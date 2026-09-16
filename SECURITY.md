@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes go into the latest release of PiPiLogicAnalyzer 7 (application and firmware). Older
+Security fixes go into the latest release of PiPiLogicAnalyzer (application and firmware). Older
 versions and the original LogicAnalyzer 6.5 by gusmanb are not maintained here.
 
 ## Reporting a vulnerability

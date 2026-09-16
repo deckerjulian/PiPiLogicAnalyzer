@@ -1,6 +1,6 @@
 # Credits and third-party notices
 
-PiPiLogicAnalyzer 7 is licensed under the GNU General Public License v3 (see [LICENSE](LICENSE)).
+PiPiLogicAnalyzer is licensed under the GNU General Public License v3 (see [LICENSE](LICENSE)).
 It contains, is based on, or is distributed together with the following works. Their copyright
 notices and licenses are kept; the complete license texts are part of the respective projects.
 
@@ -8,7 +8,7 @@ notices and licenses are kept; the complete license texts are part of the respec
 
 <https://github.com/gusmanb/logicanalyzer> — GNU General Public License v3
 
-PiPiLogicAnalyzer 7 is a modified and extended version of this project, based on version 6.5
+PiPiLogicAnalyzer is a modified and extended version of this project, based on version 6.5
 (branch `version/v6_5`, commit `3fa3703`):
 
 * the firmware in `firmware/PiPiLogicAnalyzer` is his firmware with the bug fixes and additions

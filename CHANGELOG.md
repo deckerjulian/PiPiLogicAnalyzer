@@ -62,7 +62,7 @@ whose version has a section in this file (see [Creating a release](README.md#cre
 
 ## [7.0.0] - 2026-09-14
 
-First release of PiPiLogicAnalyzer 7. It is based on version 6.5 of the
+First release, published under the name *LogicAnalyzer 7*. It is based on version 6.5 of the
 [LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín Giménez Bernad (gusmanb)
 (branch `version/v6_5`, commit `3fa3703`) and extends his firmware and software. Thank you,
 Agustín, for creating the PiPiLogicAnalyzer and sharing it under the GPL.

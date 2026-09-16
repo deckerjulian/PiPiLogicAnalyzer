@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Julian Decker
 #
-# Part of PiPiLogicAnalyzer 7.
+# Part of PiPiLogicAnalyzer.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 

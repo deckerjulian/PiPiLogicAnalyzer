@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in PiPiLogicAnalyzer 7! Bug reports, test results from real hardware, ideas
+Thanks for your interest in PiPiLogicAnalyzer! Bug reports, test results from real hardware, ideas
 and pull requests are all welcome. Please be respectful of the people you work with; the
 [Code of Conduct](CODE_OF_CONDUCT.md) applies to everything around this project.
 

@@ -19,7 +19,7 @@ for the Raspberry Pi Pico, Pico 2, Pico W, Pico 2 W, RP2040-Zero and the LogicAn
 
 This project is built on the **[LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by
 Agustín Giménez Bernad (gusmanb)**. The hardware design, the capture firmware and the original
-C#/Avalonia software are his work; PiPiLogicAnalyzer 7 starts from his version 6.5 (branch
+C#/Avalonia software are his work; PiPiLogicAnalyzer starts from his version 6.5 (branch
 `version/v6_5`, commit `3fa3703`) and extends it. Many thanks to Agustín for creating this
 remarkable open hardware logic analyzer and for sharing it under the GNU GPL, which makes a
 project like this possible. If you build or use the hardware, please visit and support the
@@ -30,7 +30,7 @@ The protocol decoders come from the [sigrok](https://sigrok.org) project
 LogicAnalyzer 6.5. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for all components
 and licenses.
 
-## What PiPiLogicAnalyzer 7 adds
+## What PiPiLogicAnalyzer adds
 
 Compared with LogicAnalyzer 6.5:
 
@@ -211,7 +211,7 @@ the trigger channel evaluates the trigger and starts the other boards through th
 
 * **Pattern:** on any board, up to 16 channels (5 with fast matching) on consecutive trigger inputs
   of that board, e.g. channels 1–21 or 22–24 of a Pico board. Firmware that does not report its
-  groups (older than PiPiLogicAnalyzer 7) allows channels 1–16. A pattern cannot span two boards.
+  groups (older than version 7.1) allows channels 1–16. A pattern cannot span two boards.
 * **Edge on a channel:** on every board whose firmware drives the trigger output on an edge (the
   firmware of this project); the capture dialog only lists these channels.
 * **External trigger (every board):** the trigger signal goes to the trigger input of every board
@@ -390,7 +390,7 @@ QT_QPA_PLATFORM=offscreen pytest
 
 ## Status and contributing
 
-PiPiLogicAnalyzer 7 is a young project. The application is covered by an automated test suite and
+PiPiLogicAnalyzer is a young project. The application is covered by an automated test suite and
 built for Windows, macOS and Linux; the firmware is built for every supported board, but not every
 board has been tried with real signals yet. Reports of what works on your board, and what does
 not, are very welcome.
@@ -418,7 +418,7 @@ warranty, and nobody is liable for damage arising from its use.
 
 ## License
 
-PiPiLogicAnalyzer 7 is licensed under the **GNU General Public License v3** ([LICENSE](LICENSE)),
+PiPiLogicAnalyzer is licensed under the **GNU General Public License v3** ([LICENSE](LICENSE)),
 the license of the original LogicAnalyzer by Agustín Giménez Bernad. It is a modified and
 extended version of his work; the changes are described in the [changelog](CHANGELOG.md),
 [docs/improvements.md](docs/improvements.md) and [firmware/README.md](firmware/README.md).

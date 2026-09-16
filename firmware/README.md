@@ -1,4 +1,4 @@
-# Firmware (PiPiLogicAnalyzer 7)
+# Firmware (PiPiLogicAnalyzer)
 
 Firmware for the RP2040/RP2350 logic analyzer. It is based on the firmware of the
 **[LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín Giménez Bernad
