@@ -399,6 +399,23 @@ Bug reports, ideas and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBU
 questions about building the hardware itself, the
 [original project](https://github.com/gusmanb/logicanalyzer) is the best place to ask.
 
+## Disclaimer
+
+This is a hobby project. It is not affiliated with, endorsed by or supported by Raspberry Pi Ltd
+or by Agustín Giménez Bernad (gusmanb), whose LogicAnalyzer it builds on. "Raspberry Pi" and
+"Pico" are trademarks of Raspberry Pi Ltd.
+
+Use it at your own risk, and keep an eye on your hardware:
+
+* The inputs of the boards tolerate **3.3 V**. Higher voltages — 5 V systems such as a Commodore 64
+  included — need a level shifter or a divider, on the trigger input as well.
+* The *Turbo* firmware images overclock the board to 400 MHz with raised core voltage. That is
+  outside the specification of the RP2040/RP2350 and can shorten its life.
+* Protocol decoders are Python files that are executed. Only add decoders from sources you trust.
+
+As stated in sections 15 to 17 of the GNU General Public License, the software comes without any
+warranty, and nobody is liable for damage arising from its use.
+
 ## License
 
 PiPiLogicAnalyzer 7 is licensed under the **GNU General Public License v3** ([LICENSE](LICENSE)),
