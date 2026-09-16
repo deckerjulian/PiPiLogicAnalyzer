@@ -282,3 +282,21 @@ def test_window_geometry_is_restored(application):
         assert second.size().height() == 777
     finally:
         second.close()
+
+
+def test_the_help_menu_links_to_both_wikis(window, monkeypatch):
+    from PySide6.QtGui import QAction
+
+    from pipilogicanalyzer.ui import main_window as main_window_module
+
+    opened = []
+    monkeypatch.setattr(main_window_module.webbrowser, "open", lambda url: opened.append(url))
+
+    actions = {action.text().replace("&", ""): action for action in window.findChildren(QAction)}
+    actions["Online documentation"].trigger()
+    actions["Online documentation of the original software (gusmanb)"].trigger()
+
+    assert opened == [
+        "https://github.com/deckerjulian/PiPiLogicAnalyzer/wiki",
+        "https://github.com/gusmanb/logicanalyzer/wiki",
+    ]

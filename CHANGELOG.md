@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). A release is created by pushing a tag `v<version>`
 whose version has a section in this file (see [Creating a release](README.md#creating-a-release)).
 
+## [Unreleased]
+
+### Application
+
+- *Help → Online documentation* opens the wiki of this project; the wiki of the original software
+  by gusmanb, which documents the hardware, has an entry of its own.
+
 ## [7.1.0] - 2026-09-15
 
 ### Project

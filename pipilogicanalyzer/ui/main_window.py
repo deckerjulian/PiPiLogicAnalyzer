@@ -106,7 +106,9 @@ from .widgets.sample_marker import SampleMarker
 from .widgets.sample_previewer import SamplePreviewer
 from .widgets.sample_viewer import SampleViewer
 
-DOCUMENTATION_URL = "https://github.com/gusmanb/logicanalyzer/wiki"
+DOCUMENTATION_URL = "https://github.com/deckerjulian/PiPiLogicAnalyzer/wiki"
+#: Wiki of the original LogicAnalyzer, which documents the hardware.
+UPSTREAM_DOCUMENTATION_URL = "https://github.com/gusmanb/logicanalyzer/wiki"
 POWER_POLL_INTERVAL_MS = 30_000
 BOARD_WATCH_INTERVAL_MS = 2_000
 WINDOW_STATE_FILE = "window-state.json"
@@ -789,8 +791,14 @@ class MainWindow(QMainWindow):
         help_menu.addAction(action_shortcuts)
 
         action_docs = QAction("Online &documentation", self)
+        action_docs.setToolTip("The wiki of this project")
         action_docs.triggered.connect(lambda: webbrowser.open(DOCUMENTATION_URL))
         help_menu.addAction(action_docs)
+
+        action_upstream_docs = QAction("Online documentation of the &original software (gusmanb)", self)
+        action_upstream_docs.setToolTip("The wiki of the LogicAnalyzer by Agustín Giménez Bernad, which documents the hardware")
+        action_upstream_docs.triggered.connect(lambda: webbrowser.open(UPSTREAM_DOCUMENTATION_URL))
+        help_menu.addAction(action_upstream_docs)
 
         action_decoders = QAction("Decoder search &paths", self)
         action_decoders.triggered.connect(self.show_decoder_paths)
