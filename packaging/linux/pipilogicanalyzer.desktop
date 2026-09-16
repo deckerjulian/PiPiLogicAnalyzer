@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=LogicAnalyzer
-Comment=Capture and decode logic signals with the LogicAnalyzer hardware
-Exec=LogicAnalyzer %f
-Icon=logicanalyzer
+Name=PiPiLogicAnalyzer
+Comment=Capture and decode logic signals with an RP2040/RP2350 logic analyzer
+Exec=PiPiLogicAnalyzer %f
+Icon=pipilogicanalyzer
 Terminal=false
 Categories=Development;Electronics;
 Keywords=logic;analyzer;sigrok;protocol;decoder;rp2040;
