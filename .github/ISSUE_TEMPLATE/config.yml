@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions about the LogicAnalyzer hardware
+    url: https://github.com/gusmanb/logicanalyzer
+    about: Building the hardware and the original software are discussed in gusmanb's project.

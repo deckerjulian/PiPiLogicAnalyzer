@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LogicAnalyzer
+Comment=Capture and decode logic signals with the LogicAnalyzer hardware
+Exec=LogicAnalyzer %f
+Icon=logicanalyzer
+Terminal=false
+Categories=Development;Electronics;
+Keywords=logic;analyzer;sigrok;protocol;decoder;rp2040;
