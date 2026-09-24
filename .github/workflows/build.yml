@@ -43,7 +43,7 @@ jobs:
     name: Tests
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -71,7 +71,7 @@ jobs:
       firmware: ${{ steps.plan.outputs.firmware }}
       platforms: ${{ steps.plan.outputs.platforms }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the tag of the last release is compared with this commit
 
@@ -137,7 +137,7 @@ jobs:
           - BOARD_ZERO
           - BOARD_INTERCEPTOR
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Ninja
         run: |
@@ -239,7 +239,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -351,7 +351,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             CHANGELOG.md
