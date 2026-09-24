@@ -260,7 +260,7 @@ jobs:
 
       - name: Download the new firmware images
         if: needs.plan.outputs.firmware == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: firmware-uf2
           path: firmware/uf2
@@ -361,7 +361,7 @@ jobs:
           path: source
 
       - name: Download the builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
