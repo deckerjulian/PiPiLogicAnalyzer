@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QColorDialog,
+    QDoubleSpinBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -61,7 +62,7 @@ from PySide6.QtWidgets import (
 
 from ...core import colors, settings
 from ...core.capture_io import session_from_dict, session_to_dict
-from ...core.formatting import to_small_time, to_thousands
+from ...core.formatting import to_large_frequency, to_small_time, to_thousands
 from ...core.profiles import (
     PROFILE_FILE_FILTER,
     Profile,
@@ -70,6 +71,10 @@ from ...core.profiles import (
     write_profiles_file,
 )
 from ...driver.base import (
+    ACQUISITION_BUFFER,
+    ACQUISITION_STREAM,
+    CAPABILITY_IMMEDIATE_TRIGGER,
+    CAPABILITY_THRESHOLD,
     MAX_MEASURED_LOOP_COUNT,
     MIN_MEASURED_POST_SAMPLES,
     AnalyzerDriverBase,
@@ -84,6 +89,11 @@ from ..icons import set_icon
 from .common import InlineMessage, button_box, dialog_layout, hint
 
 MAX_TRIGGER_CHANNELS = 24
+#: Labels of the acquisition modes of devices that have several
+ACQUISITION_LABELS = {
+    ACQUISITION_BUFFER: "Buffer (device memory)",
+    ACQUISITION_STREAM: "Stream (over USB)",
+}
 CHANNELS_PER_ROW = 8
 
 
@@ -192,6 +202,10 @@ class CaptureDialog(QDialog):
         self.profiles = profiles if profiles is not None else ProfileStore()
         #: Decoders stored alongside profiles saved from this dialog.
         self.decoder_configuration = decoder_configuration
+        try:
+            self.capabilities = driver.capabilities()
+        except Exception:  # noqa: BLE001 - optional functions only
+            self.capabilities = frozenset()
         self.limits: CaptureLimits = driver.get_limits([0])
 
         self.setWindowTitle("Capture settings")
@@ -275,8 +289,84 @@ class CaptureDialog(QDialog):
         self.summary_label = hint("", group, word_wrap=False)
         grid.addWidget(self.summary_label, 1, 0, 1, 3)
 
+        # Devices with a fixed list of rates (DSLogic): a list instead of the free value
+        self.rate_box = QComboBox(group)
+        self.rate_box.setMinimumWidth(170)
+        self.rate_box.currentIndexChanged.connect(self._on_rate_selected)
+        grid.addWidget(self.rate_box, 0, 1)
+        self.fixed_rates = self.driver.sample_rates([0], self._acquisition_mode_default()) is not None
+        if self.fixed_rates:
+            all_rates = self.driver.sample_rates(
+                range(self.driver.channel_count), None
+            ) or [self.driver.max_frequency]
+            self.frequency_box.setRange(1, max(self.driver.max_frequency, max(all_rates)))
+            self.frequency_box.setVisible(False)
+            self.jitter_label.setVisible(False)
+        else:
+            self.rate_box.setVisible(False)
+
+        self.acquisition_label = QLabel("Acquisition:", group)
+        grid.addWidget(self.acquisition_label, 2, 0)
+        self.acquisition_box = QComboBox(group)
+        for mode in self.driver.acquisition_modes():
+            self.acquisition_box.addItem(ACQUISITION_LABELS.get(mode, mode), mode)
+        self.acquisition_box.setToolTip(
+            "Buffer: the capture is kept in the memory of the device, the fastest rates.\n"
+            "Stream: the samples are sent over USB while capturing, long captures at lower rates."
+        )
+        self.acquisition_box.currentIndexChanged.connect(lambda _index: self._update_limits())
+        grid.addWidget(self.acquisition_box, 2, 1)
+        has_modes = self.acquisition_box.count() > 1
+        self.acquisition_label.setVisible(has_modes)
+        self.acquisition_box.setVisible(has_modes)
+
+        self.threshold_label = QLabel("Threshold:", group)
+        grid.addWidget(self.threshold_label, 2, 4)
+        self.threshold_box = QDoubleSpinBox(group)
+        self.threshold_box.setRange(0.0, 5.0)
+        self.threshold_box.setSingleStep(0.1)
+        self.threshold_box.setDecimals(2)
+        self.threshold_box.setSuffix(" V")
+        self.threshold_box.setValue(1.0)
+        self.threshold_box.setToolTip("Input voltage above which a sample reads as 1")
+        grid.addWidget(self.threshold_box, 2, 5)
+        has_threshold = CAPABILITY_THRESHOLD in self.capabilities
+        self.threshold_label.setVisible(has_threshold)
+        self.threshold_box.setVisible(has_threshold)
+
         grid.setColumnStretch(3, 1)
         return group
+
+    def _acquisition_mode_default(self) -> Optional[str]:
+        modes = self.driver.acquisition_modes()
+        return modes[0] if modes else None
+
+    def acquisition_mode(self) -> Optional[str]:
+        if not hasattr(self, "acquisition_box") or self.acquisition_box.count() == 0:
+            return None
+        return self.acquisition_box.currentData()
+
+    def _refresh_rates(self) -> None:
+        """Rates of devices with a fixed list, for the selected channels and acquisition mode."""
+        if not getattr(self, "fixed_rates", False):
+            return
+        rates = self.driver.sample_rates(self.enabled_channels() or [0], self.acquisition_mode()) or []
+        current = self.frequency_box.value()
+        self.rate_box.blockSignals(True)
+        self.rate_box.clear()
+        for rate in rates:
+            self.rate_box.addItem(to_large_frequency(rate), rate)
+        # keep the rate, or the fastest one below it, or the slowest one
+        index = max((i for i, rate in enumerate(rates) if rate <= current), default=0)
+        self.rate_box.setCurrentIndex(index if rates else -1)
+        self.rate_box.blockSignals(False)
+        if rates:
+            self.frequency_box.setValue(rates[index])
+
+    def _on_rate_selected(self, index: int) -> None:
+        rate = self.rate_box.itemData(index)
+        if rate is not None:
+            self.frequency_box.setValue(int(rate))
 
     def _build_channels(self) -> QWidget:
         group = QGroupBox("Channels", self)
@@ -436,9 +526,15 @@ class CaptureDialog(QDialog):
         pattern_layout.setColumnStretch(5, 1)
         layout.addWidget(self.pattern_panel)
 
+        self.immediate_radio = QRadioButton("None: start capturing at once", group)
+        self.immediate_radio.toggled.connect(self._update_trigger_mode)
+        self.immediate_radio.setVisible(CAPABILITY_IMMEDIATE_TRIGGER in self.capabilities)
+        layout.addWidget(self.immediate_radio)
+
         self.trigger_button_group = QButtonGroup(group)
         self.trigger_button_group.addButton(self.edge_radio)
         self.trigger_button_group.addButton(self.pattern_radio)
+        self.trigger_button_group.addButton(self.immediate_radio)
 
         self._update_trigger_mode()
         return group
@@ -463,6 +559,11 @@ class CaptureDialog(QDialog):
         if self.driver.blast_frequency <= 0:
             self.blast_box.setEnabled(False)
             self.blast_box.setToolTip("This device does not support blast mode")
+            if driver_type == AnalyzerDriverType.DSLOGIC:
+                self.blast_box.setVisible(False)
+        if self.driver.max_loop_count <= 0:
+            for widget in (self.burst_box, self.burst_count_box, self.measure_box):
+                widget.setVisible(False)
 
     def _fill_trigger_channels(self) -> None:
         box = self.trigger_channel_box
@@ -474,9 +575,11 @@ class CaptureDialog(QDialog):
             for index in channels:
                 box.addItem(f"Channel {index + 1} (board {index // per_device + 1})", index)
         else:
-            for index in channels[:MAX_TRIGGER_CHANNELS]:
+            # The single board firmware has 24 edge trigger inputs; other devices use every channel.
+            pico = self.driver.driver_type in (AnalyzerDriverType.SERIAL, AnalyzerDriverType.NETWORK)
+            for index in channels[:MAX_TRIGGER_CHANNELS] if pico else channels:
                 box.addItem(f"Channel {index + 1}", index)
-        if self.driver.driver_type != AnalyzerDriverType.EMULATED:
+        if self.driver.driver_type != AnalyzerDriverType.EMULATED and self.driver.has_external_trigger():
             box.addItem(
                 "External trigger (every board)" if multi else "External trigger",
                 self.driver.channel_count,
@@ -526,7 +629,8 @@ class CaptureDialog(QDialog):
 
     def _update_limits(self) -> None:
         channels = self.enabled_channels() or [0]
-        self.limits = self.driver.get_limits(channels)
+        self.limits = self.driver.get_limits(channels, self.acquisition_mode())
+        self._refresh_rates()
 
         if not self.blast_box.isChecked():
             self.pre_samples_box.setRange(self.limits.min_pre_samples, self.limits.max_pre_samples)
@@ -576,8 +680,11 @@ class CaptureDialog(QDialog):
 
     def _update_trigger_mode(self) -> None:
         edge = self.edge_radio.isChecked()
+        immediate = getattr(self, "immediate_radio", None) is not None and self.immediate_radio.isChecked()
         self.edge_panel.setEnabled(edge)
-        self.pattern_panel.setEnabled(not edge)
+        self.pattern_panel.setEnabled(not edge and not immediate)
+        # Without a trigger every sample follows the start.
+        self.pre_samples_box.setEnabled(not immediate and not self.blast_box.isChecked())
         if not edge and self.blast_box.isChecked():
             self.blast_box.setChecked(False)
         if hasattr(self, "validation_label"):
@@ -633,6 +740,9 @@ class CaptureDialog(QDialog):
         self.fast_trigger_box.setChecked(False)
         self.pattern_base_box.setValue(1)
         self.edge_radio.setChecked(True)
+        if self.acquisition_box.count():
+            self.acquisition_box.setCurrentIndex(0)
+        self.threshold_box.setValue(1.0)
         for selector in self.channel_selectors:
             selector.reset()
         self._update_limits()
@@ -767,6 +877,12 @@ class CaptureDialog(QDialog):
                 selector.channel_color = channel.channel_color
                 selector._update_color()
 
+        position = self.acquisition_box.findData(session.acquisition_mode)
+        if position >= 0:
+            self.acquisition_box.setCurrentIndex(position)
+        if session.threshold_voltage is not None:
+            self.threshold_box.setValue(session.threshold_voltage)
+
         if session.trigger_type == TriggerType.BLAST and self.blast_box.isEnabled():
             self.blast_box.setChecked(True)
             self._update_limits()
@@ -775,6 +891,7 @@ class CaptureDialog(QDialog):
             self.frequency_box.setValue(
                 max(min(session.frequency, self.driver.max_frequency), self.driver.min_frequency)
             )
+            self._update_channel_count()
             self._update_limits()
             self.pre_samples_box.setValue(session.pre_trigger_samples)
             self.post_samples_box.setValue(session.post_trigger_samples)
@@ -784,7 +901,10 @@ class CaptureDialog(QDialog):
         if driver_type == AnalyzerDriverType.EMULATED or session.trigger_type == TriggerType.SIMULATION:
             return  # no trigger settings (simulated captures are generated, not triggered)
 
-        if session.trigger_type in (TriggerType.EDGE, TriggerType.BLAST):
+        if session.trigger_type == TriggerType.IMMEDIATE:
+            if self.immediate_radio.isVisible() or CAPABILITY_IMMEDIATE_TRIGGER in self.capabilities:
+                self.immediate_radio.setChecked(True)
+        elif session.trigger_type in (TriggerType.EDGE, TriggerType.BLAST):
             if driver_type == AnalyzerDriverType.MULTI and session.trigger_type == TriggerType.BLAST:
                 return  # a multi device set has no blast mode
             self.edge_radio.setChecked(True)
@@ -842,6 +962,12 @@ class CaptureDialog(QDialog):
         session.frequency = self.frequency_box.value()
         session.pre_trigger_samples = self.pre_samples_box.value()
         session.post_trigger_samples = self.post_samples_box.value()
+        session.acquisition_mode = self.acquisition_mode() or ACQUISITION_BUFFER
+        if CAPABILITY_THRESHOLD in self.capabilities:
+            session.threshold_voltage = round(self.threshold_box.value(), 2)
+        immediate = self.immediate_radio.isChecked()
+        if immediate:
+            session.pre_trigger_samples = 0
 
         edge_mode = self.edge_radio.isChecked()
         bursts = self.burst_box.isChecked() and self.burst_box.isEnabled() and edge_mode
@@ -865,7 +991,8 @@ class CaptureDialog(QDialog):
                 )
                 return None
 
-        maximum = self.driver.get_limits([c.channel_number for c in channels]).max_total_samples
+        channel_numbers = [c.channel_number for c in channels]
+        maximum = self.driver.get_limits(channel_numbers, self.acquisition_mode()).max_total_samples
         if session.pre_trigger_samples + session.post_trigger_samples * (loops + 1) > maximum:
             self._reject_settings(
                 f"The capture is too long: at most {to_thousands(maximum)} samples fit into the "
@@ -874,11 +1001,23 @@ class CaptureDialog(QDialog):
             )
             return None
 
+        if self.fixed_rates and session.frequency not in (
+            self.driver.sample_rates(channel_numbers, self.acquisition_mode()) or []
+        ):
+            self._reject_settings(
+                "The device cannot sample these channels at this rate: choose fewer channels, "
+                "lower channel numbers or another rate.",
+                self.rate_box,
+            )
+            return None
+
         if self.driver.driver_type == AnalyzerDriverType.EMULATED:
             session.trigger_type = TriggerType.EDGE
             return session
 
-        if edge_mode:
+        if immediate:
+            session.trigger_type = TriggerType.IMMEDIATE
+        elif edge_mode:
             trigger_channel = self.trigger_channel_box.currentData()
             if trigger_channel is None:
                 self._reject_settings("Choose the channel that triggers the capture.", self.trigger_channel_box)

@@ -50,21 +50,26 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def smoke_test(window: MainWindow, report: str) -> int:
-    """Check that a (packaged) application starts and finds its decoders and firmware images."""
+    """Check that a (packaged) application starts and finds its decoders, firmware images and libusb."""
     from .core import firmware
+    from .driver.dslogic import usb as dslogic_usb
 
     registry = window.provider.registry
     registry.load()
     decoders = len(registry.decoders)
     images = len(firmware.find_images())
-    text = f"PiPiLogicAnalyzer {__version__}: window created, {decoders} decoders, {images} firmware images\n"
+    libusb = dslogic_usb.backend_available()
+    text = (
+        f"PiPiLogicAnalyzer {__version__}: window created, {decoders} decoders, {images} firmware images, "
+        f"libusb {'found' if libusb else 'MISSING'}\n"
+    )
     if report == "-":
         sys.stderr.write(text)
     else:
         with open(report, "w", encoding="utf-8") as handle:
             handle.write(text)
     window.close()
-    return 0 if decoders else 1
+    return 0 if decoders and libusb else 1
 
 
 def enable_driver_log() -> str:

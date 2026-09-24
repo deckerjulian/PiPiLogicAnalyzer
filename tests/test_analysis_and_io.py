@@ -98,6 +98,7 @@ def test_frequency_formatting():
     assert to_large_frequency(125_000) == "125 kHz"
     assert to_large_frequency(2_500_000) == "2.5 MHz"
     assert to_large_frequency(50) == "50 Hz"
+    assert to_large_frequency(1_000_000_000) == "1 GHz"
 
 
 # ----------------------------------------------------------------- capture io

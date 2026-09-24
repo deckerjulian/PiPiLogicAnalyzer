@@ -23,6 +23,7 @@ from ..base import (
     CAPABILITY_IMMEDIATE_TRIGGER,
     CAPABILITY_PATTERN_GROUPS,
     CAPABILITY_THRESHOLD,
+    AnalyzerDeviceInfo,
     AnalyzerDriverBase,
     AnalyzerDriverType,
     CaptureCompletedArgs,
@@ -150,6 +151,7 @@ class DSLogicDriver(AnalyzerDriverBase):
 
     # ---------------------------------------------------------- control I/O
     def _write(self, dest: int, data: bytes = b"", offset: int = 0) -> None:
+        log.debug("CTL_WR dest=%d offset=0x%02X data=%s", dest, offset, data.hex())
         self._device.control_out(protocol.CMD_CTL_WR, protocol.ctl_write(dest, data, offset))
 
     def _read(self, dest: int, size: int, offset: int = 0) -> bytes:
@@ -157,9 +159,22 @@ class DSLogicDriver(AnalyzerDriverBase):
         if self._read_delay:
             time.sleep(self._read_delay)
         data = self._device.control_in(protocol.CMD_CTL_RD, size)
+        log.debug("CTL_RD dest=%d offset=0x%02X -> %s", dest, offset, data.hex())
         if len(data) < size:
             raise UsbError(f"short control read ({len(data)} of {size} bytes)")
         return data
+
+    def _drain_input(self, limit: float = 0.5) -> None:
+        """Discards data left in the IN endpoint, e.g. by an aborted capture."""
+        deadline = time.monotonic() + limit
+        while time.monotonic() < deadline:
+            try:
+                data = self._device.bulk_read(protocol.EP_IN, 1 << 20, 20)
+            except UsbTimeout:
+                return
+            if not data:
+                return
+            log.debug("Discarded %d stale bytes", len(data))
 
     def _status(self) -> int:
         return self._read(protocol.CTL_HW_STATUS, 1)[0]
@@ -327,6 +342,18 @@ class DSLogicDriver(AnalyzerDriverBase):
             max_post_samples=total,
         )
 
+    def get_device_info(self) -> AnalyzerDeviceInfo:
+        # Buffer mode limits for 8, 16 (and 24) enabled channels, as the dialog lists them
+        counts = [count for count in (8, 16, 24) if count <= self.channel_count]
+        return AnalyzerDeviceInfo(
+            name=self.profile.model,
+            max_frequency=self.max_frequency,
+            blast_frequency=0,
+            channels=self.channel_count,
+            buffer_size=self.buffer_size,
+            mode_limits=[self.get_limits(range(count)) for count in counts],
+        )
+
     def device_details(self) -> dict[str, str]:
         speed = "USB 3 (SuperSpeed)" if self.info.super_speed else "USB 2 (High-Speed)"
         details = {
@@ -412,6 +439,7 @@ class DSLogicDriver(AnalyzerDriverBase):
                 if session.threshold_voltage is not None:
                     self.set_threshold(session.threshold_voltage)
                 self._write(protocol.CTL_STOP)
+                self._drain_input()
                 self._arm(setup)
             except (UsbError, DeviceConnectionError) as error:
                 log.debug("Error arming the capture: %s", error)

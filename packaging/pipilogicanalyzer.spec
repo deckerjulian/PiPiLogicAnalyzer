@@ -15,6 +15,8 @@ import os
 import sys
 import tomllib
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
 ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))
 ICONS = os.path.join(ROOT, "build", "icons")
 
@@ -55,7 +57,9 @@ def icon(name):
 a = Analysis(
     [os.path.join(SPECPATH, "launch.py")],
     pathex=[ROOT],
-    hiddenimports=DECODER_MODULES,
+    # The libusb library of libusb-package for the DSLogic driver (loaded through ctypes).
+    binaries=collect_dynamic_libs("libusb_package"),
+    hiddenimports=DECODER_MODULES + ["libusb_package", "usb.backend.libusb1"],
     excludes=["tkinter"],
 )
 

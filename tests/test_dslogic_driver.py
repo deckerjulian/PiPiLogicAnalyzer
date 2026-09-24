@@ -34,6 +34,8 @@ class FakeDSLogic(UsbDevice):
         self.writes: list[tuple[int, int, bytes]] = []  # (dest, offset, data)
         self.bulk_out: list[bytes] = []
         self.bulk_in: list[bytes] = []
+        #: left over from an earlier capture, readable before START
+        self.stale: list[bytes] = []
         self.claimed = False
         self.closed = False
         self.started = threading.Event()
@@ -72,6 +74,8 @@ class FakeDSLogic(UsbDevice):
         return len(data)
 
     def bulk_read(self, endpoint, length, timeout_ms):
+        if self.stale and not self.started.is_set():
+            return self.stale.pop(0)
         if not self.started.wait(timeout_ms / 1000) or not self.bulk_in:
             time.sleep(timeout_ms / 1000 / 10)
             raise UsbTimeout("timeout")
@@ -292,3 +296,15 @@ def test_abort_stops_without_a_result():
     assert (protocol.CTR0_ADDR, bytes([protocol.CTR0_FORCE_RDY])) in registers
     driver.dispose()
     assert device.closed
+
+
+def test_stale_data_of_an_aborted_capture_is_discarded():
+    device = FakeDSLogic(info())
+    driver = open_driver(device)
+    device.stale = [b"\xff" * 512, b"\xee" * 4096]
+    signals = {0: np.ones(1024, dtype=np.uint8)}
+    device.bulk_in = [header(real_pos=64), interleave(signals)]
+    result = run_capture(driver, session([0], pre=0, post=1000))
+    assert result.success, result.error
+    assert device.stale == []
+    assert result.session.capture_channels[0].samples.sum() == 1024

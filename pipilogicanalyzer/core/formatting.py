@@ -34,6 +34,8 @@ def to_large_frequency(frequency: float) -> str:
     if frequency is None:
         return "-"
     magnitude = abs(frequency)
+    if magnitude >= 1e9:
+        return f"{round(frequency / 1e9, 2):g} GHz"
     if magnitude >= 1e6:
         return f"{round(frequency / 1e6, 2):g} MHz"
     if magnitude >= 1e3:

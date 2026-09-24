@@ -4,6 +4,27 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). A release is created by pushing a tag `v<version>`
 whose version has a section in this file (see [Creating a release](README.md#creating-a-release)).
 
+## [Unreleased]
+
+### Application
+
+- **DreamSourceLab DSLogic Plus, U3Pro16 and U3Pro32** (experimental, not yet tested on
+  hardware): a USB driver following the DSLogic driver of DSView. Buffer and stream captures at
+  the rates of the device (up to 400 MHz / 1 GHz), edge, level pattern and immediate triggers,
+  adjustable input threshold. The FPGA bitstreams come from an installed DSView or are downloaded
+  once from the DSView repository; they are not shipped.
+- Capture dialog: devices with a fixed list of rates get a list instead of the free value; an
+  acquisition mode (buffer/stream), a threshold and "no trigger" appear where the device has them.
+  The edge trigger offers all channels of devices with more than 24.
+- `.lac` files store the acquisition mode and the input threshold of the capture settings.
+- Selecting the new analyzer after a firmware installation works again (the device list lookup
+  missed its entries).
+
+### Project
+
+- Dependencies `pyusb` and `libusb-package` (the packaged applications include libusb); the smoke
+  test of the builds checks that libusb loads. Linux udev rule for the DSLogic.
+
 ## [7.1.1] - 2026-09-24
 
 ### Application

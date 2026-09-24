@@ -275,6 +275,8 @@ def align_devices(
 
 def channels_per_device_of(session: CaptureSession, default: int = 24) -> Optional[int]:
     """Channels per board of a capture from a multi device set (``None`` for a single board)."""
+    if session.threshold_voltage is not None:
+        return None  # a device with an adjustable threshold (DSLogic): one board of up to 32 channels
     if any(channel.channel_number >= default for channel in session.capture_channels):
         return default
     return None

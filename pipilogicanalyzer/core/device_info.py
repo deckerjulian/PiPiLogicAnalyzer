@@ -69,7 +69,28 @@ def describe_device(driver: AnalyzerDriverBase) -> list[Section]:
     return _describe_single(driver) + [_capture_section(driver)]
 
 
+def _describe_dslogic(driver: AnalyzerDriverBase) -> list[Section]:
+    details = _safe(driver.device_details, {})
+    rows = [
+        ("Model", details.get("MODEL") or driver.device_version or "-"),
+        ("Manufacturer", "DreamSourceLab"),
+        ("Firmware version", details.get("FIRMWARE", "-")),
+        ("FPGA version", details.get("FPGA", "-")),
+        ("Sample memory", details.get("MEMORY", "-")),
+    ]
+    connection = [
+        ("Type", "USB (DSLogic)"),
+        ("USB speed", details.get("USB", "-")),
+        ("USB location (bus:address)", details.get("LOCATION", "-")),
+    ]
+    if details.get("SERIAL"):
+        connection.append(("Serial number", details["SERIAL"]))
+    return [("Device", rows), ("Connection", connection)]
+
+
 def _describe_single(driver: AnalyzerDriverBase) -> list[Section]:
+    if driver.driver_type == AnalyzerDriverType.DSLOGIC:
+        return _describe_dslogic(driver)
     version = driver.device_version or ""
     identity = parse_device_version(version)
     real = driver.driver_type in REAL_DEVICES
@@ -172,6 +193,9 @@ def _capture_section(driver: AnalyzerDriverBase) -> Section:
         rows.append(("Blast frequency", to_large_frequency(driver.blast_frequency)))
     if driver.driver_type in REAL_DEVICES:
         rows.append(("Max. bursts", to_thousands(driver.max_loop_count + 1)))
+    modes = _safe(driver.acquisition_modes, ())
+    if modes:
+        rows.append(("Acquisition", ", ".join(mode.capitalize() for mode in modes)))
     return ("Capture", rows)
 
 
