@@ -110,6 +110,22 @@ def test_channels_are_assigned_automatically_by_name(registry):
     assert instance.channel_map == {int(key): value for key, value in stored["channel_map"].items()}
 
 
+def test_capture_channel_0_is_assigned_by_id():
+    from pipilogicanalyzer.driver.models import AnalyzerChannel
+    from pipilogicanalyzer.ui.widgets.decoder_manager import DecoderManager
+
+    # The id matches capture channel 0, the name matches nothing.
+    info = SimpleNamespace(
+        channels=[SimpleNamespace(id="cs", name="CS#", index=0)], required_channels=[]
+    )
+    channels = [AnalyzerChannel(channel_number=0, channel_name="CS")]
+    instance = DecoderInstance(decoder_id="test")
+    fake_manager = SimpleNamespace(model=SimpleNamespace(channels=channels))
+    DecoderManager._auto_assign_channels(fake_manager, info, instance)
+
+    assert instance.channel_map == {0: 0}
+
+
 def test_bus_cycles_are_decoded_with_the_profile_configuration(registry):
     _session, group, _groups = decode_cycles(registry)
 

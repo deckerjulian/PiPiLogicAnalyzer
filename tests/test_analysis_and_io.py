@@ -226,3 +226,14 @@ def test_export_without_samples_raises(tmp_path):
         capture_io.export_csv(os.path.join(tmp_path, "x.csv"), session)
     with pytest.raises(ValueError):
         capture_io.export_vcd(os.path.join(tmp_path, "x.vcd"), session)
+
+
+def test_vcd_times_do_not_drift_at_fractional_periods(tmp_path):
+    session = make_session()
+    session.frequency = 24_000_000  # 41.67 ns per sample
+    path = os.path.join(tmp_path, "capture.vcd")
+    capture_io.export_vcd(path, session)
+    last = [line for line in open(path, encoding="utf-8").read().splitlines() if line.startswith("#")][-1]
+
+    sample_count = min(len(channel.samples) for channel in session.capture_channels)
+    assert int(last[1:]) == round(sample_count * 1e9 / 24_000_000)

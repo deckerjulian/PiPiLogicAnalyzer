@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from pipilogicanalyzer.core import device_info, firmware
 from pipilogicanalyzer.driver import detector, protocol

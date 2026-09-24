@@ -199,3 +199,17 @@ def test_limits_follow_the_selected_channels(dialog):
     select(dialog, [0, 20])
     dialog._update_limits()
     assert dialog.post_samples_box.maximum() < eight_bit
+
+
+def test_blast_settings_keep_their_post_trigger_samples(dialog):
+    select(dialog, [0])
+    dialog.blast_box.setChecked(True)
+    dialog.post_samples_box.setValue(4096)
+    dialog._accept()
+    session = dialog.selected_settings
+
+    dialog.reset_settings()
+    dialog.apply_session(session)
+
+    assert dialog.blast_box.isChecked()
+    assert dialog.post_samples_box.value() == 4096

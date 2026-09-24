@@ -23,6 +23,13 @@ FAST_TRIGGER_DELAY = 3.0
 #: The edge trigger with trigger output waits in a loop of one or two instructions, like the fast trigger.
 EDGE_OUT_TRIGGER_DELAY = 3.0
 
+
+def trigger_delay_samples(delay: float, max_frequency: int, frequency: int) -> int:
+    """Samples a trigger lagging ``delay`` device clock cycles covers at ``frequency``."""
+    delay_ns = 1_000_000_000.0 / max_frequency * delay
+    sample_period_ns = 1_000_000_000.0 / frequency
+    return int(round((delay_ns / sample_period_ns) + 0.3))
+
 #: Burst measurement limits (firmware V6_5 ``StartCaptureSimple``): the
 #: timestamp block is sized by one byte and each burst needs enough samples.
 MAX_MEASURED_LOOP_COUNT = 253

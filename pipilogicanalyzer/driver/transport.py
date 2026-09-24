@@ -170,6 +170,12 @@ class NetworkTransport(Transport):
         self._socket = self._connect()
 
     def close(self) -> None:
+        # close() alone does not wake a recv() blocked in another thread (the capture reader);
+        # shutdown() does, and it sends the FIN the single-client WiFi firmware waits for.
+        try:
+            self._socket.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         try:
             self._socket.close()
         except Exception:  # pragma: no cover - best effort
@@ -177,4 +183,4 @@ class NetworkTransport(Transport):
 
     @property
     def is_open(self) -> bool:
-        return self._socket is not None
+        return self._socket.fileno() != -1

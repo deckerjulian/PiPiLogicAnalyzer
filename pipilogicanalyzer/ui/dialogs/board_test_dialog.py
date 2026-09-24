@@ -114,6 +114,12 @@ class BoardTestDialog(QDialog):
         self._worker.done.connect(self._on_done)
         self._worker.start()
 
+    def done(self, result: int) -> None:  # noqa: D401 - QDialog override
+        # Esc or the window close button: the worker still talks to the device.
+        if self._worker is not None and self._worker.isRunning():
+            return
+        super().done(result)
+
     def _set_summary(self, text: str, role: str) -> None:
         self.summary.setText(text)
         set_role(self.summary, role)

@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -1344,7 +1343,6 @@ class MainWindow(QMainWindow):
             messages.error(self, "Capture", "The capture could not be started.", error.message)
             return
 
-        self.pending_session = session
         self._update_actions()
         self.statusBar().showMessage("Capturing, waiting for the trigger...")
 
@@ -1864,13 +1862,13 @@ class MainWindow(QMainWindow):
             window.select_segment(segment)
         return window
 
-    def copy_samples(self, first_sample: int, sample_count: int) -> None:
+    def copy_samples(self, first_sample: int, sample_count: int) -> bool:
         session = self.model.session
         if session is None:
-            return
-        if first_sample + sample_count > self.model.sample_count:
+            return False
+        if first_sample < 0 or first_sample + sample_count > self.model.sample_count:
             self._selection_out_of_range()
-            return
+            return False
         self.clipboard_samples = [
             channel.samples[first_sample : first_sample + sample_count].copy()
             if channel.samples is not None
@@ -1879,17 +1877,18 @@ class MainWindow(QMainWindow):
         ]
         self.sample_marker.has_clipboard = True
         self.statusBar().showMessage(f"Copied {to_thousands(sample_count)} samples", 5000)
+        return True
 
     def cut_samples(self, first_sample: int, sample_count: int) -> None:
-        self.copy_samples(first_sample, sample_count)
-        self.delete_samples(first_sample, sample_count)
+        if self.copy_samples(first_sample, sample_count):
+            self.delete_samples(first_sample, sample_count)
 
     def delete_samples(self, first_sample: int, sample_count: int) -> None:
         session = self.model.session
         if session is None or sample_count <= 0:
             return
         total = self.model.sample_count
-        if first_sample >= total:
+        if not 0 <= first_sample < total:
             self._selection_out_of_range()
             return
 

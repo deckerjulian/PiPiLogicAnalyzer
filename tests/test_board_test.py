@@ -11,7 +11,7 @@ import time
 
 import numpy as np
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from pipilogicanalyzer.core import simulation
 from pipilogicanalyzer.core.simulation import SimulationPattern

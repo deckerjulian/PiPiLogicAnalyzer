@@ -89,7 +89,8 @@ def test_a_pattern_on_the_second_board_triggers_the_first(make_set):
                       trigger_bit_count=16, trigger_pattern=0xFFFC)
 
     assert driver.start_capture(session) is CaptureError.NONE
-    offset = round(COMPLEX_TRIGGER_DELAY / 10 + 0.3)
+    # 5 clock cycles of the 100 MHz board at 100 MHz sampling: 5 samples (not 5 ns / 10 ns period)
+    offset = round(COMPLEX_TRIGGER_DELAY + 0.3)
     # The following board is armed first, on its trigger input
     assert started(driver) == [
         ("board1", TriggerType.EDGE, 24, [0], 100 + offset, False),
@@ -132,7 +133,8 @@ def test_an_edge_on_a_channel_drives_the_trigger_output(make_set):
 
     assert driver.start_capture(session) is CaptureError.NONE
     assert started(driver) == [
-        ("board1", TriggerType.EDGE, 24, [0], 101, False),
+        # EDGE_OUT_TRIGGER_DELAY: 3 cycles of the 100 MHz board are 3 samples at 100 MHz
+        ("board1", TriggerType.EDGE, 24, [0], 103, False),
         ("board2", TriggerType.EDGE_OUT, 6, [6], 100, True),
     ]
 
@@ -226,3 +228,24 @@ def test_the_capture_dialog_offers_every_trigger_of_the_set(make_set, monkeypatc
         assert session.trigger_channel == 48
     finally:
         dialog.close()
+
+
+def test_the_trigger_offset_scales_with_the_sample_rate(make_set):
+    driver = make_set(NEW_FIRMWARE, NEW_FIRMWARE)
+    session = capture([0, *range(24, 40)], trigger_type=TriggerType.COMPLEX, trigger_channel=24,
+                      trigger_bit_count=16, trigger_pattern=0xFFFC)
+    session.frequency = 50_000_000
+
+    assert driver.start_capture(session) is CaptureError.NONE
+    # 5 cycles at 100 MHz are 50 ns, 2.5 sample periods at 50 MHz
+    assert driver.started[0][1].pre_trigger_samples == 100 + round(2.5 + 0.3)
+
+
+def test_the_trigger_offset_needs_post_trigger_samples(make_set):
+    driver = make_set(NEW_FIRMWARE, NEW_FIRMWARE)
+    session = capture([0, *range(24, 40)], trigger_type=TriggerType.COMPLEX, trigger_channel=24,
+                      trigger_bit_count=16, trigger_pattern=0xFFFC)
+    session.post_trigger_samples = 5
+
+    assert driver.start_capture(session) is CaptureError.BAD_PARAMS
+    assert driver.started == []

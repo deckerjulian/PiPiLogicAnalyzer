@@ -769,6 +769,8 @@ class CaptureDialog(QDialog):
 
         if session.trigger_type == TriggerType.BLAST and self.blast_box.isEnabled():
             self.blast_box.setChecked(True)
+            self._update_limits()
+            self.post_samples_box.setValue(session.post_trigger_samples)
         else:
             self.frequency_box.setValue(
                 max(min(session.frequency, self.driver.max_frequency), self.driver.min_frequency)
