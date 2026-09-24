@@ -195,7 +195,7 @@ jobs:
           firmware/build_all.sh "$BOARD"
 
       - name: Upload the images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.board }}
           path: firmware/uf2/*.uf2
@@ -203,7 +203,7 @@ jobs:
 
       - name: Upload the build logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-log-${{ matrix.board }}
           path: firmware/uf2/*.log
@@ -215,7 +215,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Combine the images of all boards
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v7
         with:
           name: firmware-uf2
           pattern: firmware-BOARD_*
@@ -326,7 +326,7 @@ jobs:
           tar -C dist -czf "dist/${ARTIFACT}.tar.gz" PiPiLogicAnalyzer
 
       - name: Upload the application
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-${{ matrix.platform }}
           path: |
