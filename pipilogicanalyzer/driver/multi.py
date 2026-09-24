@@ -47,6 +47,7 @@ from .base import (
     UnsupportedFeatureError,
     parse_version,
     pattern_fits,
+    capture_mode_for_bits,
     pattern_max_bits,
     trigger_delay_samples,
 )
@@ -157,12 +158,9 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
 
     def get_capture_mode(self, channels: Sequence[int]) -> CaptureMode:
         split = self._split_channels_per_device(channels)
-        max_channel = max((max(group) for group in split if group), default=0)
-        if max_channel < 8:
-            return CaptureMode.CHANNELS_8
-        if max_channel < 16:
-            return CaptureMode.CHANNELS_16
-        return CaptureMode.CHANNELS_24
+        return capture_mode_for_bits(
+            [bit for device, group in zip(self._devices, split) for bit in device.sample_bits(group)]
+        )
 
     def get_limits(self, channels: Sequence[int]) -> CaptureLimits:
         split = self._split_channels_per_device(channels)

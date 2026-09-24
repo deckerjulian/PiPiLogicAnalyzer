@@ -174,6 +174,16 @@ class AnalyzerDriverType(Enum):
     EMULATED = "Emulated"
 
 
+def capture_mode_for_bits(bits: Sequence[int]) -> CaptureMode:
+    """Narrowest mode whose samples hold every bit."""
+    highest = max(bits, default=0)
+    if highest < 8:
+        return CaptureMode.CHANNELS_8
+    if highest < 16:
+        return CaptureMode.CHANNELS_16
+    return CaptureMode.CHANNELS_24
+
+
 @dataclass
 class DeviceVersion:
     major: int = 0
@@ -303,13 +313,12 @@ class AnalyzerDriverBase:
         raise NotImplementedError
 
     # ------------------------------------------------------------ device info
+    def sample_bits(self, channels: Sequence[int]) -> list[int]:
+        """Bit of every channel in the samples of the device (the channel number on most boards)."""
+        return list(channels)
+
     def get_capture_mode(self, channels: Sequence[int]) -> CaptureMode:
-        max_channel = max(channels) if channels else 0
-        if max_channel < 8:
-            return CaptureMode.CHANNELS_8
-        if max_channel < 16:
-            return CaptureMode.CHANNELS_16
-        return CaptureMode.CHANNELS_24
+        return capture_mode_for_bits(self.sample_bits(channels))
 
     def get_limits(self, channels: Sequence[int]) -> CaptureLimits:
         mode = self.get_capture_mode(channels)

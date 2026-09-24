@@ -422,7 +422,7 @@ class AboutDialog(QDialog):
         label = QLabel(
             "<p>Software and firmware for the RP2040/RP2350 logic analyzer.</p>"
             "<p>This project is based on and extends the "
-            f"<a {link} href='https://github.com/gusmanb/logicanalyzer'>PiPiLogicAnalyzer</a> "
+            f"<a {link} href='https://github.com/gusmanb/logicanalyzer'>LogicAnalyzer</a> "
             "by <b>Agustín Giménez Bernad (gusmanb)</b>: his hardware design, firmware and "
             "software 6.5. Many thanks to him for creating it and sharing it under the GPL.</p>"
             f"<p><a {link} href='https://github.com/deckerjulian/PiPiLogicAnalyzer'>"

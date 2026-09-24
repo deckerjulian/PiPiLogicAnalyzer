@@ -9,7 +9,7 @@ rebuilt. Every fix is commented in the source code where it applies; most are co
 
 | Area | Behaviour in the original | Here |
 | --- | --- | --- |
-| `PiPiLogicAnalyzerDriver.ReadCapture` | After the length byte always `LoopCount + 2` timestamps were read, although the firmware only sends the block when it reports more than one → the application hung while reading. | Exactly the number reported by the device is read (`tests/test_driver.py::test_timestamp_block_is_only_read_when_the_device_sends_one`). |
+| `LogicAnalyzerDriver.ReadCapture` | After the length byte always `LoopCount + 2` timestamps were read, although the firmware only sends the block when it reports more than one → the application hung while reading. | Exactly the number reported by the device is read (`tests/test_driver.py::test_timestamp_block_is_only_read_when_the_device_sends_one`). |
 | `MultiAnalyzerDriver.Dev_CaptureCompleted` | The device was identified through the mutable `Tag` property; with devices finishing at the same time channels could be swapped. | Every completion callback is bound to its device index. |
 | `EmulatedAnalyzerDriver.BlastFrequency` | Threw `NotImplementedException`; the capture dialog crashed for loaded files. | Returns 0, blast mode is disabled in the dialog. |
 | `CaptureDialog` (pattern trigger) | Checked `(trigger - 1) + bits > 16` and thereby accepted patterns reaching beyond the last usable channel. | Checks the groups of consecutive trigger inputs reported by the firmware (channels 1–16 for other firmware), at most 16 bits or 5 in fast mode. |

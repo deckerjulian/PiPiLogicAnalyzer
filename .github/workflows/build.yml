@@ -15,7 +15,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["**/*.md", "docs/**", "LICENSE", ".vscode/**"]
+    paths-ignore: ["**/*.md", "docs/**", "LICENSE", ".vscode/**", "firmware/*/.vscode/**"]
   # No paths-ignore here: a pull request that only changes documentation must still report the
   # "tests" check, otherwise it can never pass a required status check.
   pull_request:
@@ -81,8 +81,9 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           project=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           package=$(python3 -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('pipilogicanalyzer/__init__.py').read()).group(1))")
-          if [[ "$tag" != "$project" || "$tag" != "$package" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject.toml ($project) and pipilogicanalyzer/__init__.py ($package)"
+          firmware=$(sed -n 's/^pico_set_program_version(PiPiLogicAnalyzer "\(.*\)")$/\1/p' firmware/PiPiLogicAnalyzer/CMakeLists.txt)
+          if [[ "$tag" != "$project" || "$tag" != "$package" || "$tag" != "$firmware" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject.toml ($project), pipilogicanalyzer/__init__.py ($package) and firmware/PiPiLogicAnalyzer/CMakeLists.txt ($firmware)"
             exit 1
           fi
           if ! grep -q "^## \[$tag\]" CHANGELOG.md; then

@@ -2,7 +2,7 @@
  * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
  * Copyright (C) 2026 Julian Decker
  *
- * Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+ * Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
  * the changes are described in firmware/README.md.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -52,10 +52,7 @@ static uint32_t lastLoopCount;                      //Number of loops
 static bool lastTriggerInverted;                    //Inverted?
 static uint8_t lastTriggerPin;
 static uint32_t lastStartPosition;
-static bool lastCaptureComplexFast;
 static uint8_t lastCaptureType;
-static uint8_t lastTriggerPinBase;
-static uint32_t lastTriggerPinCount;
 static uint32_t lastTail;
 static CHANNEL_MODE lastCaptureMode = MODE_8_CHANNEL;
 static const pio_program_t* lastCaptureProgram;      //Program loaded by the simple capture
@@ -195,6 +192,40 @@ static bool trigger_pins_consecutive(uint8_t channelBase, uint8_t channelCount)
     return true;
 }
 
+//Every channel must be in the pin map (it was indexed out of bounds otherwise) and its GPIO bit must
+//fit in the samples of the mode: the samples hold the GPIOs from INPUT_PIN_BASE on, so on boards whose
+//channels do not start at that GPIO (Interceptor: channel 0 = GPIO 6) a channel could silently read 0
+static bool capture_pins_valid(const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode)
+{
+    uint8_t sampleBits;
+
+    switch(captureMode)
+    {
+        case MODE_8_CHANNEL:
+            sampleBits = 8;
+            break;
+        case MODE_16_CHANNEL:
+            sampleBits = 16;
+            break;
+        case MODE_24_CHANNEL:
+            sampleBits = 32;
+            break;
+        default:
+            return false;
+    }
+
+    for(uint8_t i = 0; i < capturePinCount; i++)
+    {
+        if(capturePins[i] >= MAX_CHANNELS)
+            return false;
+
+        if(pinMap[capturePins[i]] < INPUT_PIN_BASE || pinMap[capturePins[i]] - INPUT_PIN_BASE >= sampleBits)
+            return false;
+    }
+
+    return true;
+}
+
 //Channel groups on consecutive GPIOs, the channels a pattern trigger can cover ("0-20/21-23", counted from 0)
 void GetPatternTriggerGroups(char* buffer, uint32_t size)
 {
@@ -293,6 +324,7 @@ uint32_t find_capture_tail()
             transferCount = CAPTURE_BUFFER_SIZE / 2;
             break;
         case MODE_24_CHANNEL:
+        default: //The start functions reject other modes, this keeps the value defined
             transferCount = CAPTURE_BUFFER_SIZE / 4;
             break;
     }
@@ -335,8 +367,9 @@ void disable_gpios()
     for(uint8_t i = 0; i < lastCapturePinCount; i++)
         gpio_deinit(lastCapturePins[i]);
 
-
-    gpio_set_inover(lastTriggerPin, 0);
+    //Only the edge triggers invert their trigger input (lastTriggerPin is stale for the other types)
+    if(lastCaptureType == CAPTURE_TYPE_SIMPLE || lastCaptureType == CAPTURE_TYPE_BLAST)
+        gpio_set_inover(lastTriggerPin, 0);
 }
 
 
@@ -462,6 +495,9 @@ void complex_capture_completed()
 //Triggered when a blast capture ends
 void blast_capture_completed()
 {
+    //Disable the GPIO's (the trigger input was left inverted)
+    disable_gpios();
+
     //Clear the irq
     dma_channel_acknowledge_irq0(dmaPingPong0);
 
@@ -740,10 +776,9 @@ bool StartCaptureFast(uint32_t freq, uint32_t preLength, uint32_t postLength, co
     if(capturePinCount < 1 || capturePinCount > MAX_CHANNELS)
         return false;
 
-    //Channels outside of the pin map? (they indexed pinMap out of bounds)
-    for(uint8_t i = 0; i < capturePinCount; i++)
-        if(capturePins[i] >= MAX_CHANNELS)
-            return false;
+    //Channels outside of the pin map or of the sample width of the mode?
+    if(!capture_pins_valid(capturePins, capturePinCount, captureMode))
+        return false;
 
     //Bad trigger? (up to 5 channels on consecutive GPIOs, the jump table has 32 entries)
     if(triggerPinCount > 5 || !trigger_pins_consecutive(triggerPinBase, triggerPinCount))
@@ -760,7 +795,6 @@ bool StartCaptureFast(uint32_t freq, uint32_t preLength, uint32_t postLength, co
     lastPostSize = postLength;
     lastLoopCount = 0;
     lastCapturePinCount = capturePinCount;
-    lastCaptureComplexFast = true;
     lastCaptureMode = captureMode;
 
     //Map channels to pins
@@ -769,7 +803,6 @@ bool StartCaptureFast(uint32_t freq, uint32_t preLength, uint32_t postLength, co
 
     //Store trigger info
     triggerPinBase = pinMap[triggerPinBase];
-    lastTriggerPinBase = triggerPinBase;
 
     //Calculate clock divider based on frequency, it generates a clock 2x faster than the capture freequency
     float clockDiv = (float)clock_get_hz(clk_sys) / (float)(freq * 2);
@@ -827,7 +860,7 @@ bool StartCaptureFast(uint32_t freq, uint32_t preLength, uint32_t postLength, co
     pio_sm_restart(triggerPIO, sm_Trigger);
 
     //Create trigger program
-    uint8_t triggerFirstInstruction = create_fast_trigger_program(triggerValue, triggerPinCount);
+    create_fast_trigger_program(triggerValue, triggerPinCount);
 
     //Configure trigger state machine
     triggerOffset = pio_add_program(triggerPIO, &FAST_TRIGGER_program);
@@ -921,10 +954,9 @@ static bool start_trigger_program_capture(uint32_t freq, uint32_t preLength, uin
     if(capturePinCount < 1 || capturePinCount > MAX_CHANNELS)
         return false;
 
-    //Channels outside of the pin map? (they indexed pinMap out of bounds)
-    for(uint8_t i = 0; i < capturePinCount; i++)
-        if(capturePins[i] >= MAX_CHANNELS)
-            return false;
+    //Channels outside of the pin map or of the sample width of the mode?
+    if(!capture_pins_valid(capturePins, capturePinCount, captureMode))
+        return false;
 
     //Bad trigger? (a pattern covers up to 16 channels on consecutive GPIOs, an edge any channel)
     if(edgeTrigger ? triggerPinBase >= MAX_CHANNELS : (triggerPinCount > 16 || !trigger_pins_consecutive(triggerPinBase, triggerPinCount)))
@@ -941,7 +973,6 @@ static bool start_trigger_program_capture(uint32_t freq, uint32_t preLength, uin
     lastPostSize = postLength;
     lastLoopCount = 0;
     lastCapturePinCount = capturePinCount;
-    lastCaptureComplexFast = true;
     lastCaptureMode = captureMode;
 
     //Map channels to pins
@@ -950,7 +981,6 @@ static bool start_trigger_program_capture(uint32_t freq, uint32_t preLength, uin
 
     //Store trigger info
     triggerPinBase = pinMap[triggerPinBase];
-    lastTriggerPinBase = triggerPinBase;
 
     //Calculate clock divider based on frequency, it generates a clock 2x faster than the capture freequency
     float clockDiv = (float)clock_get_hz(clk_sys) / (float)(freq * 2);
@@ -1085,7 +1115,7 @@ void __not_in_flash_func(sysTickRoll)()
 void __not_in_flash_func(loopEndHandler)()
 {
     //Save timestamp
-    loopTimestamp[timestampIndex++] = systick_hw->cvr | systickLoops << 24; //timestamp;
+    loopTimestamp[timestampIndex++] = systick_hw->cvr | (uint32_t)systickLoops << 24; //timestamp;
     //Clear PIO interrupt
     capturePIO->irq = (1u << 1);
 }
@@ -1121,10 +1151,9 @@ bool StartCaptureBlast(uint32_t freq, uint32_t length, const uint8_t* capturePin
     if(capturePinCount < 1 || capturePinCount > MAX_CHANNELS)
         return false;
 
-    //Channels outside of the pin map? (they indexed pinMap out of bounds)
-    for(uint8_t i = 0; i < capturePinCount; i++)
-        if(capturePins[i] >= MAX_CHANNELS)
-            return false;
+    //Channels outside of the pin map or of the sample width of the mode?
+    if(!capture_pins_valid(capturePins, capturePinCount, captureMode))
+        return false;
 
     //Incorrect trigger pin?
     //WARNING: comparison of triggerPin and MAX_CHANNELS is correct, we exceed the maximum number of channels by 1 
@@ -1141,7 +1170,6 @@ bool StartCaptureBlast(uint32_t freq, uint32_t length, const uint8_t* capturePin
     lastLoopCount = 0;
     lastCapturePinCount = capturePinCount;
     lastTriggerInverted = invertTrigger;
-    lastCaptureComplexFast = false;
     lastCaptureMode = captureMode;
 
     //Map channels to pins
@@ -1258,10 +1286,9 @@ bool StartCaptureSimple(uint32_t freq, uint32_t preLength, uint32_t postLength, 
     if(capturePinCount < 1 || capturePinCount > MAX_CHANNELS)
         return false;
 
-    //Channels outside of the pin map? (they indexed pinMap out of bounds)
-    for(uint8_t i = 0; i < capturePinCount; i++)
-        if(capturePins[i] >= MAX_CHANNELS)
-            return false;
+    //Channels outside of the pin map or of the sample width of the mode?
+    if(!capture_pins_valid(capturePins, capturePinCount, captureMode))
+        return false;
 
     //Incorrect trigger pin?
     if(triggerPin < 0 || triggerPin > MAX_CHANNELS)
@@ -1276,7 +1303,6 @@ bool StartCaptureSimple(uint32_t freq, uint32_t preLength, uint32_t postLength, 
     lastLoopCount = loopCount;
     lastCapturePinCount = capturePinCount;
     lastTriggerInverted = invertTrigger;
-    lastCaptureComplexFast = false;
     lastCaptureMode = captureMode;
 
     //Map channels to pins
@@ -1435,6 +1461,7 @@ uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* ca
                 maxSize = CAPTURE_BUFFER_SIZE / 2;
                 break;
             case MODE_24_CHANNEL:
+            default: //The start functions reject other modes, this keeps the value defined
                 maxSize = CAPTURE_BUFFER_SIZE / 4;
                 break;
         }
@@ -1462,7 +1489,8 @@ uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* ca
                     uint32_t blastMask = 0;
 
                     //If the capture was in blast mode and the trigger edge was positive, invert the value
-                    if(lastCaptureType == CAPTURE_TYPE_BLAST && !lastTriggerInverted)
+                    //(only when the trigger GPIO is part of the samples, the external trigger is below INPUT_PIN_BASE)
+                    if(lastCaptureType == CAPTURE_TYPE_BLAST && !lastTriggerInverted && lastTriggerPin >= INPUT_PIN_BASE && lastTriggerPin - INPUT_PIN_BASE < 32)
                         blastMask = 1u << (lastTriggerPin - INPUT_PIN_BASE);
 
                     //Sort channels
@@ -1499,7 +1527,8 @@ uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* ca
                     uint16_t blastMask = 0;
 
                     //If the capture was in blast mode and the trigger edge was positive, invert the value
-                    if(lastCaptureType == CAPTURE_TYPE_BLAST && !lastTriggerInverted)
+                    //(only when the trigger GPIO is part of the samples, the external trigger is below INPUT_PIN_BASE)
+                    if(lastCaptureType == CAPTURE_TYPE_BLAST && !lastTriggerInverted && lastTriggerPin >= INPUT_PIN_BASE && lastTriggerPin - INPUT_PIN_BASE < 16)
                         blastMask = 1u << (lastTriggerPin - INPUT_PIN_BASE);
 
                     //Sort channels
@@ -1536,7 +1565,8 @@ uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* ca
                     uint8_t blastMask = 0;
 
                     //If the capture was in blast mode and the trigger edge was positive, invert the value
-                    if(lastCaptureType == CAPTURE_TYPE_BLAST && !lastTriggerInverted)
+                    //(only when the trigger GPIO is part of the samples, the external trigger is below INPUT_PIN_BASE)
+                    if(lastCaptureType == CAPTURE_TYPE_BLAST && !lastTriggerInverted && lastTriggerPin >= INPUT_PIN_BASE && lastTriggerPin - INPUT_PIN_BASE < 8)
                         blastMask = 1u << (lastTriggerPin - INPUT_PIN_BASE);
 
                     //Sort channels
@@ -1585,7 +1615,7 @@ bool StartCaptureSimulation(uint32_t freq, uint32_t preLength, uint32_t postLeng
 {
     //ABOUT THE SIMULATED CAPTURE
     //
-    //No pin is sampled: the test signals of LogicAnalyzer_Simulation.c are written into the capture
+    //No pin is sampled: the test signals of PiPiLogicAnalyzer_Simulation.c are written into the capture
     //buffer in channel order and the capture is marked as finished, so the main loop transfers it
     //exactly like a real capture. This tests the transfer and the host software without any signal.
 

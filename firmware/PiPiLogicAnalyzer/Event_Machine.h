@@ -2,7 +2,7 @@
  * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
  * Copyright (C) 2026 Julian Decker
  *
- * Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+ * Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
  * the changes are described in firmware/README.md.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -31,7 +31,5 @@
     bool event_has_events(EVENT_MACHINE* machine);
     void event_push(EVENT_MACHINE* machine, void* event);
     void event_process_queue(EVENT_MACHINE* machine, void* event_buffer, uint8_t max_events);
-    void event_clear(EVENT_MACHINE* machine);
-    void event_free(EVENT_MACHINE* machine);
 
 #endif

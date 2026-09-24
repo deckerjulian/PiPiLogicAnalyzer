@@ -4,6 +4,56 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). A release is created by pushing a tag `v<version>`
 whose version has a section in this file (see [Creating a release](README.md#creating-a-release)).
 
+## [Unreleased]
+
+### Application
+
+- Multi device sets: the boards started through the trigger line were compensated for the
+  trigger delay with far too few samples (the delay in clock cycles was divided by the sample
+  period in nanoseconds), so their samples were shifted against the board evaluating the trigger.
+- Pattern and edge-out captures whose post-trigger samples do not cover the trigger delay are
+  rejected by the settings check instead of failing on the device.
+- LogicAnalyzer Interceptor: the capture mode is chosen by the bit of every channel in the
+  samples (channel 0 = GPIO 6), so channels 4–7 in 8 channel mode and 12–15 in 16 channel mode no
+  longer read as 0.
+- Dragging a selection in the ruler beyond the left edge produced negative sample numbers; cut
+  and delete then removed the wrong samples. Cut no longer deletes when copying was refused.
+- Automatic decoder channel assignment missed capture channel 0 when it matched by id.
+- Changes made while the decoders run (sample edits, decoder settings) are decoded afterwards
+  instead of being ignored; the decoders work on a snapshot of the channels.
+- Loading capture settings or a profile in blast mode kept the default post-trigger samples.
+- Aborting a WiFi capture closes the connection properly, which also ends the waiting read.
+- VCD export: the time stamps no longer drift at sample periods that are not whole nanoseconds
+  (e.g. 24 MHz).
+- The board self-test dialog can no longer be closed with `Esc` while the test runs.
+- Smaller fixes: the first pixel column of dense waveforms was drawn as toggling, the burst
+  timestamp wraparound was off by one tick, stale input could be read as device details.
+- Unused code removed.
+
+### Firmware
+
+- WiFi: received data is acknowledged to lwIP (`tcp_recved`); without it the receive window shrank
+  with every request until the connection hung after about 11 KB of requests.
+- WiFi: the error callback no longer closes the PCB lwIP has already freed, a closed connection
+  no longer returns `ERR_ABRT`, responses are sent immediately (`tcp_output`), and a client that
+  stops reading is dropped after 5 s.
+- WiFi: received data waits in lwIP instead of blocking the WiFi core on a full event queue, so
+  the two cores can no longer block each other during a large transfer.
+- WiFi: an invalid stored IP address keeps the address assigned by DHCP.
+- Captures are rejected when a channel does not fit into the samples of the requested mode
+  (Interceptor) instead of silently reading 0; unknown trigger types are answered with
+  `CAPTURE_ERROR` instead of starting an edge capture.
+- Undefined shifts in the burst timestamps and the blast trigger mask fixed; a blast capture
+  releases its GPIOs; the power status line cannot overflow its buffer.
+- CMake applies a changed `BOARD_TYPE` to an existing build directory; unused code removed.
+
+### Project
+
+- `publish.ps1` works again after the rename (settings file, image name) and names the images
+  like `build_all.sh`. The VS Code kit uses the SDK 2.1.1 toolchain.
+- Corrected references to gusmanb's original LogicAnalyzer that the rename had changed.
+- The release check also compares the firmware version in `CMakeLists.txt` with the tag.
+
 ## [7.1.0] - 2026-09-15
 
 ### Project
@@ -17,6 +67,15 @@ whose version has a section in this file (see [Creating a release](README.md#cre
   `PIPI_LOGIC_ANALYZER_<BOARD>_V<major>_<minor>`. The application also accepts the previous
   identification, so boards with an older firmware keep working. USB VID/PID (0x1209/0x3020) and
   the hardware of Agustín Giménez Bernad are unchanged.
+- `SECURITY.md` (private vulnerability reporting, where problems are plausible) and a Contributor
+  Covenant `CODE_OF_CONDUCT.md`.
+- Corrected license statements: a few bundled sigrok decoders are MIT or BSD, not GPL, and the
+  AppImage runtime is distributed with the Linux build. The copies of the Raspberry Pi
+  `lwipopts.h` and `pico_sdk_import.cmake` carry their BSD-3-Clause notice again.
+- Source files carry a copyright and `SPDX-License-Identifier` header; `pyproject.toml` declares
+  `GPL-3.0-or-later`.
+- Pull requests that only change documentation now run the tests as well, so a required check can
+  pass.
 
 ### Application
 
@@ -40,18 +99,6 @@ whose version has a section in this file (see [Creating a release](README.md#cre
 - *Help → Online documentation* opens the wiki of this project; the wiki of the original software
   by gusmanb, which documents the hardware, has an entry of its own.
 
-### Project
-
-- `SECURITY.md` (private vulnerability reporting, where problems are plausible) and a Contributor
-  Covenant `CODE_OF_CONDUCT.md`.
-- Corrected license statements: a few bundled sigrok decoders are MIT or BSD, not GPL, and the
-  AppImage runtime is distributed with the Linux build. The copies of the Raspberry Pi
-  `lwipopts.h` and `pico_sdk_import.cmake` carry their BSD-3-Clause notice again.
-- Source files carry a copyright and `SPDX-License-Identifier` header; `pyproject.toml` declares
-  `GPL-3.0-or-later`.
-- Pull requests that only change documentation now run the tests as well, so a required check can
-  pass.
-
 ### Firmware
 
 - Identifies itself as `V7_1`. A multi device set only accepts boards with the same version, so
@@ -65,7 +112,7 @@ whose version has a section in this file (see [Creating a release](README.md#cre
 First release, published under the name *LogicAnalyzer 7*. It is based on version 6.5 of the
 [LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín Giménez Bernad (gusmanb)
 (branch `version/v6_5`, commit `3fa3703`) and extends his firmware and software. Thank you,
-Agustín, for creating the PiPiLogicAnalyzer and sharing it under the GPL.
+Agustín, for creating the LogicAnalyzer and sharing it under the GPL.
 
 ### Application
 

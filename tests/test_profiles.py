@@ -106,12 +106,12 @@ def test_invalid_files_raise_value_error(tmp_path):
 def test_the_original_profiles_file_is_understood(tmp_path):
     """LogicAnalyzer 6.5 writes Newtonsoft JSON with ``$type``/``$values``."""
     original = {
-        "$type": "PiPiLogicAnalyzer.Classes.ProfilesSet, PiPiLogicAnalyzer",
+        "$type": "LogicAnalyzer.Classes.ProfilesSet, LogicAnalyzer",
         "Profiles": {
-            "$type": "System.Collections.Generic.List`1[[PiPiLogicAnalyzer.Classes.Profile]]",
+            "$type": "System.Collections.Generic.List`1[[LogicAnalyzer.Classes.Profile]]",
             "$values": [
                 {
-                    "$type": "PiPiLogicAnalyzer.Classes.Profile, PiPiLogicAnalyzer",
+                    "$type": "LogicAnalyzer.Classes.Profile, LogicAnalyzer",
                     "Name": "SPI flash",
                     "CaptureSettings": {
                         "$type": "SharedDriver.CaptureSession, SharedDriver",
@@ -132,7 +132,7 @@ def test_the_original_profiles_file_is_understood(tmp_path):
                         "TriggerInverted": True,
                     },
                     "DecoderConfiguration": {
-                        "$type": "PiPiLogicAnalyzer.SigrokDecoderBridge.SerializableDecodingTree",
+                        "$type": "LogicAnalyzer.SigrokDecoderBridge.SerializableDecodingTree",
                         "Branches": {"$type": "List", "$values": []},
                     },
                 }

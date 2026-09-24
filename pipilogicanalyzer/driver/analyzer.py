@@ -8,7 +8,7 @@
 
 """Driver for a single PiPiLogicAnalyzer device (serial or network).
 
-Port of ``SharedDriver/PiPiLogicAnalyzerDriver.cs``.
+Port of ``SharedDriver/LogicAnalyzerDriver.cs`` of the original LogicAnalyzer.
 
 Differences with the original implementation:
 
@@ -86,6 +86,12 @@ log = logging.getLogger("pipilogicanalyzer.driver")
 def unpack_channel_samples(raw_samples: np.ndarray, channel_index: int) -> np.ndarray:
     """Extract the samples of one channel from the packed capture words."""
     return ((raw_samples >> np.uint32(channel_index)) & np.uint32(1)).astype(np.uint8)
+
+
+#: Bit of every channel in the samples of the LogicAnalyzer Interceptor. Its channels do not start at
+#: the first input GPIO (PIN_MAP of BOARD_INTERCEPTOR: channel 0 = GPIO 6, INPUT_PIN_BASE = 2), so
+#: the capture mode has to be chosen by these bits, not by the channel number.
+INTERCEPTOR_SAMPLE_BITS = tuple(range(4, 28)) + (0, 1, 2, 3)
 
 
 class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
@@ -168,6 +174,14 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
     @property
     def device_version(self) -> Optional[str]:
         return self._version
+
+    def sample_bits(self, channels: Sequence[int]) -> list[int]:
+        if "_INTERCEPTOR_" in (self._version or ""):
+            return [
+                INTERCEPTOR_SAMPLE_BITS[channel] if 0 <= channel < len(INTERCEPTOR_SAMPLE_BITS) else channel
+                for channel in channels
+            ]
+        return super().sample_bits(channels)
 
     @property
     def channel_count(self) -> int:

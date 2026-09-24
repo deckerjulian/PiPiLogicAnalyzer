@@ -13,7 +13,7 @@ PiPiLogicAnalyzer is a modified and extended version of this project, based on v
 
 * the firmware in `firmware/PiPiLogicAnalyzer` is his firmware with the bug fixes and additions
   described in [firmware/README.md](firmware/README.md);
-* the application is a Python/Qt port of his C#/Avalonia software (`PiPiLogicAnalyzer`,
+* the application is a Python/Qt port of his C#/Avalonia software (`LogicAnalyzer`,
   `SharedDriver`, `SignalDescriptionLanguage`, the sigrok decoder bridge) with the changes
   described in [docs/improvements.md](docs/improvements.md) and [CHANGELOG.md](CHANGELOG.md);
 * the device protocol, the `.lac` file format, the profile format and the USB identifiers
