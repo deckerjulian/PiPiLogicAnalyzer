@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). A release is created by pushing a tag `v<version>`
 whose version has a section in this file (see [Creating a release](README.md#creating-a-release)).
 
-## [Unreleased]
+## [7.1.1] - 2026-09-24
 
 ### Application
 
