@@ -105,7 +105,7 @@ pico_generate_pio_header(${PROJECT_NAME}
 pico_set_program_name(PiPiLogicAnalyzer "PiPiLogicAnalyzer")
 # PiPiLogicAnalyzer 7, based on gusmanb's LogicAnalyzer 6.5. Hosts check "V<major>_<minor>": the
 # original 6.5 software accepts every version from V6_5 on and uses the same capture request.
-pico_set_program_version(PiPiLogicAnalyzer "7.1.0")
+pico_set_program_version(PiPiLogicAnalyzer "7.1.1")
 pico_set_program_url(PiPiLogicAnalyzer "https://github.com/deckerjulian/PiPiLogicAnalyzer")
 add_compile_definitions(FIRMWARE_VERSION="V7_1")
 
