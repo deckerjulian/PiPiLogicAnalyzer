@@ -64,15 +64,11 @@ LAYOUT_V6_0 = RequestLayout("<BBBxH24sBxIIIBBBx", channels=24, max_loop_count=25
 #: Firmware V6_5 and newer: 32 channels, 16 bit loop count -- 56 bytes.
 LAYOUT_V6_5 = RequestLayout("<BBBxH32sBxIIIHBB", channels=32, max_loop_count=65534)
 
-CAPTURE_REQUEST_FORMAT = LAYOUT_V6_0.format
 CAPTURE_REQUEST_SIZE = LAYOUT_V6_0.size
 
 #: ``WIFI_SETTINGS_REQUEST``: 116 bytes.
 NET_CONFIG_FORMAT = "<33s64s16sxH"
 NET_CONFIG_SIZE = struct.calcsize(NET_CONFIG_FORMAT)
-
-MAX_CAPTURE_CHANNELS = LAYOUT_V6_5.channels
-
 
 def layout_for_version(major: int, minor: int) -> RequestLayout:
     """Request layout understood by a device reporting ``V<major>_<minor>``."""

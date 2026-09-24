@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
@@ -51,8 +51,6 @@ DOT_GRID_SAMPLE_LIMIT = 100
 class SampleViewer(QWidget):
     """Draws the captured channels."""
 
-    sample_double_clicked = Signal(int)
-
     def __init__(self, model: CaptureViewModel, parent: Optional[QWidget] = None, section: str = "all") -> None:
         super().__init__(parent)
         self.model = model
@@ -65,7 +63,6 @@ class SampleViewer(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
 
         self._pan_origin: Optional[tuple[float, int]] = None
-        self._last_tooltip = ""
 
         model.capture_changed.connect(self._on_capture_changed)
         model.view_changed.connect(self.update)
@@ -230,7 +227,8 @@ class SampleViewer(QWidget):
         run_at_boundary = np.clip(run_at_boundary, 0, len(transitions) - 1)
         level = transitions.values[run_at_boundary]
 
-        edges_before = np.searchsorted(transitions.starts, boundaries, side="left")
+        # starts[0] is the start of the first run, not an edge.
+        edges_before = np.searchsorted(transitions.starts[1:], boundaries, side="left")
         edges_in_column = np.diff(edges_before)
 
         # 0 = low, 1 = high, 2 = at least one edge inside the column.
@@ -400,11 +398,6 @@ class SampleViewer(QWidget):
             self.unsetCursor()
         super().mouseReleaseEvent(event)
 
-    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        sample = self.model.sample_at(event.position().x(), self.width())
-        self.sample_double_clicked.emit(sample)
-        super().mouseDoubleClickEvent(event)
-
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
         if self._pan_origin is not None:
             origin_x, origin_sample = self._pan_origin
@@ -433,7 +426,6 @@ class SampleViewer(QWidget):
         interval = transitions.interval_at(sample)
         if interval is None:
             QToolTip.hideText()
-            self._last_tooltip = ""
             return
 
         text = (
@@ -443,11 +435,8 @@ class SampleViewer(QWidget):
             f"Length: {to_small_time(interval.duration)} ({interval.sample_count:,} samples)\n"
             f"Inferred frequency: {to_inferred_frequency(interval.duration)}"
         )
-        if text != self._last_tooltip:
-            self._last_tooltip = text
         QToolTip.showText(event.globalPosition().toPoint(), text, self)
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
         QToolTip.hideText()
-        self._last_tooltip = ""
         super().leaveEvent(event)

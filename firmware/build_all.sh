@@ -13,7 +13,7 @@
 #   firmware/build_all.sh                      all boards
 #   firmware/build_all.sh BOARD_PICO BOARD_PICO_2   selected boards
 #
-# The images are named LogicAnalyzer_<BOARD_TYPE>[_Turbo].uf2, which the application
+# The images are named PiPiLogicAnalyzer_<BOARD_TYPE>[_Turbo].uf2, which the application
 # uses to recognise the board when flashing.
 
 set -eo pipefail

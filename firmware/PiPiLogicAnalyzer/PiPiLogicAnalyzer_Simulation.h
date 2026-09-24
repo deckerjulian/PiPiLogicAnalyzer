@@ -2,7 +2,7 @@
  * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
  * Copyright (C) 2026 Julian Decker
  *
- * Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+ * Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
  * the changes are described in firmware/README.md.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,7 +14,7 @@
 //Test signal generator for the simulated capture (trigger type 4).
 //
 //Plain C without Pico SDK dependencies, so it can be compiled on a PC and compared with the
-//generator of the application (logicanalyzer/core/simulation.py). Both must stay identical.
+//generator of the application (pipilogicanalyzer/core/simulation.py). Both must stay identical.
 
 #include <stdint.h>
 

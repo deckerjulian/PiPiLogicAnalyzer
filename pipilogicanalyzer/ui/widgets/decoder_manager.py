@@ -15,6 +15,7 @@ thread through Python.NET while holding the GIL).
 
 from __future__ import annotations
 
+import copy
 from typing import Optional
 
 from PySide6.QtCore import QThread, Qt, Signal
@@ -67,8 +68,6 @@ class DecodeWorker(QThread):
 class DecoderManager(QWidget):
     """List of decoder instances plus the controls to run them."""
 
-    decoding_completed = Signal(list)
-
     def __init__(
         self,
         model: CaptureViewModel,
@@ -79,6 +78,8 @@ class DecoderManager(QWidget):
         self.model = model
         self.provider = provider
         self._worker: Optional[DecodeWorker] = None
+        # Set when a decode is requested while one is running; it runs again once that finishes.
+        self._decode_pending = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -268,7 +269,9 @@ class DecoderManager(QWidget):
         }
         used: set[int] = set()
         for decoder_channel in info.channels:
-            index = by_name.get(decoder_channel.id.lower()) or by_name.get(decoder_channel.name.lower())
+            index = by_name.get(decoder_channel.id.lower())
+            if index is None:  # not "or": capture channel 0 is a valid match
+                index = by_name.get(decoder_channel.name.lower())
             if index is not None and index not in used:
                 instance.channel_map[decoder_channel.index] = index
                 used.add(index)
@@ -388,19 +391,33 @@ class DecoderManager(QWidget):
             return
 
         if self._worker is not None and self._worker.isRunning():
+            self._decode_pending = True
             return
+        self._decode_pending = False
 
         self.status_label.setText("Decoding...")
         set_role(self.status_label, "hint")
         self.decode_button.setEnabled(False)
 
-        self._worker = DecodeWorker(self.provider, session, self)
+        # The sample editor replaces the channel arrays while the worker reads them: decode a
+        # snapshot of the channel list (the arrays themselves are never changed in place).
+        snapshot = copy.copy(session)
+        snapshot.capture_channels = [copy.copy(channel) for channel in session.capture_channels]
+
+        self._worker = DecodeWorker(self.provider, snapshot, self)
         self._worker.completed.connect(self._on_decoding_completed)
         self._worker.failed.connect(self._on_decoding_failed)
-        self._worker.finished.connect(self._refresh_buttons)
+        self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
+    def _on_worker_finished(self) -> None:
+        self._refresh_buttons()
+        if self._decode_pending:
+            self.decode()
+
     def _on_decoding_completed(self, groups: list) -> None:
+        if self._decode_pending:
+            return  # outdated, the pending decode replaces it
         errors = [group for group in groups if group.error]
         rows = sum(group.row_count for group in groups)
         if errors:
@@ -415,7 +432,6 @@ class DecoderManager(QWidget):
             self.status_label.setToolTip("")
 
         self.model.set_annotation_groups(groups)
-        self.decoding_completed.emit(groups)
 
     def _on_decoding_failed(self, message: str) -> None:
         self.status_label.setText("Decoding failed")

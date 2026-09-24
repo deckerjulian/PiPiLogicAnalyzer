@@ -8,7 +8,7 @@
 
 """Driver for a single PiPiLogicAnalyzer device (serial or network).
 
-Port of ``SharedDriver/PiPiLogicAnalyzerDriver.cs``.
+Port of ``SharedDriver/LogicAnalyzerDriver.cs`` of the original LogicAnalyzer.
 
 Differences with the original implementation:
 
@@ -64,6 +64,7 @@ from .base import (
     parse_version,
     pattern_fits,
     pattern_max_bits,
+    trigger_delay_samples,
 )
 from ..core.simulation import SimulationPattern
 from .models import BurstInfo, CaptureSession, TriggerType
@@ -85,6 +86,12 @@ log = logging.getLogger("pipilogicanalyzer.driver")
 def unpack_channel_samples(raw_samples: np.ndarray, channel_index: int) -> np.ndarray:
     """Extract the samples of one channel from the packed capture words."""
     return ((raw_samples >> np.uint32(channel_index)) & np.uint32(1)).astype(np.uint8)
+
+
+#: Bit of every channel in the samples of the LogicAnalyzer Interceptor. Its channels do not start at
+#: the first input GPIO (PIN_MAP of BOARD_INTERCEPTOR: channel 0 = GPIO 6, INPUT_PIN_BASE = 2), so
+#: the capture mode has to be chosen by these bits, not by the channel number.
+INTERCEPTOR_SAMPLE_BITS = tuple(range(4, 28)) + (0, 1, 2, 3)
 
 
 class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
@@ -167,6 +174,14 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
     @property
     def device_version(self) -> Optional[str]:
         return self._version
+
+    def sample_bits(self, channels: Sequence[int]) -> list[int]:
+        if "_INTERCEPTOR_" in (self._version or ""):
+            return [
+                INTERCEPTOR_SAMPLE_BITS[channel] if 0 <= channel < len(INTERCEPTOR_SAMPLE_BITS) else channel
+                for channel in channels
+            ]
+        return super().sample_bits(channels)
 
     @property
     def channel_count(self) -> int:
@@ -328,14 +343,14 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         ticks_per_burst = (ns_per_sample * session.post_trigger_samples) / ns_per_tick
 
         for index in range(1, len(stamps)):
-            top = stamps[index] + 0xFFFFFFFF if stamps[index] < stamps[index - 1] else stamps[index]
+            top = stamps[index] + (1 << 32) if stamps[index] < stamps[index - 1] else stamps[index]
             if top - stamps[index - 1] <= ticks_per_burst:
                 correction = int(ticks_per_burst - (top - stamps[index - 1]) + ticks_per_sample * 2)
                 stamps[index:] += correction
 
         delays: list[float] = []
         for index in range(2, len(stamps)):
-            top = stamps[index] + 0xFFFFFFFF if stamps[index] < stamps[index - 1] else stamps[index]
+            top = stamps[index] + (1 << 32) if stamps[index] < stamps[index - 1] else stamps[index]
             delays.append(float((top - stamps[index - 1]) - ticks_per_burst) * ns_per_tick)
 
         bursts: list[BurstInfo] = []
@@ -418,13 +433,11 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
 
     def trigger_offset(self, session: CaptureSession) -> int:
         """Samples the pattern trigger lags behind, compensated in the request."""
-        sample_period = 1_000_000_000.0 / session.frequency
         delay = {
             TriggerType.FAST: FAST_TRIGGER_DELAY,
             TriggerType.EDGE_OUT: EDGE_OUT_TRIGGER_DELAY,
         }.get(session.trigger_type, COMPLEX_TRIGGER_DELAY)
-        delay_period = (1.0 / self.max_frequency) * 1_000_000_000.0 * delay
-        return int(round((delay_period / sample_period) + 0.3))
+        return trigger_delay_samples(delay, self.max_frequency, session.frequency)
 
     # ------------------------------------------------------------- validation
     def validate_settings(self, session: CaptureSession, requested_samples: int) -> bool:
@@ -459,6 +472,8 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 and limits.min_post_samples <= session.post_trigger_samples <= limits.max_post_samples
                 and requested_samples <= limits.max_total_samples
                 and self.min_frequency <= session.frequency <= self.max_frequency
+                # The trigger delay is compensated with post-trigger samples.
+                and session.post_trigger_samples > self.trigger_offset(session)
             )
 
         if session.trigger_type == TriggerType.BLAST:
@@ -488,6 +503,7 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
             and limits.min_post_samples <= session.post_trigger_samples <= limits.max_post_samples
             and requested_samples <= limits.max_total_samples
             and self.min_frequency <= session.frequency <= self.max_frequency
+            and session.post_trigger_samples > self.trigger_offset(session)
         )
 
     # ------------------------------------------------------------------- stop
@@ -561,6 +577,7 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         details: dict[str, str] = {}
         with self._lock:
             try:
+                self._transport.reset_input()
                 self._transport.write(protocol.command_packet(protocol.CMD_DEVICE_INFO))
                 while True:
                     line = self._transport.read_line(timeout=5.0)
@@ -625,18 +642,6 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
             return self._transport.read_line(timeout=5.0)
         except Exception:
             return "DISCONNECTED"
-
-    # ------------------------------------------------------------------ blink
-    def blink(self, enabled: bool = True) -> bool:
-        if self._is_network:
-            return False
-        command = protocol.CMD_BLINK_ON if enabled else protocol.CMD_BLINK_OFF
-        expected = "BLINKON" if enabled else "BLINKOFF"
-        try:
-            self._transport.write(protocol.command_packet(command))
-            return self._transport.read_line(timeout=10.0) == expected
-        except Exception:
-            return False
 
     # ---------------------------------------------------------------- cleanup
     def dispose(self) -> None:

@@ -47,7 +47,9 @@ from .base import (
     UnsupportedFeatureError,
     parse_version,
     pattern_fits,
+    capture_mode_for_bits,
     pattern_max_bits,
+    trigger_delay_samples,
 )
 from .models import AnalyzerChannel, CaptureSession, TriggerType
 
@@ -156,12 +158,9 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
 
     def get_capture_mode(self, channels: Sequence[int]) -> CaptureMode:
         split = self._split_channels_per_device(channels)
-        max_channel = max((max(group) for group in split if group), default=0)
-        if max_channel < 8:
-            return CaptureMode.CHANNELS_8
-        if max_channel < 16:
-            return CaptureMode.CHANNELS_16
-        return CaptureMode.CHANNELS_24
+        return capture_mode_for_bits(
+            [bit for device, group in zip(self._devices, split) for bit in device.sample_bits(group)]
+        )
 
     def get_limits(self, channels: Sequence[int]) -> CaptureLimits:
         split = self._split_channels_per_device(channels)
@@ -281,8 +280,13 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
 
             offset = 0
             if trigger_device is not None:
-                sample_period = 1_000_000_000.0 / session.frequency
-                offset = int(round((delay / sample_period) + 0.3))
+                # The delay is in clock cycles of the board evaluating the trigger; it compensates
+                # its own samples by the same offset (PiPiLogicAnalyzerDriver.trigger_offset).
+                offset = trigger_delay_samples(
+                    delay, self._devices[trigger_device].max_frequency, session.frequency
+                )
+                if session.post_trigger_samples <= offset:
+                    return CaptureError.BAD_PARAMS
 
             self._completed = [False] * len(self._devices)
             self._pending = [None] * len(self._devices)

@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtGui import QColor
 
 from ..driver.models import AnalyzerChannel
@@ -22,7 +20,6 @@ TRIGGER_LINE_COLOR = QColor(255, 255, 255)
 BURST_LINE_COLOR = QColor(240, 255, 255)
 SAMPLE_LINE_COLOR = QColor(60, 60, 60)
 SAMPLE_DASH_COLOR = QColor(60, 60, 60, 60)
-ERROR_COLOR = QColor(255, 0, 0)
 TEXT_COLOR = QColor(255, 255, 255)
 SELECTION_COLOR = QColor(255, 255, 255, 128)
 # Regions are drawn on top of the waveforms; keep them translucent enough to
@@ -71,7 +68,3 @@ def find_contrast(color: QColor) -> QColor:
     """Black or white, whichever reads better on ``color``."""
     yiq = (color.red() * 299 + color.green() * 587 + color.blue() * 114) // 1000
     return QColor(0, 0, 0) if yiq >= 128 else QColor(255, 255, 255)
-
-
-def optional_color(value: Optional[int]) -> Optional[QColor]:
-    return None if value is None else color_from_uint(value)

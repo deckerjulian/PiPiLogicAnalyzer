@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from pipilogicanalyzer.core import device_info, firmware
 from pipilogicanalyzer.driver import detector, protocol
@@ -59,7 +59,7 @@ def make_drive(root, name, board_id):
 # ----------------------------------------------------------------- images
 def test_uf2_image_is_read(tmp_path):
     path = make_uf2(
-        tmp_path / "pipilogicanalyzer_6.5_BOARD_PICO_2_W_WIFI_Turbo.uf2",
+        tmp_path / "logicanalyzer_6.5_BOARD_PICO_2_W_WIFI_Turbo.uf2",
         families=(firmware.FAMILY_RP2350_ARM_S, firmware.FAMILY_ABSOLUTE),
     )
     image = firmware.read_uf2(str(path))

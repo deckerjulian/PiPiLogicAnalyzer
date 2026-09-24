@@ -40,7 +40,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable, Optional, Sequence
+from typing import Optional
 
 import numpy as np
 
@@ -472,7 +472,3 @@ def samples_from_source(source: str, total_samples: Optional[int] = None) -> np.
         padding = np.full(total_samples - samples.size, samples[-1], dtype=np.uint8)
         return np.concatenate((samples, padding))
     return samples[:total_samples]
-
-
-def describe_tokens(tokens: Iterable[Token]) -> Sequence[str]:  # pragma: no cover - debugging aid
-    return [f"{token.token_type.value}: {token.source}" for token in tokens]

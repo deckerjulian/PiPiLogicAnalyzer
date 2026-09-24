@@ -64,7 +64,6 @@ class SampleMarker(QWidget):
     insert_requested = Signal(int)
     delete_requested = Signal(int, int)
     shift_requested = Signal()
-    selection_changed = Signal(object)
 
     def __init__(self, model: CaptureViewModel, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -88,7 +87,9 @@ class SampleMarker(QWidget):
         return self.width() / max(self.model.visible_samples, 1)
 
     def sample_at(self, x: float) -> int:
-        return self.model.sample_at(x, self.width())
+        # Qt keeps reporting positions left and right of the widget while a drag is held.
+        sample = self.model.sample_at(x, self.width())
+        return min(max(sample, 0), max(self.model.sample_count - 1, 0))
 
     def _x_for(self, sample: float) -> float:
         return (sample - self.model.first_sample) * self.sample_width()
@@ -216,7 +217,6 @@ class SampleMarker(QWidget):
         if self._dragging and self.selection is not None:
             self.selection.last_sample = sample
             self.update()
-            self.selection_changed.emit(self.selection)
             return
 
         self._show_tooltip(event, sample)
@@ -233,7 +233,6 @@ class SampleMarker(QWidget):
                     self.selection = None
                     current = self.model.user_marker
                     self.model.set_user_marker(None if current == sample else sample)
-                self.selection_changed.emit(self.selection)
             self.update()
         super().mouseReleaseEvent(event)
 
@@ -316,12 +315,6 @@ class SampleMarker(QWidget):
 
     def clear_selection(self) -> None:
         self.selection = None
-        self.selection_changed.emit(None)
-        self.update()
-
-    def select(self, first_sample: int, last_sample: int) -> None:
-        self.selection = Selection(first_sample, last_sample)
-        self.selection_changed.emit(self.selection)
         self.update()
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - Qt naming

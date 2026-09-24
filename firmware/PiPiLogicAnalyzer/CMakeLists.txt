@@ -1,7 +1,7 @@
 # Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
 # Copyright (C) 2026 Julian Decker
 #
-# Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+# Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
 # the changes are described in firmware/README.md.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -40,7 +40,8 @@ endif()
 
 if((BOARD_TYPE STREQUAL "BOARD_PICO_W") OR (BOARD_TYPE STREQUAL "BOARD_PICO_W_WIFI"))
     message(STATUS "Setting PICO_BOARD to pico_w")
-    set(PICO_BOARD pico_w CACHE STRING "Board type")
+    # FORCE: a changed BOARD_TYPE must also apply to an already configured build directory
+    set(PICO_BOARD pico_w CACHE STRING "Board type" FORCE)
     message(STATUS "Forcing Debug for W build")
     set(CMAKE_BUILD_TYPE Debug)
     if(TURBO_MODE)
@@ -48,7 +49,7 @@ if((BOARD_TYPE STREQUAL "BOARD_PICO_W") OR (BOARD_TYPE STREQUAL "BOARD_PICO_W_WI
     endif()
 elseif((BOARD_TYPE STREQUAL "BOARD_PICO_2_W") OR (BOARD_TYPE STREQUAL "BOARD_PICO_2_W_WIFI"))
     message(STATUS "Setting PICO_BOARD to pico2_w")
-    set(PICO_BOARD pico2_w CACHE STRING "Board type")
+    set(PICO_BOARD pico2_w CACHE STRING "Board type" FORCE)
     message(STATUS "Forcing Debug for W build")
     set(CMAKE_BUILD_TYPE Debug)
     if(TURBO_MODE)
@@ -56,10 +57,10 @@ elseif((BOARD_TYPE STREQUAL "BOARD_PICO_2_W") OR (BOARD_TYPE STREQUAL "BOARD_PIC
     endif()
 elseif(BOARD_TYPE STREQUAL "BOARD_PICO_2")
     message(STATUS "Setting PICO_BOARD to pico2")
-    set(PICO_BOARD pico2 CACHE STRING "Board type")
+    set(PICO_BOARD pico2 CACHE STRING "Board type" FORCE)
 else()
     message(STATUS "Setting PICO_BOARD to pico")
-    set(PICO_BOARD pico CACHE STRING "Board type")
+    set(PICO_BOARD pico CACHE STRING "Board type" FORCE)
 endif()
 
 if(TURBO_MODE)
@@ -102,7 +103,7 @@ pico_generate_pio_header(${PROJECT_NAME}
 )
 
 pico_set_program_name(PiPiLogicAnalyzer "PiPiLogicAnalyzer")
-# LogicAnalyzer 7, based on gusmanb's LogicAnalyzer 6.5. Hosts check "V<major>_<minor>": the
+# PiPiLogicAnalyzer 7, based on gusmanb's LogicAnalyzer 6.5. Hosts check "V<major>_<minor>": the
 # original 6.5 software accepts every version from V6_5 on and uses the same capture request.
 pico_set_program_version(PiPiLogicAnalyzer "7.1.0")
 pico_set_program_url(PiPiLogicAnalyzer "https://github.com/deckerjulian/PiPiLogicAnalyzer")
@@ -122,7 +123,6 @@ if(BOARD_TYPE STREQUAL "BOARD_PICO_2")
 endif()
 if(BOARD_TYPE STREQUAL "BOARD_PICO_W")
     message(STATUS "Configuring for Pico W without WiFi support")
-    set(PICO_BOARD pico_w)
     add_compile_definitions(BUILD_PICO_W)
     set (CYW_LIB pico_cyw43_arch_none)
 endif()
@@ -132,8 +132,7 @@ if(BOARD_TYPE STREQUAL "BOARD_PICO_W_WIFI")
     set (CYW_LIB pico_cyw43_arch_lwip_poll)
 endif()
 if(BOARD_TYPE STREQUAL "BOARD_PICO_2_W")
-    message(STATUS "Configuring for Pico W without WiFi support")
-    set(PICO_BOARD pico2_w)
+    message(STATUS "Configuring for Pico 2 W without WiFi support")
     add_compile_definitions(BUILD_PICO_2_W)
     add_compile_definitions(CORE_TYPE_2)
     set (CYW_LIB pico_cyw43_arch_none)
@@ -153,7 +152,7 @@ if(BOARD_TYPE STREQUAL "BOARD_INTERCEPTOR")
     add_compile_definitions(BUILD_INTERCEPTOR)
 endif()
 
-# Add any user requested librariesUna pregu
+# Libraries
 target_link_libraries(PiPiLogicAnalyzer
         pico_stdlib
         hardware_dma
@@ -165,7 +164,6 @@ target_link_libraries(PiPiLogicAnalyzer
         hardware_vreg
         pico_multicore
         pico_base_headers
-        pico_multicore
         cmsis_core
         ${CYW_LIB}
         )

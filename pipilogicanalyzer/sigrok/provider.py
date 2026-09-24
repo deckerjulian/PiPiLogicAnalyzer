@@ -112,18 +112,6 @@ class SigrokProvider:
     def info_for(self, instance: DecoderInstance) -> Optional[DecoderInfo]:
         return self.registry.get(instance.decoder_id)
 
-    def stackable_decoders(self, instance: DecoderInstance) -> list[DecoderInfo]:
-        """Decoders that can consume the Python output of ``instance``."""
-        info = self.info_for(instance)
-        if info is None or not info.outputs:
-            return []
-        produced = set(info.outputs)
-        return [
-            candidate
-            for candidate in self.registry.decoders
-            if candidate.inputs and set(candidate.inputs) & produced
-        ]
-
     # --------------------------------------------------------------- running
     def run(self, session: CaptureSession) -> list[AnnotationGroup]:
         """Execute every enabled decoder and return their annotation groups."""

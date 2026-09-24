@@ -40,8 +40,8 @@
     "files.associations": {
         "pads_bank0.h": "c",
         "stdlib.h": "c",
-        "logicanalyzer_wifi.h": "c",
-        "logicanalyzer_board_settings.h": "c",
+        "pipilogicanalyzer_wifi.h": "c",
+        "pipilogicanalyzer_board_settings.h": "c",
         "string.h": "c",
         "stdio.h": "c",
         "dma.h": "c",

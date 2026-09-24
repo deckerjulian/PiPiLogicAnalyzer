@@ -101,14 +101,8 @@ class InlineMessage(QLabel):
     def show_error(self, text: str) -> None:
         self._show(text, "error")
 
-    def show_warning(self, text: str) -> None:
-        self._show(text, "warning")
-
     def show_success(self, text: str) -> None:
         self._show(text, "success")
-
-    def show_info(self, text: str) -> None:
-        self._show(text, "hint")
 
     def clear(self) -> None:
         self._show("", None)
@@ -130,9 +124,6 @@ class Banner(QFrame):
         self.button = QPushButton(self)
         self.button.setVisible(False)
         layout.addWidget(self.button, 0, Qt.AlignVCenter)
-
-    def set_kind(self, kind: str) -> None:
-        set_role(self, f"banner-{kind}")
 
     def set_message(self, text: str, button_text: Optional[str] = None) -> None:
         self.label.setText(text)

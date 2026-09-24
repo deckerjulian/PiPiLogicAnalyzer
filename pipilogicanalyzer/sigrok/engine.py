@@ -257,15 +257,6 @@ class DecoderRegistry:
                 queue.append((producer, chain))
         return []
 
-    def categories(self) -> dict[str, list[DecoderInfo]]:
-        """Decoders grouped by tag, as shown in the decoder browser."""
-        grouped: dict[str, list[DecoderInfo]] = {}
-        for info in self.decoders:
-            tags = info.tags or ("Uncategorized",)
-            for tag in tags:
-                grouped.setdefault(str(tag), []).append(info)
-        return dict(sorted(grouped.items(), key=lambda item: item[0].lower()))
-
 
 def describe_decoder(decoder_class: type, path: str = "", fallback_id: str = "") -> DecoderInfo:
     """Read the static description of a decoder class."""

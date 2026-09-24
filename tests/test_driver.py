@@ -381,3 +381,14 @@ def test_aborting_a_capture_does_not_report_an_error(driver):
     if driver._capture_thread is not None:
         driver._capture_thread.join(5)
     assert results == []
+
+
+def test_the_interceptor_mode_follows_the_sample_bits(driver):
+    # Standard boards: the channel number is the bit in the samples.
+    assert driver.get_capture_mode([0, 7]) is CaptureMode.CHANNELS_8
+
+    # Interceptor: channel 0 is GPIO 6 = bit 4, channel 4 is bit 8, channel 12 is bit 16.
+    driver._version = "PIPI_LOGIC_ANALYZER_INTERCEPTOR_V7_1"
+    assert driver.get_capture_mode([0, 3]) is CaptureMode.CHANNELS_8
+    assert driver.get_capture_mode([4]) is CaptureMode.CHANNELS_16
+    assert driver.get_capture_mode([12]) is CaptureMode.CHANNELS_24

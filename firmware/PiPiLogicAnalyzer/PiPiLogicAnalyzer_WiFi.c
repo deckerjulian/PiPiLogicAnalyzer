@@ -2,7 +2,7 @@
  * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
  * Copyright (C) 2026 Julian Decker
  *
- * Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+ * Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
  * the changes are described in firmware/README.md.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -32,6 +32,15 @@ WIFI_STATE_MACHINE currentState = VALIDATE_SETTINGS;
 ip_addr_t address;
 struct tcp_pcb* serverPcb;
 struct tcp_pcb* clientPcb;
+
+//Data received from the client that did not fit into the event queue yet. It is acknowledged to lwIP
+//(tcp_recved) as it is handed over, so the receive window closes while the frontend is busy instead of
+//the WiFi core blocking on a full queue: core 0 may itself be blocked sending data to this core.
+static struct pbuf* pendingData;
+static uint16_t pendingPos;
+
+//Time a client may keep the send buffer full before it is dropped
+#define SEND_TIMEOUT_MS 5000
 
 bool apConnected = false;
 bool boot = false;
@@ -87,23 +96,88 @@ void stopServer()
     serverPcb = NULL;
 }
 
-void killClient()
+static void dropPendingData()
 {
+    if(pendingData != NULL)
+    {
+        pbuf_free(pendingData);
+        pendingData = NULL;
+    }
+    pendingPos = 0;
+}
+
+//Hands the received data over to the frontend as far as the event queue has room
+static void flushPendingData()
+{
+    EVENT_FROM_WIFI evt;
+    evt.event = DATA_RECEIVED;
+
+    while(pendingData != NULL && pendingPos < pendingData->tot_len)
+    {
+        uint16_t left = pendingData->tot_len - pendingPos;
+        uint8_t copy = left > 128 ? 128 : left;
+        evt.dataLength = copy;
+        pbuf_copy_partial(pendingData, evt.data, copy, pendingPos);
+
+        if(!queue_try_add(&wifiToFrontend.queue, &evt))
+            return;
+
+        pendingPos += copy;
+
+        if(clientPcb != NULL)
+            tcp_recved(clientPcb, copy);
+    }
+
+    dropPendingData();
+}
+
+static void notifyDisconnected()
+{
+    EVENT_FROM_WIFI evt;
+    evt.event = DISCONNECTED;
+    event_push(&wifiToFrontend, &evt);
+}
+
+//Returns true if the connection had to be aborted (tcp_close can fail when lwIP is out of memory)
+bool killClient()
+{
+    bool aborted = false;
+
+    dropPendingData();
+
     if(clientPcb != NULL)
     {
         tcp_recv(clientPcb, NULL);
         tcp_err(clientPcb, NULL);
-        tcp_close(clientPcb);
+        if(tcp_close(clientPcb) != ERR_OK)
+        {
+            tcp_abort(clientPcb);
+            aborted = true;
+        }
         clientPcb = NULL;
     }
     currentState = WAITING_TCP_CLIENT;
+
+    return aborted;
 }
 
 void sendData(uint8_t* data, uint8_t len)
 {
+    absolute_time_t timeout = make_timeout_time_ms(SEND_TIMEOUT_MS);
+
     while(clientPcb && tcp_sndbuf(clientPcb) < len)
     {
+        //A client that stops reading would otherwise stall this core and, through the full event
+        //queue, the capture core as well
+        if(time_reached(timeout))
+        {
+            killClient();
+            notifyDisconnected();
+            return;
+        }
+
         cyw43_arch_poll();
+        flushPendingData();
         sleep_ms(1);
     }
 
@@ -114,56 +188,48 @@ void sendData(uint8_t* data, uint8_t len)
     if(tcp_write(clientPcb, data, len, TCP_WRITE_FLAG_COPY))
     {
         killClient();
-        EVENT_FROM_WIFI evt;
-        evt.event = DISCONNECTED;
-        event_push(&wifiToFrontend, &evt);
+        notifyDisconnected();
+        return;
     }
-    
+
+    //Send now instead of waiting for the next ACK or the TCP timer
+    tcp_output(clientPcb);
 }
 
 void serverError(void *arg, err_t err)
 {
-    killClient();
-
-    EVENT_FROM_WIFI evt;
-    evt.event = DISCONNECTED;
-    event_push(&wifiToFrontend, &evt);
+    //lwIP has already freed the PCB when this is called, it must not be touched any more
+    clientPcb = NULL;
+    dropPendingData();
+    currentState = WAITING_TCP_CLIENT;
+    notifyDisconnected();
 }
 
 err_t serverReceiveData(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
 {
-    EVENT_FROM_WIFI evt;
-
     //Client disconnected
     if(!p || p->tot_len == 0)
     {
         if(p)
             pbuf_free(p);
-            
-        killClient();
-        evt.event = DISCONNECTED;
-        event_push(&wifiToFrontend, &evt);
-        return ERR_ABRT;
+
+        bool aborted = killClient();
+        notifyDisconnected();
+        //ERR_ABRT tells lwIP that the PCB is gone, which is only true after tcp_abort
+        return aborted ? ERR_ABRT : ERR_OK;
     }
 
-    uint16_t left = p->tot_len;
-    uint16_t pos = 0;
-
-    while(left)
+    if(pendingData == NULL)
     {
-        uint8_t copy = left > 128 ? 128 : left;
-        evt.event = DATA_RECEIVED;
-        evt.dataLength = copy;
-        pbuf_copy_partial(p, evt.data, copy, pos);
-        event_push(&wifiToFrontend, &evt);
-        pos += copy;
-        left -= copy;
+        pendingData = p;
+        pendingPos = 0;
     }
+    else
+        pbuf_cat(pendingData, p);
 
-    pbuf_free(p);
+    flushPendingData();
 
     return ERR_OK;
-
 }
 
 err_t acceptConnection(void *arg, struct tcp_pcb *client_pcb, err_t err)
@@ -224,9 +290,11 @@ bool tryConnectAP()
     if(cyw43_arch_wifi_connect_timeout_ms((const char*)wifiSettings.apName, (const char*)wifiSettings.passwd, CYW43_AUTH_WPA2_AES_PSK, 10000))
         return false;
 
-    ipaddr_aton((const char*)wifiSettings.ipAddress, &address);
-
-    netif_set_ipaddr(netif_list, &address);
+    //An invalid stored address keeps the one assigned by DHCP
+    if(ipaddr_aton((const char*)wifiSettings.ipAddress, &address))
+        netif_set_ipaddr(netif_list, ip_2_ip4(&address));
+    else
+        ip_addr_copy_from_ip4(address, *netif_ip4_addr(netif_list));
 
     apConnected = true;
 
@@ -334,7 +402,10 @@ void runWiFiCore()
         event_process_queue(&frontendToWifi, &frontendEventBuffer, 8);
         processWifiMachine();
         if(currentState > CONNECTING_AP)
+        {
             cyw43_arch_poll();
+            flushPendingData();
+        }
     }
 }
 

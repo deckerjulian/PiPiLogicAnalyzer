@@ -70,7 +70,7 @@ tagged versions (for example `v7.0.0`) are regular releases.
 | macOS (Apple Silicon) | `PiPiLogicAnalyzer-<version>-macos-arm64.dmg` | open, drag `PiPiLogicAnalyzer.app` to *Applications* |
 | macOS (Intel) | `PiPiLogicAnalyzer-<version>-macos-x64.dmg` | as above (tagged releases only) |
 | Linux (x86_64) | `PiPiLogicAnalyzer-<version>-linux-x86_64.AppImage` | `chmod +x` and run; or unpack the `.tar.gz` |
-| Firmware | `LogicAnalyzer_<BOARD>[_Turbo].uf2`, all in `PiPiLogicAnalyzer-firmware-uf2.zip` | see [Installing the firmware](#installing-the-firmware) |
+| Firmware | `PiPiLogicAnalyzer_<BOARD>[_Turbo].uf2`, all in `PiPiLogicAnalyzer-firmware-uf2.zip` | see [Installing the firmware](#installing-the-firmware) |
 
 The applications include Python, Qt, the protocol decoders and all firmware images; nothing
 else has to be installed, and *Device → Install or update firmware…* offers the images directly.
@@ -97,7 +97,8 @@ Actions:
 | Tag `v*` | ✓ | ✓ | Windows, macOS (Apple Silicon and Intel), Linux | release |
 | Manual run (*Actions → Build → Run workflow*) | ✓ | ✓ | all | artifacts only |
 
-Changes to documentation alone start no run. Every packaged application is started once with
+A push that changes documentation alone starts no run; pull requests always run the tests. Every
+packaged application is started once with
 `--smoke-test` before it is uploaded.
 
 ## Creating a release

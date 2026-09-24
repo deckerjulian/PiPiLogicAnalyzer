@@ -1,49 +1,66 @@
+# Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
+# Copyright (C) 2026 Julian Decker
+#
+# Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
+# the changes are described in firmware/README.md.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Windows counterpart of firmware/build_all.sh: builds the firmware for every board (and turbo
+# variant) into .\publish. The images are named PiPiLogicAnalyzer_<BOARD_TYPE>[_Turbo].uf2, which
+# the application uses to recognise the board when flashing.
+#
+#   .\publish.ps1                            all boards
+#   .\publish.ps1 BOARD_PICO BOARD_PICO_2    selected boards
+#
+# Uses the Pico SDK 2.1.1 and the tools installed by the "Raspberry Pi Pico" VS Code extension.
+
 param (
-    [Parameter(Mandatory=$true)]
-    [string]$packageVersion
+    [string[]]$Boards
 )
 
-$packageName = "logicanalyzer_" + $packageVersion
+$ErrorActionPreference = "Stop"
+Set-Location -Path $PSScriptRoot
 
-# Define board types and turbo mode options
-$boardTypes = @("BOARD_PICO", "BOARD_PICO_W", "BOARD_PICO_W_WIFI", "BOARD_ZERO", "BOARD_PICO_2", "BOARD_PICO_2_W", "BOARD_PICO_2_W_WIFI", "BOARD_INTERCEPTOR")
-$turboModes = @("0", "1")
+$allBoards = @("BOARD_PICO", "BOARD_PICO_2", "BOARD_PICO_W", "BOARD_PICO_W_WIFI", "BOARD_PICO_2_W", "BOARD_PICO_2_W_WIFI", "BOARD_ZERO", "BOARD_INTERCEPTOR")
+if (-not $Boards) {
+    $Boards = $allBoards
+}
+
+# CMakeLists.txt silently falls back to the Pico for unknown boards
+foreach ($board in $Boards) {
+    if ($board -notin $allBoards) {
+        throw "Unknown board $board, known: $($allBoards -join ' ')"
+    }
+}
 
 # Path to the build settings file
-$buildSettingsFile = "LogicAnalyzer_Build_Settings.cmake"
+$buildSettingsFile = "PiPiLogicAnalyzer_Build_Settings.cmake"
+$buildSettingsBackup = "$buildSettingsFile.orig"
 
-# Paths from settings.json
-$cmakePath = "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake"
-$cmakeBinPath = "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake"
-$ninjaPath = "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1"
-$picoSdkPath = "${env:USERPROFILE}/.pico-sdk/sdk/2.1.1"
-$picoToolchainPath = "${env:USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1"
-$picoToolchainBinPath = "${env:USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1/bin"
-$picoToolPath = "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool"
+# Tools of the VS Code extension
+$picoHome = "${env:USERPROFILE}/.pico-sdk"
+$cmakeBinPath = "$picoHome/cmake/v3.31.5/bin"
+$ninjaPath = "$picoHome/ninja/v1.12.1"
+$picoSdkPath = "$picoHome/sdk/2.1.1"
+$picoToolchainPath = "$picoHome/toolchain/14_2_Rel1"
+$picoToolchainBinPath = "$picoToolchainPath/bin"
+$picoToolPath = "$picoHome/picotool/2.1.1/picotool"
 
-# Function to update the build settings file
-function Update-BuildSettings {
-    param (
-        [string]$boardType,
-        [string]$turboMode
-    )
-    $content = Get-Content $buildSettingsFile
-    $content = $content -replace '(set\(BOARD_TYPE ".*"\))', "set(BOARD_TYPE `"$boardType`")"
-    $content = $content -replace '(set\(TURBO_MODE .*\))', "set(TURBO_MODE $turboMode)"
-    Set-Content $buildSettingsFile $content
+# A leftover copy means an earlier run was stopped before it could restore the settings
+if (Test-Path -Path $buildSettingsBackup) {
+    throw "$buildSettingsBackup exists from an interrupted run. Move it back over $buildSettingsFile or delete it, then start again."
 }
 
-# Get the number of processors
-$processorCount = [Environment]::ProcessorCount
-
-# Create the publish directory if it doesn't exist
-$publishDir = ".\publish"
-if (-Not (Test-Path -Path $publishDir)) {
-    New-Item -ItemType Directory -Path $publishDir
+# Create or clear the publish directory
+$publishDir = Join-Path $PSScriptRoot "publish"
+if (-not (Test-Path -Path $publishDir)) {
+    New-Item -ItemType Directory -Path $publishDir | Out-Null
 } else {
-    # Clear the publish directory
     Remove-Item -Recurse -Force "$publishDir\*"
 }
+# Separate from .\build, so the VS Code build keeps its board in the cache
+$buildDir = Join-Path $publishDir ".build"
 
 # Set environment variables
 $env:PICO_SDK_PATH = $picoSdkPath
@@ -57,52 +74,57 @@ foreach ($path in $pathsToAdd) {
     }
 }
 
-# Loop through each board type and turbo mode combination
-foreach ($boardType in $boardTypes) {
-    foreach ($turboMode in $turboModes) {
-        # Skip turbo mode for the W variants (CMakeLists.txt refuses them, the Pico 2 W ones included)
-        if ($turboMode -eq "1" -and ($boardType -like "BOARD_PICO_W*" -or $boardType -like "BOARD_PICO_2_W*")) {
-            continue
-        }
+$processorCount = [Environment]::ProcessorCount
+$settings = Get-Content $buildSettingsFile
+Copy-Item -Path $buildSettingsFile -Destination $buildSettingsBackup
+$built = 0
+$failed = 0
 
-        # Update the build settings file
-        Update-BuildSettings -boardType $boardType -turboMode $turboMode
-
-        # Clean the build directory
-        Remove-Item -Recurse -Force "build"
-        New-Item -ItemType Directory -Path "build"
-        Set-Location -Path "build"
-
-        # Run the CMake configuration command
-        & $cmakePath -G "Ninja" ..
-
-        # Run the CMake build command
-        & $cmakePath --build . --config Release -- -j $processorCount
-
-        # Check if the .uf2 file exists before moving it
-        $uf2File = "LogicAnalyzer.uf2"
-        if (Test-Path -Path $uf2File) {
-            # Determine the final binary name
-            if ($turboMode -eq "1") {
-                $binaryName = "${packageName}_${boardType}_Turbo.uf2"
-            } else {
-                $binaryName = "${packageName}_${boardType}.uf2"
+try {
+    foreach ($boardType in $Boards) {
+        foreach ($turboMode in @("0", "1")) {
+            # Skip turbo mode for the W variants (CMakeLists.txt refuses them, the Pico 2 W ones included)
+            if ($turboMode -eq "1" -and ($boardType -like "BOARD_PICO_W*" -or $boardType -like "BOARD_PICO_2_W*")) {
+                continue
             }
 
-            # Move the generated .uf2 file
-            Move-Item -Path $uf2File -Destination "..\$publishDir\$binaryName"
-        } else {
-            Write-Host "Error: $uf2File not found for $boardType with Turbo $turboMode"
-        }
+            $binaryName = "PiPiLogicAnalyzer_$boardType"
+            if ($turboMode -eq "1") {
+                $binaryName = "${binaryName}_Turbo"
+            }
+            Write-Host "==> $binaryName"
 
-        # Return to the root directory
-        Set-Location -Path ".."
+            # Update the build settings file
+            $content = $settings -replace '^set\(BOARD_TYPE .*\)', "set(BOARD_TYPE `"$boardType`")"
+            $content = $content -replace '^set\(TURBO_MODE .*\)', "set(TURBO_MODE $turboMode)"
+            Set-Content $buildSettingsFile $content
+
+            # The board is cached by CMake, every variant needs a fresh build directory
+            Remove-Item -Recurse -Force $buildDir -ErrorAction SilentlyContinue
+
+            & cmake -S . -B $buildDir -G "Ninja"
+            if ($LASTEXITCODE -eq 0) {
+                & cmake --build $buildDir --config Release -- -j $processorCount
+            }
+
+            $uf2File = Join-Path $buildDir "PiPiLogicAnalyzer.uf2"
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -Path $uf2File)) {
+                Move-Item -Path $uf2File -Destination "$publishDir\$binaryName.uf2"
+                $built++
+            } else {
+                Write-Host "Error: $binaryName failed"
+                $failed++
+            }
+        }
     }
 }
+finally {
+    Move-Item -Force -Path $buildSettingsBackup -Destination $buildSettingsFile
+    Remove-Item -Recurse -Force $buildDir -ErrorAction SilentlyContinue
+}
 
-# Compress the .uf2 files and delete the originals
-Get-ChildItem -Path $publishDir -Filter *.uf2 | ForEach-Object {
-    $zipFileName = "$($_.BaseName).zip"
-    Compress-Archive -Path $_.FullName -DestinationPath "$publishDir\$zipFileName"
-    Remove-Item -Path $_.FullName
+Write-Host ""
+Write-Host "$built image(s) in $publishDir, $failed failed."
+if ($failed -gt 0) {
+    exit 1
 }

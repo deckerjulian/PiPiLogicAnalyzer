@@ -2,7 +2,7 @@
  * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
  * Copyright (C) 2026 Julian Decker
  *
- * Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+ * Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
  * the changes are described in firmware/README.md.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,7 +13,6 @@
     #define __LOGICANALYZER_BOARD_SETTINGS__
 
     #include "pico/stdlib.h"
-    //#include "LogicAnalyzer_Build_Settings.h"
 
     //Board definitions
 

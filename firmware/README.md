@@ -18,9 +18,9 @@ All changes compared with the original are part of the source code in
 ## Building
 
 Requirements: Raspberry Pi Pico SDK 2.1.1, ARM GCC 14.2 and CMake/Ninja. The easiest way is the
-*Raspberry Pi Pico* extension for VS Code, which installs everything in `~/.pico-sdk`. Editor
-settings are not part of the repository (`.vscode/` is ignored); point the extension at
-`firmware/PiPiLogicAnalyzer` as the CMake source directory.
+*Raspberry Pi Pico* extension for VS Code, which installs everything in `~/.pico-sdk`. The VS Code
+setup of the extension is part of the repository in `firmware/PiPiLogicAnalyzer/.vscode`; open
+`firmware/PiPiLogicAnalyzer` as the folder.
 
 1. Set `BOARD_TYPE` and, if wanted, `TURBO_MODE` in
    [`PiPiLogicAnalyzer/PiPiLogicAnalyzer_Build_Settings.cmake`](PiPiLogicAnalyzer/PiPiLogicAnalyzer_Build_Settings.cmake).
@@ -48,10 +48,11 @@ firmware/build_all.sh                          # all boards
 firmware/build_all.sh BOARD_PICO BOARD_PICO_2  # selected boards
 ```
 
-The files are named `LogicAnalyzer_<BOARD_TYPE>[_Turbo].uf2`; the application recognises the
+The files are named `PiPiLogicAnalyzer_<BOARD_TYPE>[_Turbo].uf2`; the application recognises the
 board of an image by this name when flashing. The build settings are restored afterwards; error
-logs are kept as `.log` files next to the images. On Windows, `publish.ps1` does the same
-(PowerShell).
+logs are kept as `.log` files next to the images. On Windows,
+`firmware/PiPiLogicAnalyzer/publish.ps1` does the same (PowerShell) and writes the images to
+`firmware/PiPiLogicAnalyzer/publish`.
 
 ### Automatic builds (GitHub Actions)
 
@@ -170,32 +171,32 @@ computer and compares both generators sample by sample.
 | `PiPiLogicAnalyzer.c` | Capture and WiFi requests were interpreted as structures without a length check, directly in the unaligned buffer. | The length must equal `sizeof` the structure; copied with `memcpy`. |
 | `PiPiLogicAnalyzer.c` | SSID, password and IP were stored without a terminating zero although the WiFi core uses them as C strings. | The last byte of every field is set to 0. |
 | `PiPiLogicAnalyzer.c` | WiFi responses were copied into a 32 byte event with `memcpy` without a length limit. | Responses go through `wifi_transfer` in 32 byte chunks; `printf` with the format string `"%s"`. |
-| `LogicAnalyzer_Capture.c` | Blast mode: the buffer end was computed as `lastPostSize` instead of `lastPostSize - 1`. The first sample was missing and a zeroed one was appended (with a full buffer sample 0 came last). | Correct buffer end. |
-| `LogicAnalyzer_Capture.c` | The NMI and SysTick handlers of the burst measurement were only restored for `timestampIndex != 0`. After an abort before the first timestamp, the next measurement panicked in `exception_set_exclusive_handler`. | Separate flag `lastBurstMeasure`; the previous SysTick state is restored. |
-| `LogicAnalyzer_Capture.c` | A burst measurement without loops loaded the measuring PIO program but installed no NMI handler. The `irq wait 1` blocked the capture forever. | Measuring only with `loopCount > 0`; the program is selected accordingly. |
-| `LogicAnalyzer_Capture.c` | `GetBuffer` computed with `lastTail = 0xFFFFFFFF` when `find_capture_tail` could not determine the DMA position and then wrote far behind the buffer. | The buffer end is limited to the valid range. |
-| `LogicAnalyzer_Capture.c` | Missing parameter checks: unknown capture mode (undefined buffer size), channel numbers outside the pin map (reading outside the array, arbitrary GPIOs), 0 post-trigger samples (`postLength - 1` gave an endless capture), frequency 0 (division by 0) or too low for the PIO divider, 32 bit overflow of `pre + post × (loops + 1)`. | All values are checked before starting. |
-| `LogicAnalyzer_Capture.c` | Pattern trigger: bits above the pattern length in the trigger value prevented any trigger. | The trigger value is masked to the pattern length. |
-| `LogicAnalyzer_Capture.c` | `StopCapture` could finish a capture a second time if it ended right before interrupts were disabled. `captureFinished` was not `volatile`. | Checked again with interrupts disabled; `volatile`. Blast captures no longer touch the unused second DMA channel. |
-| `LogicAnalyzer_Capture.c` | After a simple capture the PIO program of the other edge was removed, never the measuring one. | The program actually loaded is removed. |
-| `LogicAnalyzer_Capture.c` | `1 << pin` with pin 31 is undefined in C. | `1u << pin`. |
-| `LogicAnalyzer_Capture.h` | `RP2350.h` was only included for `BUILD_PICO_2`, not for the Pico 2 W. | Included through `CORE_TYPE_2`. |
-| `LogicAnalyzer_WiFi.c` | `tryStartServer` had no `return true` on the success path (undefined return value). On errors every retry leaked a PCB. | Return value added, PCBs are closed on errors. |
-| `LogicAnalyzer_WiFi.c` | `sendData` called `tcp_write` with `NULL` if the client disconnected while waiting for send buffers. | Aborts when no client is connected. |
-| `LogicAnalyzer_WiFi.c` | `sleep_ms(100)` with interrupts disabled during the battery measurement. | `busy_wait_ms(100)`. |
+| `PiPiLogicAnalyzer_Capture.c` | Blast mode: the buffer end was computed as `lastPostSize` instead of `lastPostSize - 1`. The first sample was missing and a zeroed one was appended (with a full buffer sample 0 came last). | Correct buffer end. |
+| `PiPiLogicAnalyzer_Capture.c` | The NMI and SysTick handlers of the burst measurement were only restored for `timestampIndex != 0`. After an abort before the first timestamp, the next measurement panicked in `exception_set_exclusive_handler`. | Separate flag `lastBurstMeasure`; the previous SysTick state is restored. |
+| `PiPiLogicAnalyzer_Capture.c` | A burst measurement without loops loaded the measuring PIO program but installed no NMI handler. The `irq wait 1` blocked the capture forever. | Measuring only with `loopCount > 0`; the program is selected accordingly. |
+| `PiPiLogicAnalyzer_Capture.c` | `GetBuffer` computed with `lastTail = 0xFFFFFFFF` when `find_capture_tail` could not determine the DMA position and then wrote far behind the buffer. | The buffer end is limited to the valid range. |
+| `PiPiLogicAnalyzer_Capture.c` | Missing parameter checks: unknown capture mode (undefined buffer size), channel numbers outside the pin map (reading outside the array, arbitrary GPIOs), 0 post-trigger samples (`postLength - 1` gave an endless capture), frequency 0 (division by 0) or too low for the PIO divider, 32 bit overflow of `pre + post × (loops + 1)`. | All values are checked before starting. |
+| `PiPiLogicAnalyzer_Capture.c` | Pattern trigger: bits above the pattern length in the trigger value prevented any trigger. | The trigger value is masked to the pattern length. |
+| `PiPiLogicAnalyzer_Capture.c` | `StopCapture` could finish a capture a second time if it ended right before interrupts were disabled. `captureFinished` was not `volatile`. | Checked again with interrupts disabled; `volatile`. Blast captures no longer touch the unused second DMA channel. |
+| `PiPiLogicAnalyzer_Capture.c` | After a simple capture the PIO program of the other edge was removed, never the measuring one. | The program actually loaded is removed. |
+| `PiPiLogicAnalyzer_Capture.c` | `1 << pin` with pin 31 is undefined in C. | `1u << pin`. |
+| `PiPiLogicAnalyzer_Capture.h` | `RP2350.h` was only included for `BUILD_PICO_2`, not for the Pico 2 W. | Included through `CORE_TYPE_2`. |
+| `PiPiLogicAnalyzer_WiFi.c` | `tryStartServer` had no `return true` on the success path (undefined return value). On errors every retry leaked a PCB. | Return value added, PCBs are closed on errors. |
+| `PiPiLogicAnalyzer_WiFi.c` | `sendData` called `tcp_write` with `NULL` if the client disconnected while waiting for send buffers. | Aborts when no client is connected. |
+| `PiPiLogicAnalyzer_WiFi.c` | `sleep_ms(100)` with interrupts disabled during the battery measurement. | `busy_wait_ms(100)`. |
 | `Event_Machine.c` | `event_has_events` compared the addresses of two structure fields and always returned `true`. | `!queue_is_empty(...)`. |
 | `PiPiLogicAnalyzer_Build_Settings.cmake` | Turbo mode (overclocking and overvoltage) was the default; the board list was outdated. | Turbo off, complete list. |
 | `publish.ps1` | Turbo builds were attempted for the Pico 2 W although CMake refuses them. | They are skipped. |
+| `PiPiLogicAnalyzer_WiFi.c` | Received data was never acknowledged with `tcp_recved`: every request shrank the TCP receive window until the connection hung. | Acknowledged as it is handed to the capture core. |
+| `PiPiLogicAnalyzer_WiFi.c` | The error callback closed the PCB that lwIP had already freed; a remote close returned `ERR_ABRT` without aborting the PCB. | Only the reference is dropped; `ERR_ABRT` only after `tcp_abort`. |
+| `PiPiLogicAnalyzer_WiFi.c` | Received data was pushed into the event queue with a blocking call. With both queues full the two cores could block each other; a client that stopped reading stalled both cores. | The data waits in lwIP (closed window) until the queue has room; a client is dropped after 5 s without progress. Responses are sent with `tcp_output`. |
+| `PiPiLogicAnalyzer_Capture.c` | Channels whose GPIO bit did not fit into the samples of the mode read as 0 (Interceptor in 8 and 16 channel mode). | Rejected by the firmware; the application chooses the mode by the GPIO bits. |
+| `PiPiLogicAnalyzer.c` | Unknown trigger types started an edge capture. | `CAPTURE_ERROR`. |
+| `PiPiLogicAnalyzer_Capture.c` | Undefined shifts: `systickLoops << 24` (signed) and the blast mask for the external trigger (negative shift). A blast capture kept the trigger input inverted. | Unsigned shift, mask only for sampled GPIOs, GPIOs released. |
+| `CMakeLists.txt` | A changed `BOARD_TYPE` was ignored in an existing build directory (cached `PICO_BOARD`). | `PICO_BOARD` is forced. |
 
 ## Known, unfixed issues
 
-* **Interceptor in 8 and 16 channel mode:** the channels do not start at the first input GPIO
-  there (channel 0 = GPIO 6). Channels whose bit position `GPIO − INPUT_PIN_BASE` exceeds the
-  width of the mode chosen by the host arrive as 0, e.g. channels 4–7 in 8 channel mode. A fix
-  needs a wider internal capture and copying within the ring buffer; it cannot be tested without
-  the hardware. Workaround: also capture a channel from 16 on, then the host uses 32 bit mode.
-* **WiFi:** both event queues (depth 8) block when adding. If both are full at the same time,
-  the two cores could theoretically block each other.
 * `find_capture_tail` evaluates `transfer_count` of the DMA channel the way the author marked
   with "TODO: CHECK". This project only prevents an invalid value from corrupting memory.
 

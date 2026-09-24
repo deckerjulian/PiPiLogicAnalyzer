@@ -10,7 +10,7 @@ venv/
 .mypy_cache/
 firmware/*/publish/
 firmware/uf2/
-firmware/LogicAnalyzer_V2/LogicAnalyzer_Build_Settings.cmake.orig
+firmware/*/*_Build_Settings.cmake.orig
 .DS_Store
 # Personal editor settings (the firmware keeps the VS Code setup of the original project)
 /.vscode/

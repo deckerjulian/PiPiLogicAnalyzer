@@ -2,7 +2,7 @@
  * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
  * Copyright (C) 2026 Julian Decker
  *
- * Part of LogicAnalyzer 7, based on his LogicAnalyzer firmware;
+ * Part of PiPiLogicAnalyzer, based on his LogicAnalyzer firmware;
  * the changes are described in firmware/README.md.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -50,7 +50,6 @@
         bool skipWiFiData = false;
         bool dataFromWiFi = false;
         EVENT_FROM_WIFI wifiEventBuffer;
-        WIFI_SETTINGS_REQUEST* wReq;
 
         #define MULTICORE_LOCKOUT_TIMEOUT (uint64_t)10 * 365 * 24 * 60 * 60 * 1000 * 1000
 
@@ -410,7 +409,7 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                                 started = StartCaptureEdgeOut(req->frequency, req->preSamples, req->postSamples, (uint8_t*)&req->channels, req->channelCount, req->trigger, req->inverted, req->captureMode);
                             else if(req->triggerType == 3)
                                 started = StartCaptureBlast(req->frequency, req->postSamples, (uint8_t*)&req->channels, req->channelCount, req->trigger, req->inverted, req->captureMode);
-                            else if(!simulated) //Start simple trigger capture
+                            else if(req->triggerType == 0) //Start simple trigger capture (unknown types are an error)
                                 started = StartCaptureSimple(req->frequency, req->preSamples, req->postSamples, req->loopCount, req->measure, (uint8_t*)&req->channels, req->channelCount, req->trigger, req->inverted, req->captureMode);
                         
                         #else
@@ -422,7 +421,7 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                             }
                             else if(req->triggerType == 3)
                                 started = StartCaptureBlast(req->frequency, req->postSamples, (uint8_t*)&req->channels, req->channelCount, req->trigger, req->inverted, req->captureMode);
-                            else if(!simulated) //Start simple trigger capture
+                            else if(req->triggerType == 0) //Start simple trigger capture (unknown types are an error)
                                 started = StartCaptureSimple(req->frequency, req->preSamples, req->postSamples, req->loopCount, req->measure, (uint8_t*)&req->channels, req->channelCount, req->trigger, req->inverted, req->captureMode);
                         
                         #endif
@@ -449,7 +448,7 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
 
                         WIFI_SETTINGS_REQUEST wifiRequest;
                         memcpy(&wifiRequest, &messageBuffer[3], sizeof(WIFI_SETTINGS_REQUEST));
-                        wReq = &wifiRequest;
+                        WIFI_SETTINGS_REQUEST* wReq = &wifiRequest;
                         WIFI_SETTINGS settings;
                         settings.checksum = 0;
                         memcpy(settings.apName, wReq->apName, 33);
@@ -626,7 +625,12 @@ void sendPowerStatus(POWER_STATUS* status)
 {
     char buffer[32];
     memset(buffer, 0, 32);
-    int len = sprintf(buffer, "%.2f", status->vsysVoltage);
+    //Room for "_<vbus>\n" and the terminating zero, even for a nonsense voltage
+    int len = snprintf(buffer, sizeof(buffer) - 3, "%.2f", status->vsysVoltage);
+    if(len < 0)
+        len = 0;
+    else if(len > (int)sizeof(buffer) - 4)
+        len = sizeof(buffer) - 4;
     buffer[len++] = '_';
     buffer[len++] = status->vbusConnected ? '1' : '0';
     buffer[len] = '\n';
@@ -674,8 +678,6 @@ void wifiEvent(void* event)
 /// @return True if anything is received, false if not
 bool processWiFiInput(bool skipProcessing)
 {
-    bool res = event_has_events(&wifiToFrontend);
-
     if(skipProcessing)
     {
         skipWiFiData = true;
