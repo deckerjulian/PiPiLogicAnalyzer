@@ -111,6 +111,8 @@ def session_to_dict(session: CaptureSession, include_samples: bool = True) -> di
         "TriggerInverted": bool(session.trigger_inverted),
         "TriggerBitCount": int(session.trigger_bit_count),
         "TriggerPattern": int(session.trigger_pattern),
+        "AcquisitionMode": session.acquisition_mode,
+        "ThresholdVoltage": session.threshold_voltage,
     }
 
 
@@ -126,6 +128,10 @@ def session_from_dict(data: dict) -> CaptureSession:
         trigger_inverted=bool(data.get("TriggerInverted", False)),
         trigger_bit_count=int(data.get("TriggerBitCount", 0)),
         trigger_pattern=int(data.get("TriggerPattern", 0)),
+        acquisition_mode=str(data.get("AcquisitionMode") or "buffer"),
+        threshold_voltage=(
+            float(data["ThresholdVoltage"]) if data.get("ThresholdVoltage") is not None else None
+        ),
     )
     session.capture_channels = [
         channel_from_dict(item) for item in (data.get("CaptureChannels") or [])

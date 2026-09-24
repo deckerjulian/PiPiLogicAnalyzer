@@ -162,7 +162,7 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
             [bit for device, group in zip(self._devices, split) for bit in device.sample_bits(group)]
         )
 
-    def get_limits(self, channels: Sequence[int]) -> CaptureLimits:
+    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
         split = self._split_channels_per_device(channels)
         limits = [device.get_limits(group) for device, group in zip(self._devices, split)]
         return CaptureLimits(
