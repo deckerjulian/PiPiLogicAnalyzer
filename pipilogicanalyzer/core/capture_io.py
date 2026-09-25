@@ -113,6 +113,7 @@ def session_to_dict(session: CaptureSession, include_samples: bool = True) -> di
         "TriggerPattern": int(session.trigger_pattern),
         "AcquisitionMode": session.acquisition_mode,
         "ThresholdVoltage": session.threshold_voltage,
+        "Continuous": session.continuous,
     }
 
 
@@ -132,6 +133,7 @@ def session_from_dict(data: dict) -> CaptureSession:
         threshold_voltage=(
             float(data["ThresholdVoltage"]) if data.get("ThresholdVoltage") is not None else None
         ),
+        continuous=bool(data.get("Continuous", False)),
     )
     session.capture_channels = [
         channel_from_dict(item) for item in (data.get("CaptureChannels") or [])

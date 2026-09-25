@@ -238,3 +238,13 @@ def test_vcd_times_do_not_drift_at_fractional_periods(tmp_path):
 
     sample_count = min(len(channel.samples) for channel in session.capture_channels)
     assert int(last[1:]) == round(sample_count * 1e9 / 24_000_000)
+
+
+def test_an_endless_stream_setting_is_saved():
+    from pipilogicanalyzer.core.capture_io import session_from_dict, session_to_dict
+    from pipilogicanalyzer.driver.models import CaptureSession
+
+    session = CaptureSession(frequency=1_000_000, post_trigger_samples=1000, acquisition_mode="stream",
+                             continuous=True)
+    assert session_from_dict(session_to_dict(session, include_samples=False)).continuous
+    assert not session_from_dict({"Frequency": 1}).continuous

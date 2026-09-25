@@ -145,6 +145,9 @@ class CaptureSession:
     acquisition_mode: str = "buffer"
     #: Input threshold in volts for devices with an adjustable threshold, ``None``: device default
     threshold_voltage: Optional[float] = None
+    #: Stream until stopped, keeping only the latest ``pre + post`` samples (devices with
+    #: ``CAPABILITY_CONTINUOUS_STREAM``)
+    continuous: bool = False
 
     @property
     def total_samples(self) -> int:

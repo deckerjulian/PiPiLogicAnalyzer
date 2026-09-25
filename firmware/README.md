@@ -108,11 +108,12 @@ functions the firmware reports.
 
 | Request | Response |
 | --- | --- |
-| Command 8 (capabilities) | `CAPS:SELFTEST,SIMULATION,DEVICEINFO,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23` (the last two on boards with pattern trigger); the original firmware answers `ERR_UNKNOWN_MSG` |
+| Command 8 (capabilities) | `CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23` (the last two on boards with pattern trigger; `STREAM=<bytes per second>` is the rate a stream capture can send); the original firmware answers `ERR_UNKNOWN_MSG` |
 | Command 7 (self-test) | one line `SELFTEST:<test>:<status>:<details>` per test, finally `SELFTEST_END` |
 | Command 9 (device information) | lines `INFO:<key>:<value>`, finally `INFO_END`. Keys: `BOARD`, `FIRMWARE`, `BUILD_DATE`, `SDK`, `CHIP`, `CHIP_REVISION` and `ROM_VERSION` (RP2040 only), `UNIQUE_ID`, `FLASH_SIZE`, `CLOCK`, `TURBO`, `WIFI`, `PATTERN_TRIGGER` |
 | Capture request with `triggerType = 4` | simulated capture, pattern in `triggerValue`, `loopCount` must be 0 |
 | Capture request with `triggerType = 5` | edge trigger on channel `trigger` (falling edge with `inverted`) that also drives the trigger output, like the pattern triggers: the board that triggers a multi device set |
+| Capture request with `triggerType = 6` | stream capture over USB, see [Stream capture](#stream-capture); `triggerValue = 1` streams a test counter instead of the inputs |
 
 ### Triggers
 
@@ -147,6 +148,28 @@ The capture tests only compare channels that follow the pull resistors.
 * Shorts between two channels cannot be detected reliably with equally strong pull resistors.
 * Boards with input buffers or level shifters report their channels as `STUCK_*`, because the
   buffer drives the input.
+
+### Stream capture
+
+The capture runs without end and the samples are sent while they arrive, until the host sends
+any byte. The two DMA channels fill the whole capture buffer alternately and count their passes;
+the main loop sends what they wrote since the last chunk. Only over USB (not WiFi), without
+trigger (it starts at once), without pre-trigger samples.
+
+* **Answer:** `STREAM_STARTED:<bits>`, the bit of every requested channel in the samples, e.g.
+  `0,1,2,24`. The samples are the raw input words of the capture mode (1, 2 or 4 bytes, bit n =
+  GPIO `INPUT_PIN_BASE + n`): sorting the bits of every sample, as after a normal capture, would
+  take longer than the transfer leaves.
+* **Data:** chunks of a 32 bit little-endian byte count and that many sample bytes (at most
+  4096, sent at the latest after 20 ms).
+* **End:** a count of `0` after a stop, or `0xFFFFFFFF` when USB was too slow and the DMA overtook
+  the samples not sent yet; the chunk before it may then hold overwritten samples and is dropped
+  by the application.
+* **Rate:** USB full speed carries about 890 kB/s of CDC data (measured on a Pico 2); the firmware
+  reports 800 kB/s, which is 800 kHz with 8 channels, 400 kHz with 16 and 200 kHz with 24.
+* **Test counter** (`triggerValue = 1`): a PIO program counts down by one per sample instead of
+  reading the pins, so the transfer can be checked sample by sample; the application's self-test
+  streams it for half a second (`STREAM` result).
 
 ### Simulated capture
 

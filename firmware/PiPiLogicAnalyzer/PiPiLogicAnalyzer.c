@@ -104,6 +104,18 @@ uint16_t bufferPos = 0;
 //Capture status
 bool capturing = false;
 
+//Stream capture (trigger type 6, USB only): the samples are sent while they are captured, in
+//chunks of a 32 bit byte count and the data, until the host sends any byte. The end is a count
+//of STREAM_END_STOPPED, or STREAM_END_OVERFLOW when USB was too slow (the chunk before may
+//hold overwritten samples then).
+#define STREAM_CHUNK_BYTES 4096
+#define STREAM_FLUSH_US 20000
+#define STREAM_END_STOPPED 0u
+#define STREAM_END_OVERFLOW 0xFFFFFFFFu
+bool streaming = false;
+uint64_t streamSent;        //Samples sent
+uint64_t streamLastSend;    //time_us_64 of the last chunk
+
 bool blink = false;
 uint32_t blinkCount = 0;
 
@@ -396,6 +408,27 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                         //The pattern is transmitted in triggerValue.
                         bool simulated = req->triggerType == 4;
 
+                        if(req->triggerType == 6) //Stream capture, answered with the bit of every channel
+                        {
+                            //triggerValue 1: a test counter instead of the inputs (checks the transfer)
+                            if(fromWiFi || !StartCaptureStream(req->frequency, (uint8_t*)&req->channels, req->channelCount, req->captureMode, req->triggerValue == 1))
+                            {
+                                sendResponse("CAPTURE_ERROR\n", fromWiFi);
+                                break;
+                            }
+
+                            char bitsLine[128] = "STREAM_STARTED:";
+                            size_t bitsLength = strlen(bitsLine);
+                            GetStreamSampleBits(bitsLine + bitsLength, sizeof(bitsLine) - bitsLength - 1);
+                            strcat(bitsLine, "\n");
+                            sendResponse(bitsLine, fromWiFi);
+
+                            streamSent = 0;
+                            streamLastSend = time_us_64();
+                            streaming = true;
+                            break;
+                        }
+
                         if(simulated && req->loopCount == 0)
                             started = StartCaptureSimulation(req->frequency, req->preSamples, req->postSamples, (uint8_t*)&req->channels, req->channelCount, (uint8_t)req->triggerValue, req->captureMode);
 
@@ -540,7 +573,7 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                         #ifdef SUPPORTS_COMPLEX_TRIGGER
 
                             //EDGE_TRIGGER_OUT: trigger type 5, PATTERN_GROUPS: channels a pattern trigger can cover
-                            char capsLine[128] = "CAPS:SELFTEST,SIMULATION,DEVICEINFO,EDGE_TRIGGER_OUT,PATTERN_GROUPS=";
+                            char capsLine[128] = "CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,PATTERN_GROUPS=";
                             size_t capsLength = strlen(capsLine);
                             GetPatternTriggerGroups(capsLine + capsLength, sizeof(capsLine) - capsLength - 1);
                             strcat(capsLine, "\n");
@@ -548,7 +581,7 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
 
                         #else
 
-                            sendResponse("CAPS:SELFTEST,SIMULATION,DEVICEINFO\n", fromWiFi);
+                            sendResponse("CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000\n", fromWiFi);
 
                         #endif
                         break;
@@ -721,6 +754,75 @@ bool processCancel()
     #endif
 }
 
+/// @brief Ends a stream capture with the end marker
+static void end_stream(uint32_t marker)
+{
+    StopCapture();
+    cdc_transfer((unsigned char*)&marker, 4);
+    streaming = false;
+    LED_ON();
+}
+
+/// @brief Sends the samples a stream captured since the last call, or ends it
+static void stream_step()
+{
+    uint32_t bufferSamples;
+    uint8_t bytesPerSample;
+    uint8_t* buffer = GetStreamBuffer(&bufferSamples, &bytesPerSample);
+
+    if(!tud_cdc_connected())
+    {
+        StopCapture(); //The host is gone
+        streaming = false;
+        LED_ON();
+        return;
+    }
+
+    if(processUSBInput(true)) //Any byte of the host stops the stream
+    {
+        end_stream(STREAM_END_STOPPED);
+        return;
+    }
+
+    uint64_t written = StreamWrittenSamples();
+    if(written < streamSent) //Read during a DMA hand-over (see StreamWrittenSamples)
+        return;
+
+    uint64_t available = written - streamSent;
+    if(available >= bufferSamples) //The DMA overtook the samples not sent yet
+    {
+        end_stream(STREAM_END_OVERFLOW);
+        return;
+    }
+
+    uint32_t chunkSamples = STREAM_CHUNK_BYTES / bytesPerSample;
+    uint64_t now = time_us_64();
+    if(available == 0 || (available < chunkSamples && now - streamLastSend < STREAM_FLUSH_US))
+    {
+        tud_task();
+        return;
+    }
+
+    uint32_t start = (uint32_t)(streamSent % bufferSamples);
+    uint32_t count = available < chunkSamples ? (uint32_t)available : chunkSamples;
+    if(count > bufferSamples - start)
+        count = bufferSamples - start;
+
+    uint32_t bytes = count * bytesPerSample;
+    cdc_transfer((unsigned char*)&bytes, 4);
+    cdc_transfer(buffer + start * bytesPerSample, bytes);
+
+    //The samples must still have been in the buffer when the transfer read them
+    if(StreamWrittenSamples() - streamSent >= bufferSamples)
+    {
+        end_stream(STREAM_END_OVERFLOW);
+        return;
+    }
+
+    streamSent += count;
+    streamLastSend = now;
+}
+
 /// @brief Main app loop
 /// @return Exit code
 int main()
@@ -779,8 +881,12 @@ int main()
 
     while(1)
     {
+        if(streaming)
+        {
+            stream_step();
+        }
         //Are we capturing?
-        if(capturing)
+        else if(capturing)
         {
             //Is the PIO units still working?
             if(!IsCapturing())

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...driver.base import AnalyzerDriverBase, SelfTestResult, UnsupportedFeatureError
+from ...driver.base import AnalyzerDriverBase, AnalyzerDriverType, SelfTestResult, UnsupportedFeatureError
 from ..icons import set_icon
 from ..theme import JITTER_HIGH, JITTER_LOW, JITTER_MEDIUM, set_role, set_variant
 from .common import Banner, button_box, dialog_layout, heading, hint
@@ -36,7 +36,20 @@ STATUS_HINTS = {
     "STUCK_HIGH": "Reads high with the pull-down: signal connected, external buffer or short to 3.3 V",
     "STUCK_LOW": "Reads low with the pull-up: signal connected, external buffer or short to GND",
     "INVERTED": "Follows the pull resistors inverted",
+    "ACTIVE": "Changes while no probe should be connected",
 }
+
+DESCRIPTION = (
+    "The test checks the capture buffer, the trigger link and every channel input "
+    "using only the internal pull resistors, and records the pull pattern through the "
+    "normal and the blast capture path. Boards with input buffers or level shifters "
+    "report their channels as driven; that is expected there."
+)
+DSLOGIC_DESCRIPTION = (
+    "The test captures the test counter of the FPGA to check the capture memory, the USB "
+    "transfer in buffer and stream mode and the triggers bit by bit, and checks that every "
+    "input reads low."
+)
 
 
 class SelfTestWorker(QThread):
@@ -65,15 +78,8 @@ class BoardTestDialog(QDialog):
         layout = dialog_layout(self)
 
         layout.addWidget(heading(driver.device_version or "Device", self))
-        layout.addWidget(
-            hint(
-                "The test checks the capture buffer, the trigger link and every channel input "
-                "using only the internal pull resistors, and records the pull pattern through the "
-                "normal and the blast capture path. Boards with input buffers or level shifters "
-                "report their channels as driven; that is expected there.",
-                self,
-            )
-        )
+        dslogic = driver.driver_type == AnalyzerDriverType.DSLOGIC
+        layout.addWidget(hint(DSLOGIC_DESCRIPTION if dslogic else DESCRIPTION, self))
         banner = Banner("warning", self)
         banner.set_message("<b>Disconnect all probes and signals</b> before running the test.")
         layout.addWidget(banner)

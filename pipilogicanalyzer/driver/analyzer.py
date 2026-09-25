@@ -34,12 +34,21 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 from typing import Optional, Sequence
 
 import numpy as np
 
 from . import protocol
 from .base import (
+    ACQUISITION_BUFFER,
+    ACQUISITION_STREAM,
+    CAPABILITY_CONTINUOUS_STREAM,
+    CAPABILITY_STREAM,
+    CAPABILITY_STREAM_IMMEDIATE_ONLY,
+    MAX_SAMPLE_BYTES,
+    CaptureLimits,
+    CaptureProgressArgs,
     COMPLEX_TRIGGER_DELAY,
     DEFAULT_PATTERN_GROUPS,
     EDGE_OUT_TRIGGER_DELAY,
@@ -66,8 +75,9 @@ from .base import (
     pattern_max_bits,
     trigger_delay_samples,
 )
+from ..core.sample_store import RingStore, SampleStore
 from ..core.simulation import SimulationPattern
-from .models import BurstInfo, CaptureSession, TriggerType
+from .models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType
 from .transport import NetworkTransport, SerialTransport, Transport, TransportError
 
 _ADDRESS_PORT_RE = re.compile(r"^(\d+\.\d+\.\d+\.\d+):(\d+)$")
@@ -75,6 +85,20 @@ _CHANNELS_RE = re.compile(r"^CHANNELS:(\d+)$")
 _BUFFER_RE = re.compile(r"^BUFFER:(\d+)$")
 _FREQ_RE = re.compile(r"^FREQ:(\d+)$")
 _BLAST_RE = re.compile(r"^BLASTFREQ:(\d+)$")
+_STREAM_STARTED_RE = re.compile(r"^STREAM_STARTED:([\d,]+)$")
+
+#: Trigger type of a stream capture request: raw input words sent while capturing, in chunks of
+#: a 32 bit byte count and the data, until any byte from the host stops it
+STREAM_TRIGGER_TYPE = 6
+STREAM_END_STOPPED = 0
+#: USB was too slow: the chunk before the marker may hold overwritten samples
+STREAM_END_OVERFLOW = 0xFFFFFFFF
+#: Bytes per second of firmware that announces ``STREAM`` without a value
+DEFAULT_STREAM_BANDWIDTH = 800_000
+STREAM_STALL_TIMEOUT = 3.0
+STREAM_STOP_TIMEOUT = 3.0
+#: Seconds between two progress events of a stream (live display)
+STREAM_PROGRESS_INTERVAL = 0.1
 
 #: Systick period used when the device reports no blast frequency.  The systick
 #: runs at the CPU clock, which is the blast frequency (200MHz -> 5ns on RP2040).
@@ -115,6 +139,7 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         self._is_network = False
         self._request_layout = protocol.LAYOUT_V6_0
         self._capabilities: Optional[frozenset[str]] = None
+        self._streaming = False
         self.connection_string = connection_string
 
         match = _ADDRESS_PORT_RE.match(connection_string)
@@ -221,13 +246,19 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
 
     # ---------------------------------------------------------------- capture
     def start_capture(
-        self, session: CaptureSession, completed_handler: Optional[CaptureCompletedHandler] = None
+        self,
+        session: CaptureSession,
+        completed_handler: Optional[CaptureCompletedHandler] = None,
+        internal_test: bool = False,
     ) -> CaptureError:
+        """``internal_test``: a stream of the firmware's test counter instead of the inputs."""
         with self._lock:
             if self._capturing:
                 return CaptureError.BUSY
             if not session.capture_channels:
                 return CaptureError.BAD_PARAMS
+            if session.acquisition_mode == ACQUISITION_STREAM:
+                return self._start_stream(session, completed_handler, internal_test)
 
             if (
                 session.trigger_type == TriggerType.SIMULATION
@@ -308,6 +339,164 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 CaptureCompletedArgs(success=False, session=session, error=str(error)),
                 completed_handler,
             )
+
+    # ----------------------------------------------------------------- stream
+    @property
+    def stream_bandwidth(self) -> int:
+        """Bytes per second the firmware streams over USB; 0 without stream captures."""
+        if self._is_network:
+            return 0
+        for item in self.capabilities():
+            if item == CAPABILITY_STREAM:
+                return DEFAULT_STREAM_BANDWIDTH
+            if item.startswith(CAPABILITY_STREAM + "="):
+                try:
+                    return max(int(item[len(CAPABILITY_STREAM) + 1:]), 0)
+                except ValueError:
+                    return DEFAULT_STREAM_BANDWIDTH
+        return 0
+
+    def acquisition_modes(self) -> tuple[str, ...]:
+        return (ACQUISITION_BUFFER, ACQUISITION_STREAM) if self.stream_bandwidth else ()
+
+    def max_frequency_for(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> int:
+        if acquisition_mode != ACQUISITION_STREAM:
+            return self.max_frequency
+        mode = self.get_capture_mode(channels or [0])
+        return min(self.stream_bandwidth // mode.bytes_per_sample, self.max_frequency)
+
+    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
+        if acquisition_mode != ACQUISITION_STREAM:
+            return super().get_limits(channels, acquisition_mode)
+        total = MAX_SAMPLE_BYTES // max(len(list(channels)), 1)
+        return CaptureLimits(min_pre_samples=0, max_pre_samples=0, min_post_samples=1, max_post_samples=total)
+
+    def _start_stream(
+        self,
+        session: CaptureSession,
+        completed_handler: Optional[CaptureCompletedHandler],
+        internal_test: bool = False,
+    ) -> CaptureError:
+        channels = session.channel_numbers
+        limits = self.get_limits(channels, ACQUISITION_STREAM)
+        if not (
+            self.stream_bandwidth
+            and session.trigger_type == TriggerType.IMMEDIATE
+            and min(channels) >= 0
+            and max(channels) < self.channel_count
+            and session.loop_count == 0
+            and 1 <= session.post_trigger_samples <= limits.max_post_samples
+            and 1 <= session.frequency <= self.max_frequency_for(channels, ACQUISITION_STREAM)
+        ):
+            log.debug("Stream rejected: invalid settings")
+            return CaptureError.BAD_PARAMS
+
+        mode = self.get_capture_mode(channels)
+        request = protocol.CaptureRequest(
+            trigger_type=STREAM_TRIGGER_TYPE,
+            trigger_value=1 if internal_test else 0,
+            channels=channels,
+            channel_count=len(channels),
+            frequency=session.frequency,
+            capture_mode=int(mode),
+        )
+        try:
+            self._transport.reset_input()
+            self._transport.write(
+                protocol.command_packet(protocol.CMD_START_CAPTURE, request.pack(self._request_layout))
+            )
+            result = self._transport.read_line(timeout=10.0)
+        except (TransportError, OSError) as error:
+            log.debug("Error starting the stream: %s", error)
+            return CaptureError.HARDWARE_ERROR
+
+        match = _STREAM_STARTED_RE.match(result or "")
+        bits = [int(bit) for bit in match.group(1).split(",")] if match else []
+        if len(bits) != len(channels):
+            log.debug("Error starting the stream, device response: %r", result)
+            return CaptureError.HARDWARE_ERROR
+        log.debug("Stream started (%d Hz, mode %s, bits %s)", session.frequency, mode.name, bits)
+
+        self._capturing = self._streaming = True
+        self._abort.clear()
+        self._capture_thread = threading.Thread(
+            target=self._read_stream,
+            args=(session, mode, bits, completed_handler),
+            name="pipilogicanalyzer-stream",
+            daemon=True,
+        )
+        self._capture_thread.start()
+        return CaptureError.NONE
+
+    def _read_stream(
+        self,
+        session: CaptureSession,
+        mode: CaptureMode,
+        bits: list[int],
+        completed_handler: Optional[CaptureCompletedHandler],
+    ) -> None:
+        numbers = session.channel_numbers
+        dtype = {1: "<u1", 2: "<u2", 4: "<u4"}[mode.bytes_per_sample]
+        wanted = session.post_trigger_samples
+        store: SampleStore = RingStore(numbers, wanted) if session.continuous else SampleStore(numbers, wanted)
+
+        def append(data: bytes) -> None:
+            raw = np.frombuffer(data, dtype=dtype)
+            store.append({number: ((raw >> bit) & 1).astype(np.uint8) for number, bit in zip(numbers, bits)})
+
+        # A chunk is only used once the next header shows the stream did not overflow meanwhile.
+        held: Optional[bytes] = None
+        stop_sent = False
+        overflow = False
+        reported = time.monotonic()
+        try:
+            while True:
+                size = int.from_bytes(self._transport.read_exactly(4, timeout=STREAM_STALL_TIMEOUT), "little")
+                if size in (STREAM_END_STOPPED, STREAM_END_OVERFLOW):
+                    overflow = size == STREAM_END_OVERFLOW
+                    break
+                data = self._transport.read_exactly(size, timeout=STREAM_STALL_TIMEOUT)
+                if held is not None:
+                    append(held)
+                held = data
+                if not session.continuous and not stop_sent and store.total + len(held) // mode.bytes_per_sample >= wanted:
+                    self._transport.write(bytes([protocol.CMD_ABORT_CAPTURE]))
+                    stop_sent = True
+                if store.total and time.monotonic() - reported >= STREAM_PROGRESS_INTERVAL:
+                    reported = time.monotonic()
+                    views, first = store.window()
+                    self._raise_capture_progress(CaptureProgressArgs(session, views, first))
+            if held is not None and not overflow:
+                append(held)
+        except Exception as error:  # noqa: BLE001 - reported to the UI
+            self._capturing = self._streaming = False
+            if self._abort.is_set():
+                return
+            log.debug("Error reading the stream: %s", error)
+            self._raise_capture_completed(
+                CaptureCompletedArgs(success=False, session=session, error=str(error)), completed_handler
+            )
+            return
+
+        samples, _first = store.result()
+        count = min((len(values) for values in samples.values()), default=0)
+        for channel in session.capture_channels:
+            channel.samples = samples[channel.channel_number][:count]
+        session.pre_trigger_samples = 0
+        session.post_trigger_samples = count
+        session.loop_count = 0
+        session.bursts = None
+        self._capturing = self._streaming = False
+        log.debug("Stream complete: %d samples%s", count, ", overflow" if overflow else "")
+        error = None
+        if overflow:
+            error = (
+                "The USB connection could not keep up with the stream, so it stopped early. "
+                "Lower the rate or capture fewer channels."
+            )
+        self._raise_capture_completed(
+            CaptureCompletedArgs(success=count > 0, session=session, error=error), completed_handler
+        )
 
     def _read_timestamps(self) -> np.ndarray:
         stamp_length = self._transport.read_exactly(1)[0]
@@ -511,7 +700,20 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         if not self._capturing:
             return False
 
-        self._capturing = False
+        if self._streaming:
+            # The firmware ends the stream with its end marker; the samples so far are kept.
+            try:
+                self._transport.write(bytes([protocol.CMD_ABORT_CAPTURE]))
+            except Exception:  # pragma: no cover - device may already be gone
+                pass
+            thread = self._capture_thread
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(STREAM_STOP_TIMEOUT)
+                if not thread.is_alive():
+                    return True
+            log.debug("The stream did not end, reconnecting")
+
+        self._capturing = self._streaming = False
         self._abort.set()
 
         try:
@@ -550,9 +752,12 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 return frozenset()
 
         if line.startswith("CAPS:"):
-            self._capabilities = frozenset(
-                item.strip() for item in line[len("CAPS:"):].split(",") if item.strip()
-            )
+            items = {item.strip() for item in line[len("CAPS:"):].split(",") if item.strip()}
+            if not self._is_network and any(
+                item == CAPABILITY_STREAM or item.startswith(CAPABILITY_STREAM + "=") for item in items
+            ):
+                items |= {CAPABILITY_CONTINUOUS_STREAM, CAPABILITY_STREAM_IMMEDIATE_ONLY}
+            self._capabilities = frozenset(items)
         else:
             self._capabilities = frozenset()
         log.debug("Device capabilities: %s", sorted(self._capabilities))
@@ -609,7 +814,36 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 result = parse_self_test_line(line)
                 if result is not None:
                     results.append(result)
+        if self.stream_bandwidth:
+            results.append(self._stream_self_test())
         return results
+
+    def _stream_self_test(self, seconds: float = 0.5) -> SelfTestResult:
+        """A stream of the firmware's test counter at the highest rate of 8 channels."""
+        rate = self.max_frequency_for(range(8), ACQUISITION_STREAM)
+        session = CaptureSession(frequency=rate, pre_trigger_samples=0, post_trigger_samples=int(rate * seconds))
+        session.capture_channels = [AnalyzerChannel(channel_number=number) for number in range(8)]
+        session.acquisition_mode = ACQUISITION_STREAM
+        session.trigger_type = TriggerType.IMMEDIATE
+        done = threading.Event()
+        outcome: list[CaptureCompletedArgs] = []
+        error = self.start_capture(session, lambda args: (outcome.append(args), done.set()), internal_test=True)
+        if error != CaptureError.NONE:
+            return SelfTestResult("STREAM", "FAIL", f"The stream could not be started ({error.value})")
+        if not done.wait(seconds + 10):
+            self.stop_capture()
+            return SelfTestResult("STREAM", "FAIL", "The stream did not end")
+        result = outcome[0]
+        if not result.success or result.error:
+            return SelfTestResult("STREAM", "FAIL", result.error or "No samples arrived")
+        # The counter runs down by one per sample
+        words = sum(channel.samples.astype(np.int64) << channel.channel_number for channel in session.capture_channels)
+        wrong = int(np.count_nonzero((words[:-1] - words[1:]) & 0xFF != 1))
+        if wrong:
+            return SelfTestResult("STREAM", "FAIL", f"{wrong:,} of {len(words):,} samples wrong")
+        return SelfTestResult(
+            "STREAM", "OK", f"{len(words):,} samples at {rate / 1e3:g} kHz over USB, test pattern exact"
+        )
 
     # ------------------------------------------------------------- bootloader
     def enter_bootloader(self) -> bool:

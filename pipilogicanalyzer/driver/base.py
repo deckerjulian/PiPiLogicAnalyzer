@@ -13,9 +13,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
-from typing import Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Optional, Sequence
 
 from .models import CaptureSession, TriggerType
+
+if TYPE_CHECKING:
+    import numpy as np
 
 #: Delays (in device clock cycles) introduced by the trigger PIO programs.
 COMPLEX_TRIGGER_DELAY = 5.0
@@ -63,6 +66,15 @@ CAPABILITY_PATTERN_GROUPS = "PATTERN_GROUPS="
 CAPABILITY_IMMEDIATE_TRIGGER = "IMMEDIATE_TRIGGER"
 #: The input threshold voltage can be set (``CaptureSession.threshold_voltage``).
 CAPABILITY_THRESHOLD = "THRESHOLD"
+#: Stream captures can run until stopped (``CaptureSession.continuous``).
+CAPABILITY_CONTINUOUS_STREAM = "CONTINUOUS_STREAM"
+#: Stream captures start at once, without a trigger.
+CAPABILITY_STREAM_IMMEDIATE_ONLY = "STREAM_IMMEDIATE_ONLY"
+#: Firmware function: stream captures over USB (``STREAM=<bytes per second>``).
+CAPABILITY_STREAM = "STREAM"
+
+#: The application keeps one byte per sample and channel: a stream is limited to about 1 GiB of them.
+MAX_SAMPLE_BYTES = 1 << 30
 
 #: Acquisition modes (``CaptureSession.acquisition_mode``): into the memory of the device, or
 #: streamed over USB while capturing.
@@ -103,6 +115,10 @@ def pattern_fits(groups: Sequence[tuple[int, int]], first_channel: int, bit_coun
     )
 
 
+#: Words of self-test items that stay in capitals in their titles
+TITLE_ACRONYMS = frozenset({"RAM", "USB", "FPGA"})
+
+
 @dataclass
 class SelfTestResult:
     """One line of the board self-test (``SELFTEST:<item>:<status>:<detail>``)."""
@@ -115,7 +131,8 @@ class SelfTestResult:
     def title(self) -> str:
         if self.item.startswith("CH") and self.item[2:].isdigit():
             return f"Channel {self.item[2:]}"
-        return self.item.replace("_", " ").capitalize()
+        text = " ".join(word if word in TITLE_ACRONYMS else word.lower() for word in self.item.split("_"))
+        return text[:1].upper() + text[1:]
 
     @property
     def severity(self) -> str:
@@ -244,12 +261,34 @@ class CaptureCompletedArgs:
 CaptureCompletedHandler = Callable[[CaptureCompletedArgs], None]
 
 
+@dataclass
+class CaptureProgressArgs:
+    """The samples a streaming capture received so far (sent from the capture thread).
+
+    ``samples`` maps the channel numbers of ``session`` to views of the arrays the driver fills;
+    they stay valid, the driver only writes behind them.
+    """
+
+    session: CaptureSession
+    samples: dict[int, "np.ndarray"]
+    #: position of ``samples[...][0]`` in the stream: > 0 once an endless stream drops samples
+    first_sample: int = 0
+
+    @property
+    def sample_count(self) -> int:
+        return min((len(samples) for samples in self.samples.values()), default=0)
+
+
+CaptureProgressHandler = Callable[[CaptureProgressArgs], None]
+
+
 class AnalyzerDriverBase:
     """Base class shared by every driver implementation."""
 
     def __init__(self) -> None:
         self.tag: object = None
         self._capture_completed_handlers: list[CaptureCompletedHandler] = []
+        self._capture_progress_handlers: list[CaptureProgressHandler] = []
 
     # ----------------------------------------------------------------- events
     def add_capture_completed_handler(self, handler: CaptureCompletedHandler) -> None:
@@ -259,6 +298,19 @@ class AnalyzerDriverBase:
     def remove_capture_completed_handler(self, handler: CaptureCompletedHandler) -> None:
         if handler in self._capture_completed_handlers:
             self._capture_completed_handlers.remove(handler)
+
+    def add_capture_progress_handler(self, handler: CaptureProgressHandler) -> None:
+        """Called while a capture streams its samples (DSLogic stream mode)."""
+        if handler not in self._capture_progress_handlers:
+            self._capture_progress_handlers.append(handler)
+
+    def remove_capture_progress_handler(self, handler: CaptureProgressHandler) -> None:
+        if handler in self._capture_progress_handlers:
+            self._capture_progress_handlers.remove(handler)
+
+    def _raise_capture_progress(self, args: CaptureProgressArgs) -> None:
+        for registered in list(self._capture_progress_handlers):
+            registered(args)
 
     def _raise_capture_completed(
         self, args: CaptureCompletedArgs, handler: Optional[CaptureCompletedHandler] = None
@@ -360,6 +412,10 @@ class AnalyzerDriverBase:
         """``ACQUISITION_*`` modes the device offers; empty: the only mode is the buffer."""
         return ()
 
+    def max_frequency_for(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> int:
+        """Highest rate of ``channels`` in ``acquisition_mode`` (a stream is limited by its link)."""
+        return self.max_frequency
+
     def sample_rates(
         self, channels: Sequence[int], acquisition_mode: Optional[str] = None
     ) -> Optional[list[int]]:
@@ -406,6 +462,7 @@ class AnalyzerDriverBase:
     # ---------------------------------------------------------------- cleanup
     def dispose(self) -> None:
         self._capture_completed_handlers.clear()
+        self._capture_progress_handlers.clear()
 
     def __enter__(self) -> "AnalyzerDriverBase":
         return self

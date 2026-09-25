@@ -73,7 +73,9 @@ from ...core.profiles import (
 from ...driver.base import (
     ACQUISITION_BUFFER,
     ACQUISITION_STREAM,
+    CAPABILITY_CONTINUOUS_STREAM,
     CAPABILITY_IMMEDIATE_TRIGGER,
+    CAPABILITY_STREAM_IMMEDIATE_ONLY,
     CAPABILITY_THRESHOLD,
     MAX_MEASURED_LOOP_COUNT,
     MIN_MEASURED_POST_SAMPLES,
@@ -278,7 +280,8 @@ class CaptureDialog(QDialog):
         self.pre_samples_box.setMinimumWidth(120)
         grid.addWidget(self.pre_samples_box, 0, 5)
 
-        grid.addWidget(QLabel("Post-trigger samples:", group), 1, 4)
+        self.post_label = QLabel("Post-trigger samples:", group)
+        grid.addWidget(self.post_label, 1, 4)
         self.post_samples_box = QSpinBox(group)
         self.post_samples_box.setGroupSeparatorShown(True)
         self.post_samples_box.setRange(0, 1_000_000)
@@ -320,6 +323,15 @@ class CaptureDialog(QDialog):
         self.acquisition_label.setVisible(has_modes)
         self.acquisition_box.setVisible(has_modes)
 
+        self.continuous_box = QCheckBox("Until stopped", group)
+        self.continuous_box.setToolTip(
+            "Stream until Stop is pressed, keeping only the latest samples in memory:\n"
+            "the sample count sets how many are kept."
+        )
+        self.continuous_box.toggled.connect(lambda _checked: self._update_limits())
+        grid.addWidget(self.continuous_box, 2, 2)
+        self.continuous_box.setVisible(False)
+
         self.threshold_label = QLabel("Threshold:", group)
         grid.addWidget(self.threshold_label, 2, 4)
         self.threshold_box = QDoubleSpinBox(group)
@@ -340,6 +352,15 @@ class CaptureDialog(QDialog):
     def _acquisition_mode_default(self) -> Optional[str]:
         modes = self.driver.acquisition_modes()
         return modes[0] if modes else None
+
+    def continuous(self) -> bool:
+        """An endless stream is selected."""
+        return (
+            hasattr(self, "continuous_box")
+            and self.continuous_box.isChecked()
+            and self.acquisition_mode() == ACQUISITION_STREAM
+            and CAPABILITY_CONTINUOUS_STREAM in self.capabilities
+        )
 
     def acquisition_mode(self) -> Optional[str]:
         if not hasattr(self, "acquisition_box") or self.acquisition_box.count() == 0:
@@ -631,6 +652,10 @@ class CaptureDialog(QDialog):
         channels = self.enabled_channels() or [0]
         self.limits = self.driver.get_limits(channels, self.acquisition_mode())
         self._refresh_rates()
+        if not self.fixed_rates and not self.blast_box.isChecked():
+            # A stream is limited by its link (the Pico: USB full speed)
+            self.frequency_box.setMaximum(self.driver.max_frequency_for(channels, self.acquisition_mode()))
+        self._apply_stream_trigger()
 
         if not self.blast_box.isChecked():
             self.pre_samples_box.setRange(self.limits.min_pre_samples, self.limits.max_pre_samples)
@@ -644,6 +669,18 @@ class CaptureDialog(QDialog):
             f"Samples captured after the trigger (per burst)\n"
             f"Min: {to_thousands(self.limits.min_post_samples)}  Max: {to_thousands(self.limits.max_post_samples)}"
         )
+        if hasattr(self, "continuous_box"):
+            self.continuous_box.setVisible(
+                CAPABILITY_CONTINUOUS_STREAM in self.capabilities
+                and self.acquisition_mode() == ACQUISITION_STREAM
+            )
+            continuous = self.continuous()
+            self.post_label.setText("Keep last samples:" if continuous else "Post-trigger samples:")
+            if continuous:
+                self.post_samples_box.setToolTip(
+                    "The stream runs until stopped; this many of the latest samples are kept\n"
+                    f"Max: {to_thousands(self.limits.max_post_samples)}"
+                )
         self._update_summary()
 
     def _total_samples(self) -> int:
@@ -656,10 +693,16 @@ class CaptureDialog(QDialog):
         total = self._total_samples()
         maximum = self.limits.max_total_samples
         duration = to_small_time(total / max(self.frequency_box.value(), 1))
-        self.summary_label.setText(
-            f"{to_thousands(total)} samples in total ({duration}), "
-            f"at most {to_thousands(maximum)} with these channels"
-        )
+        if self.continuous():
+            self.summary_label.setText(
+                f"Runs until stopped, keeps the last {to_thousands(total)} samples ({duration}), "
+                f"at most {to_thousands(maximum)}"
+            )
+        else:
+            self.summary_label.setText(
+                f"{to_thousands(total)} samples in total ({duration}), "
+                f"at most {to_thousands(maximum)} with these channels"
+            )
         set_role(self.summary_label, "error" if total > maximum else "hint")
 
     def _update_jitter(self) -> None:
@@ -677,6 +720,22 @@ class CaptureDialog(QDialog):
         set_role(self.jitter_label, role)
         self.jitter_label.setToolTip(f"Actual sampling frequency: {actual:,.0f} Hz")
         self._update_summary()
+
+    def _apply_stream_trigger(self) -> None:
+        """Devices whose stream starts at once offer only "None" as its trigger."""
+        if not hasattr(self, "immediate_radio"):
+            return
+        only_immediate = (
+            self.acquisition_mode() == ACQUISITION_STREAM
+            and CAPABILITY_STREAM_IMMEDIATE_ONLY in self.capabilities
+        )
+        self.immediate_radio.setVisible(only_immediate or CAPABILITY_IMMEDIATE_TRIGGER in self.capabilities)
+        self.edge_radio.setEnabled(not only_immediate)
+        self.pattern_radio.setEnabled(not only_immediate)
+        if only_immediate:
+            self.immediate_radio.setChecked(True)
+        elif self.immediate_radio.isChecked() and self.immediate_radio.isHidden():
+            self.edge_radio.setChecked(True)
 
     def _update_trigger_mode(self) -> None:
         edge = self.edge_radio.isChecked()
@@ -719,7 +778,10 @@ class CaptureDialog(QDialog):
             self.jitter_label.setText("Jitter 0.000%")
             set_role(self.jitter_label, "chip-ok")
         else:
-            self.frequency_box.setRange(max(self.driver.min_frequency, 1), self.driver.max_frequency)
+            channels = self.enabled_channels() or [0]
+            self.frequency_box.setRange(
+                max(self.driver.min_frequency, 1), self.driver.max_frequency_for(channels, self.acquisition_mode())
+            )
             self.frequency_box.setEnabled(True)
             self.pre_samples_box.setEnabled(True)
             self.burst_box.setEnabled(True)
@@ -738,6 +800,7 @@ class CaptureDialog(QDialog):
         self.measure_box.setChecked(False)
         self.pattern_edit.clear()
         self.fast_trigger_box.setChecked(False)
+        self.continuous_box.setChecked(False)
         self.pattern_base_box.setValue(1)
         self.edge_radio.setChecked(True)
         if self.acquisition_box.count():
@@ -882,6 +945,7 @@ class CaptureDialog(QDialog):
             self.acquisition_box.setCurrentIndex(position)
         if session.threshold_voltage is not None:
             self.threshold_box.setValue(session.threshold_voltage)
+        self.continuous_box.setChecked(session.continuous)
 
         if session.trigger_type == TriggerType.BLAST and self.blast_box.isEnabled():
             self.blast_box.setChecked(True)
@@ -963,6 +1027,7 @@ class CaptureDialog(QDialog):
         session.pre_trigger_samples = self.pre_samples_box.value()
         session.post_trigger_samples = self.post_samples_box.value()
         session.acquisition_mode = self.acquisition_mode() or ACQUISITION_BUFFER
+        session.continuous = self.continuous()
         if CAPABILITY_THRESHOLD in self.capabilities:
             session.threshold_voltage = round(self.threshold_box.value(), 2)
         immediate = self.immediate_radio.isChecked()

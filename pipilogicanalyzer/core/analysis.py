@@ -45,27 +45,98 @@ class ChannelTransitions:
 
     ``starts`` holds the first sample of every run, ``values`` the level of that
     run.  Both arrays are computed once per capture and reused by every consumer.
+    A capture that is still streaming in grows with :meth:`extend`; an endless
+    stream that only keeps its latest samples moves its window with
+    :meth:`slide_to`.  Runs are stored at absolute positions (``origin`` is the
+    absolute position of sample 0), so neither costs more than the new samples.
     """
 
-    __slots__ = ("starts", "values", "sample_count", "frequency")
+    __slots__ = ("sample_count", "frequency", "origin", "_starts", "_values", "_low", "_high")
 
-    def __init__(self, samples: Optional[np.ndarray], frequency: int) -> None:
+    def __init__(self, samples: Optional[np.ndarray], frequency: int, origin: int = 0) -> None:
         self.frequency = max(int(frequency), 1)
-        if samples is None or samples.size == 0:
-            self.starts = np.zeros(0, dtype=np.int64)
-            self.values = np.zeros(0, dtype=np.uint8)
-            self.sample_count = 0
-            return
+        self.origin = origin
+        self.sample_count = 0
+        self._starts = np.zeros(0, dtype=np.int64)
+        self._values = np.zeros(0, dtype=np.uint8)
+        #: the runs of the window are ``_starts[_low:_high]`` (the first may start before it)
+        self._low = self._high = 0
+        if samples is not None and samples.size:
+            self.extend(samples, int(samples.shape[0]))
 
-        samples = np.asarray(samples, dtype=np.uint8)
-        self.sample_count = int(samples.shape[0])
-        changes = np.flatnonzero(samples[1:] != samples[:-1]) + 1
-        self.starts = np.concatenate(([0], changes)).astype(np.int64)
-        self.values = samples[self.starts]
+    # ----------------------------------------------------------------- arrays
+    @property
+    def absolute_starts(self) -> np.ndarray:
+        return self._starts[self._low : self._high]
+
+    @property
+    def starts(self) -> np.ndarray:
+        """First sample of every run (the first one clipped to 0)."""
+        starts = self.absolute_starts
+        if not self.origin and (not len(starts) or starts[0] >= 0):
+            return starts
+        starts = starts - self.origin
+        if len(starts):
+            starts[0] = max(starts[0], 0)
+        return starts
+
+    @property
+    def values(self) -> np.ndarray:
+        return self._values[self._low : self._high]
 
     def __len__(self) -> int:
-        return int(self.starts.shape[0])
+        return self._high - self._low
 
+    # ---------------------------------------------------------------- growing
+    def extend(self, samples: np.ndarray, sample_count: int) -> None:
+        """Indexes ``samples`` from :attr:`sample_count` up to ``sample_count``.
+
+        ``samples`` is the whole channel (window) so far; the work is proportional to the new
+        samples.
+        """
+        old = self.sample_count
+        if sample_count <= old:
+            return
+        if old == 0:
+            part = np.asarray(samples[:sample_count], dtype=np.uint8)
+            changes = np.flatnonzero(part[1:] != part[:-1]) + 1
+            starts = np.concatenate(([0], changes)).astype(np.int64) + self.origin
+            values = part[np.concatenate(([0], changes))]
+            self._low = self._high  # nothing of an earlier window is kept
+        else:
+            part = np.asarray(samples[old - 1 : sample_count], dtype=np.uint8)
+            changes = np.flatnonzero(part[1:] != part[:-1]) + 1
+            starts = changes.astype(np.int64) + (old - 1 + self.origin)
+            values = part[changes]
+
+        kept = len(self)
+        if self._high + len(starts) > len(self._starts):
+            capacity = max(2 * (kept + len(starts)), 1024)
+            new_starts = np.empty(capacity, dtype=np.int64)
+            new_values = np.empty(capacity, dtype=np.uint8)
+            new_starts[:kept] = self.absolute_starts
+            new_values[:kept] = self.values
+            self._starts, self._values = new_starts, new_values
+            self._low, self._high = 0, kept
+        self._starts[self._high : self._high + len(starts)] = starts
+        self._values[self._high : self._high + len(starts)] = values
+        self._high += len(starts)
+        self.sample_count = sample_count
+
+    def slide_to(self, origin: int) -> None:
+        """Drops the samples before the absolute position ``origin`` (moving window)."""
+        dropped = origin - self.origin
+        if dropped <= 0:
+            return
+        self.origin = origin
+        if dropped >= self.sample_count:
+            self.sample_count = 0
+            self._low = self._high
+            return
+        self.sample_count -= dropped
+        self._low += max(int(np.searchsorted(self.absolute_starts, origin, side="right")) - 1, 0)
+
+    # ---------------------------------------------------------------- queries
     @property
     def edge_count(self) -> int:
         """Number of level changes in the channel."""
@@ -75,7 +146,7 @@ class ChannelTransitions:
         """Index of the run containing ``sample`` (-1 when out of range)."""
         if self.sample_count == 0 or sample < 0 or sample >= self.sample_count:
             return -1
-        return int(np.searchsorted(self.starts, sample, side="right") - 1)
+        return int(np.searchsorted(self.absolute_starts, sample + self.origin, side="right") - 1)
 
     def interval_at(self, sample: int) -> Optional[Interval]:
         index = self.run_index(sample)
@@ -84,8 +155,9 @@ class ChannelTransitions:
         return self._interval(index)
 
     def _interval(self, index: int) -> Interval:
-        start = int(self.starts[index])
-        end = int(self.starts[index + 1]) if index + 1 < len(self) else self.sample_count
+        starts = self.absolute_starts
+        start = max(int(starts[index]) - self.origin, 0)
+        end = int(starts[index + 1]) - self.origin if index + 1 < len(self) else self.sample_count
         return Interval(
             start=start,
             end=end,
@@ -107,14 +179,26 @@ class ChannelTransitions:
         if last_sample < first_sample:
             return self.starts[:0], self.values[:0]
 
-        begin = max(int(np.searchsorted(self.starts, first_sample, side="right")) - 1, 0)
-        end = int(np.searchsorted(self.starts, last_sample, side="right"))
-        return self.starts[begin:end], self.values[begin:end]
+        starts = self.absolute_starts
+        begin = max(int(np.searchsorted(starts, first_sample + self.origin, side="right")) - 1, 0)
+        end = int(np.searchsorted(starts, last_sample + self.origin, side="right"))
+        return starts[begin:end] - self.origin, self.values[begin:end]
+
+    def levels_and_edges(self, boundaries: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """For sample positions ``boundaries``: the level at each (but the last) and the
+        number of edges before each, e.g. to draw columns of many samples."""
+        starts = self.absolute_starts
+        positions = boundaries + self.origin
+        run_at_boundary = np.searchsorted(starts, positions[:-1], side="right") - 1
+        run_at_boundary = np.clip(run_at_boundary, 0, len(self) - 1)
+        # starts[0] is the start of the first run, not an edge.
+        edges_before = np.searchsorted(starts[1:], positions, side="left")
+        return self.values[run_at_boundary], edges_before
 
 
-def build_transitions(channels: Sequence, frequency: int) -> list[ChannelTransitions]:
-    """Index every channel of a capture."""
-    return [ChannelTransitions(channel.samples, frequency) for channel in channels]
+def build_transitions(channels: Sequence, frequency: int, origin: int = 0) -> list[ChannelTransitions]:
+    """Index every channel of a capture (``origin``: stream position of its first sample)."""
+    return [ChannelTransitions(channel.samples, frequency, origin) for channel in channels]
 
 
 @dataclass

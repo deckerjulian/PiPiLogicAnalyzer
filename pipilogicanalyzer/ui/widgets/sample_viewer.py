@@ -66,6 +66,7 @@ class SampleViewer(QWidget):
 
         model.capture_changed.connect(self._on_capture_changed)
         model.view_changed.connect(self.update)
+        model.samples_appended.connect(self.update)
         model.regions_changed.connect(self.update)
         model.marker_changed.connect(self.update)
         model.hover_changed.connect(self.update)
@@ -223,12 +224,7 @@ class SampleViewer(QWidget):
         boundaries = first + (np.arange(width + 1, dtype=np.float64) * visible / width)
         boundaries = np.clip(boundaries, 0, max(transitions.sample_count, 1))
 
-        run_at_boundary = np.searchsorted(transitions.starts, boundaries[:-1], side="right") - 1
-        run_at_boundary = np.clip(run_at_boundary, 0, len(transitions) - 1)
-        level = transitions.values[run_at_boundary]
-
-        # starts[0] is the start of the first run, not an edge.
-        edges_before = np.searchsorted(transitions.starts[1:], boundaries, side="left")
+        level, edges_before = transitions.levels_and_edges(boundaries)
         edges_in_column = np.diff(edges_before)
 
         # 0 = low, 1 = high, 2 = at least one edge inside the column.

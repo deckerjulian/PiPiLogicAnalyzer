@@ -171,3 +171,20 @@ def test_deinterleave_matches_a_reference_loop():
     for channel in channels:
         assert result[channel].dtype == np.uint8
         assert result[channel].tolist() == expected[channel]
+
+
+def test_deinterleave_into_handles_rows_split_across_transfers():
+    rng = np.random.default_rng(3)
+    channels = [0, 2, 5]
+    data = rng.integers(0, 256, 8 * len(channels) * 20, dtype=np.uint8).tobytes()
+    expected = protocol.deinterleave(data, channels)
+    arrays = {channel: np.zeros(20 * 64, dtype=np.uint8) for channel in channels}
+    pending, samples = bytearray(), 0
+    for start in range(0, len(data), 37):  # chunks that end inside a row
+        pending += data[start:start + 37]
+        written = protocol.deinterleave_into(pending, channels, arrays, samples)
+        del pending[: written // 64 * 8 * len(channels)]
+        samples += written
+    assert samples == 20 * 64 and not pending
+    for channel in channels:
+        assert np.array_equal(arrays[channel], expected[channel])

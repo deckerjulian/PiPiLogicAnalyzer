@@ -350,3 +350,130 @@ def test_stale_data_of_an_aborted_capture_is_discarded():
     assert result.success, result.error
     assert device.stale == []
     assert result.session.capture_channels[0].samples.sum() == 1024
+
+
+def stream_data(samples: int):
+    signals = {0: (np.arange(samples) // 3 % 2).astype(np.uint8), 1: (np.arange(samples) // 64 % 2).astype(np.uint8)}
+    data = interleave(signals)
+    return signals, [data[start:start + 1000] for start in range(0, len(data), 1000)]
+
+
+def test_a_stream_reports_its_samples_while_it_runs(monkeypatch):
+    from pipilogicanalyzer.driver.dslogic import driver as module
+
+    monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
+    device = FakeDSLogic(info())
+    driver = open_driver(device)
+    signals, chunks = stream_data(64 * 1024)
+    device.bulk_in = [header(real_pos=0)] + chunks
+    progress = []
+    driver.add_capture_progress_handler(
+        lambda args: progress.append((args.sample_count, args.samples[0][: args.sample_count].copy()))
+    )
+    result = run_capture(driver, session([0, 1], pre=0, post=64 * 1024, acquisition_mode=ACQUISITION_STREAM,
+                                         trigger_type=TriggerType.IMMEDIATE))
+    assert result.success, result.error
+    counts = [count for count, _samples in progress]
+    assert len(counts) > 10 and counts == sorted(counts) and counts[-1] <= 64 * 1024
+    for count, samples in progress:
+        assert count % 64 == 0 and np.array_equal(samples, signals[0][:count])
+    assert np.array_equal(result.session.capture_channels[1].samples, signals[1])
+
+
+def test_a_buffer_capture_reports_no_progress():
+    device = FakeDSLogic(info())
+    driver = open_driver(device)
+    signals = {0: np.ones(1024, dtype=np.uint8)}
+    device.bulk_in = [header(real_pos=0), interleave(signals)]
+    progress = []
+    driver.add_capture_progress_handler(progress.append)
+    assert run_capture(driver, session([0], pre=0, post=1000)).success
+    assert progress == []
+
+
+def test_stopping_a_stream_keeps_the_samples_received(monkeypatch):
+    from pipilogicanalyzer.driver.dslogic import driver as module
+
+    monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
+    device = FakeDSLogic(info())
+    driver = open_driver(device)
+    signals, chunks = stream_data(64 * 1024)
+    device.bulk_in = [header(real_pos=0)] + chunks[: len(chunks) // 2]  # then the data stops
+    received = threading.Event()
+    driver.add_capture_progress_handler(lambda args: args.sample_count >= 64 * 400 and received.set())
+    results = []
+    done = threading.Event()
+    capture = session([0, 1], pre=0, post=64 * 1024, acquisition_mode=ACQUISITION_STREAM,
+                      trigger_type=TriggerType.IMMEDIATE)
+    assert driver.start_capture(capture, lambda args: (results.append(args), done.set())) is CaptureError.NONE
+    assert received.wait(5)
+    time.sleep(0.2)
+    assert driver.stop_capture()
+    assert done.wait(5) and results[0].success
+    samples = results[0].session.capture_channels[0].samples
+    assert 64 * 400 <= len(samples) < 64 * 1024
+    assert np.array_equal(samples, signals[0][: len(samples)])
+
+
+def test_the_ring_store_keeps_the_latest_samples():
+    from pipilogicanalyzer.core.sample_store import RingStore
+    from pipilogicanalyzer.driver.dslogic.driver import _add_transfer
+
+    rng = np.random.default_rng(5)
+    channels = [0, 3]
+    truth = {channel: rng.integers(0, 2, 64 * 500, dtype=np.uint8) for channel in channels}
+    data = interleave(truth)
+    for keep in (64, 64 * 7, 64 * 100, 64 * 499):
+        store = RingStore(channels, keep)
+        pending = bytearray()
+        position = 0
+        while position < len(data):
+            step = int(rng.integers(1, 3000))
+            pending += data[position:position + step]
+            position += step
+            del pending[: _add_transfer(store, pending)]
+            views, first = store.window()
+            assert first == max(store.total - keep, 0)
+            for channel in channels:
+                assert np.array_equal(views[channel], truth[channel][first:store.total])
+        samples, first = store.result()
+        assert first == 64 * 500 - keep and len(samples[0]) == keep
+
+
+def test_an_endless_stream_needs_the_stream_mode():
+    driver = open_driver(FakeDSLogic(info()))
+    stream = session([0], pre=0, post=10_000, acquisition_mode=ACQUISITION_STREAM,
+                     trigger_type=TriggerType.IMMEDIATE, continuous=True)
+    setup = driver.capture_setup(stream)
+    assert setup.keep_samples == 10_048 and setup.actual_samples == protocol.STREAM_MAX_SAMPLES
+    assert (protocol.STREAM_MAX_SAMPLES >> 4) <= 0xFFFFFFFF
+    buffered = session([0], pre=0, post=10_000, trigger_type=TriggerType.IMMEDIATE, continuous=True)
+    assert driver.capture_setup(buffered) is None
+
+
+def test_an_endless_stream_runs_until_stopped_and_keeps_its_end(monkeypatch):
+    from pipilogicanalyzer.driver.dslogic import driver as module
+
+    monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
+    device = FakeDSLogic(info())
+    driver = open_driver(device)
+    signals, chunks = stream_data(64 * 1024)
+    device.bulk_in = [header(real_pos=0)] + chunks
+    firsts = []
+    all_received = threading.Event()
+    driver.add_capture_progress_handler(
+        lambda args: (firsts.append(args.first_sample),
+                      args.first_sample + args.sample_count == 64 * 1024 and all_received.set())
+    )
+    results = []
+    done = threading.Event()
+    capture = session([0, 1], pre=0, post=64 * 100, acquisition_mode=ACQUISITION_STREAM,
+                      trigger_type=TriggerType.IMMEDIATE, continuous=True)
+    assert driver.start_capture(capture, lambda args: (results.append(args), done.set())) is CaptureError.NONE
+    assert all_received.wait(5), "the stream stopped before its data ended"
+    assert driver.is_capturing  # no end of its own
+    assert driver.stop_capture()
+    assert done.wait(5) and results[0].success
+    assert firsts[-1] == 64 * 1024 - 64 * 100 and firsts == sorted(firsts)
+    for channel in (0, 1):
+        assert np.array_equal(results[0].session.capture_channels[channel].samples, signals[channel][-64 * 100:])
