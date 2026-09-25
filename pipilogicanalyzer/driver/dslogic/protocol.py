@@ -93,6 +93,8 @@ HALF_MODE_BIT = 5
 QUAR_MODE_BIT = 6
 SLOW_ACQ_BIT = 10
 STREAM_MODE_BIT = 12
+#: The FPGA captures a counter instead of the inputs: sample n holds n on channels 0..15
+INT_TEST_BIT = 15
 
 # Security handshake of the boards with CAPS_FEATURE_SECURITY (command.h): the FPGA only
 # captures after it received the key words stored in the EEPROM of the board.
@@ -111,6 +113,8 @@ TRIGGER_PROBES = 16
 ATOMIC_SAMPLES = 64
 #: Sample counts are aligned to 1024 (SAMPLES_ALIGN)
 SAMPLES_ALIGN = 1024
+#: Largest capture the FPGA counts (``cnt``: 32 bits of 16 samples), used by endless streams
+STREAM_MAX_SAMPLES = (0xFFFFFFFF << 4) & ~(SAMPLES_ALIGN - 1)
 #: Largest pre-trigger share in buffer mode (DS_MAX_TRIG_PERCENT) and in stream mode
 MAX_TRIGGER_PERCENT_BUFFER = 90
 MAX_TRIGGER_PERCENT_STREAM = 10
@@ -327,6 +331,10 @@ class CaptureSetup:
     pre_trigger: int
     mode: AcquisitionMode
     trigger: TriggerSpec = NO_TRIGGER
+    #: capture the internal test counter (self-test)
+    internal_test: bool = False
+    #: endless stream: keep only the latest samples (a multiple of 64), 0 keeps everything
+    keep_samples: int = 0
 
     @property
     def channel_count(self) -> int:
@@ -446,6 +454,7 @@ def settings_mode(setup: CaptureSetup) -> int:
         | ((setup.rate == setup.profile.quarter_rate) << QUAR_MODE_BIT)
         | ((setup.bytes_per_ms < 1024) << SLOW_ACQ_BIT)
         | ((setup.mode == AcquisitionMode.STREAM) << STREAM_MODE_BIT)
+        | (setup.internal_test << INT_TEST_BIT)
     )
     return mode
 
@@ -580,6 +589,23 @@ def deinterleave(data: bytes, channels: Sequence[int]) -> dict[int, np.ndarray]:
     bits = np.unpackbits(blocks, axis=2, bitorder="little")  # (blocks, channels, 64)
     return {channel: np.ascontiguousarray(bits[:, index, :]).reshape(-1) for index, channel in
             enumerate(sorted(channels))}
+
+
+def deinterleave_into(data: bytes, channels: Sequence[int], arrays: dict[int, np.ndarray], offset: int) -> int:
+    """Unpacks whole 64 sample rows of ``data`` into ``arrays`` from sample ``offset``.
+
+    Returns the number of samples per channel written; bytes of an incomplete row are ignored.
+    """
+    count = len(channels)
+    rows = len(data) // (8 * count) if count else 0
+    if rows == 0:
+        return 0
+    blocks = np.frombuffer(data, dtype=np.uint8, count=rows * 8 * count).reshape(rows, count, 8)
+    bits = np.unpackbits(blocks, axis=2, bitorder="little")  # (rows, channels, 64)
+    written = rows * ATOMIC_SAMPLES
+    for index, channel in enumerate(sorted(channels)):
+        arrays[channel][offset : offset + written] = bits[:, index, :].reshape(-1)
+    return written
 
 
 def transfer_size(setup: CaptureSetup) -> int:

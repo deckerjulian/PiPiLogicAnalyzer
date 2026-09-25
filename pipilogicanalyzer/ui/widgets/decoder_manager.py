@@ -380,7 +380,8 @@ class DecoderManager(QWidget):
 
     # -------------------------------------------------------------- decoding
     def decode_if_automatic(self) -> None:
-        if self.auto_decode.isChecked():
+        # A live capture is decoded once it is complete.
+        if self.auto_decode.isChecked() and not self.model.is_live:
             self.decode()
 
     def decode(self) -> None:

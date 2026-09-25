@@ -54,6 +54,8 @@ class CaptureViewModel(QObject):
     annotations_changed = Signal()
     hover_changed = Signal()
     channel_height_changed = Signal()
+    #: the samples of a live capture grew (:meth:`extend_live`)
+    samples_appended = Signal()
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -62,6 +64,7 @@ class CaptureViewModel(QObject):
         #: ``id()`` of the pinned channels.
         self._pinned: set[int] = set()
         self._session: Optional[CaptureSession] = None
+        self._live = False
         self._transitions: list[ChannelTransitions] = []
         self._first_sample = 0
         self._visible_samples = 200
@@ -146,23 +149,47 @@ class CaptureViewModel(QObject):
     def pre_trigger_samples(self) -> int:
         return self._session.pre_trigger_samples if self._session else 0
 
-    def set_session(self, session: Optional[CaptureSession]) -> None:
+    @property
+    def is_live(self) -> bool:
+        """The session is a capture still streaming in; it is replaced when it completes."""
+        return self._live
+
+    def set_session(
+        self, session: Optional[CaptureSession], live: bool = False, first_sample: int = 0
+    ) -> None:
+        """``live``: a capture still streaming in (see :meth:`extend_live`), whose sample 0 is
+        at ``first_sample`` of the stream."""
         if session is not self._session:
             self._pinned.clear()
         self._session = session
-        self.rebuild_transitions()
+        self._live = live and session is not None
+        self.rebuild_transitions(first_sample if self._live else 0)
         self._user_marker = None
         self.set_hover(None)
         self.capture_changed.emit()
         self.marker_changed.emit()
 
-    def rebuild_transitions(self) -> None:
+    def extend_live(self, first_sample: int = 0) -> None:
+        """Indexes the samples the channels of the live session got since the last call.
+
+        ``first_sample`` is the stream position of sample 0: an endless stream drops its oldest
+        samples, and its channels hold only the latest ones.
+        """
+        if not self._live:
+            return
+        for channel, transitions in zip(self._session.capture_channels, self._transitions):
+            if channel.samples is not None:
+                transitions.slide_to(first_sample)
+                transitions.extend(channel.samples, len(channel.samples))
+        self.samples_appended.emit()
+
+    def rebuild_transitions(self, origin: int = 0) -> None:
         """Re-index the channels; call after the samples were modified."""
         if self._session is None:
             self._transitions = []
             return
         self._transitions = build_transitions(
-            self._session.capture_channels, self._session.frequency
+            self._session.capture_channels, self._session.frequency, origin
         )
 
     def transitions_for(self, channel: AnalyzerChannel) -> Optional[ChannelTransitions]:

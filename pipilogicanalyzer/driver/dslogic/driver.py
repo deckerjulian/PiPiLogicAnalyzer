@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+import queue
 import threading
 import time
 from typing import Callable, Optional, Sequence
@@ -20,20 +22,26 @@ import numpy as np
 from ..base import (
     ACQUISITION_BUFFER,
     ACQUISITION_STREAM,
+    CAPABILITY_CONTINUOUS_STREAM,
     CAPABILITY_IMMEDIATE_TRIGGER,
     CAPABILITY_PATTERN_GROUPS,
+    CAPABILITY_SELF_TEST,
     CAPABILITY_THRESHOLD,
+    MAX_SAMPLE_BYTES,
     AnalyzerDeviceInfo,
     AnalyzerDriverBase,
     AnalyzerDriverType,
     CaptureCompletedArgs,
     CaptureCompletedHandler,
     CaptureError,
+    CaptureProgressArgs,
     CaptureLimits,
     DeviceConnectionError,
+    SelfTestResult,
 )
+from ...core.sample_store import RingStore, SampleStore
 from ..models import CaptureSession, TriggerType
-from . import protocol, resources
+from . import protocol, resources, self_test
 from . import usb as usb_access
 from .protocol import AcquisitionMode, CaptureSetup, TriggerSpec
 from .usb import UsbDevice, UsbDeviceInfo, UsbError, UsbTimeout
@@ -42,12 +50,12 @@ log = logging.getLogger("pipilogicanalyzer.driver.dslogic")
 
 #: Default input threshold of DSView
 DEFAULT_THRESHOLD = 1.0
-#: The application keeps one byte per sample and channel: limit a capture to about 1 GiB of them
-MAX_SAMPLE_BYTES = 1 << 30
 #: Time to wait for the status bits of the FPGA
 STATUS_TIMEOUT = 2.0
 #: A stream capture fails when no data arrived for this long
 STREAM_STALL_TIMEOUT = 3.0
+#: Seconds between two progress events of a streaming capture (live display)
+PROGRESS_INTERVAL = 0.1
 #: Bulk reads are split into short timeouts so that an abort is noticed quickly
 READ_SLICE_MS = 200
 
@@ -112,6 +120,20 @@ def prepare(
     raise FirmwareMissingError(f"The {info.model} did not restart after loading its firmware.")
 
 
+def _add_transfer(store: SampleStore, data: bytes) -> int:
+    """Unpacks the whole 64 sample rows of ``data`` into ``store``; returns the bytes used."""
+    row = 8 * len(store.channels)
+    if isinstance(store, RingStore):
+        rows = protocol.deinterleave(data, store.channels)
+        store.append(rows)
+        written = len(next(iter(rows.values()))) if rows else 0
+    else:
+        # Straight into the arrays, without the copy of append
+        written = protocol.deinterleave_into(data, store.channels, store.arrays, store.total)
+        store.total += written
+    return written // protocol.ATOMIC_SAMPLES * row
+
+
 class DSLogicDriver(AnalyzerDriverBase):
     """One DSLogic analyzer on USB."""
 
@@ -138,6 +160,8 @@ class DSLogicDriver(AnalyzerDriverBase):
         self._threshold: Optional[float] = None
         self.firmware_version = (0, 0)
         self.hdl_version = 0
+        #: result of the security handshake, ``None`` on boards without one
+        self.security_passed: Optional[bool] = None
 
         try:
             self._device = open_device(info)
@@ -179,6 +203,11 @@ class DSLogicDriver(AnalyzerDriverBase):
     def _status(self) -> int:
         return self._read(protocol.CTL_HW_STATUS, 1)[0]
 
+    def read_status(self) -> int:
+        """The ``HW_STATUS`` bits of the board."""
+        with self._lock:
+            return self._status()
+
     def _wait_status(self, bit: int, what: str, timeout: float = STATUS_TIMEOUT) -> None:
         deadline = time.monotonic() + timeout
         while True:
@@ -219,8 +248,8 @@ class DSLogicDriver(AnalyzerDriverBase):
 
             self.write_register(protocol.CTR0_ADDR, protocol.CTR0_NONE)
             if self.profile.security:
-                passed = self._security_check()
-                log.debug("Security check %s", "passed" if passed else "failed")
+                self.security_passed = self._security_check()
+                log.debug("Security check %s", "passed" if self.security_passed else "failed")
             self.set_threshold(DEFAULT_THRESHOLD)
             if self.profile.adf4360:
                 for address, values, delay_ms in protocol.ADC_CLOCK_INIT:
@@ -267,7 +296,7 @@ class DSLogicDriver(AnalyzerDriverBase):
         self.write_register(protocol.SEC_CTRL_ADDR, command)
         self.write_register(protocol.SEC_CTRL_ADDR + 1, command >> 8)
 
-    def _security_passed(self) -> bool:
+    def _security_pass_bit(self) -> bool:
         return bool(self.read_register(protocol.SEC_CTRL_ADDR) & protocol.SECU_PASS)
 
     def _security_check(self) -> bool:
@@ -283,12 +312,12 @@ class DSLogicDriver(AnalyzerDriverBase):
                 time.sleep(0.01)
             self.write_register(protocol.SEC_CTRL_ADDR, control)
             self.write_register(protocol.SEC_CTRL_ADDR + 1, 0)
-        if self._security_passed():
+        if self._security_pass_bit():
             return True
         self._security_write(protocol.SECU_START, 0)
         tries = protocol.SECU_TRY_COUNT
         for step in reversed(range(protocol.SECU_STEPS)):
-            if self._security_passed():
+            if self._security_pass_bit():
                 break
             while not self.read_register(protocol.SEC_CTRL_ADDR) & protocol.SECU_READY:
                 tries -= 1
@@ -297,7 +326,7 @@ class DSLogicDriver(AnalyzerDriverBase):
             if self.read_register(protocol.SEC_DATA_ADDR + 1) or self.read_register(protocol.SEC_DATA_ADDR):
                 return False
             self._security_write(protocol.SECU_CHECK, key[step])
-        return self._security_passed()
+        return self._security_pass_bit()
 
     def set_threshold(self, voltage: float) -> None:
         if self._threshold == voltage:
@@ -350,7 +379,9 @@ class DSLogicDriver(AnalyzerDriverBase):
 
     def capabilities(self) -> frozenset[str]:
         return frozenset({
+            CAPABILITY_CONTINUOUS_STREAM,
             CAPABILITY_IMMEDIATE_TRIGGER,
+            CAPABILITY_SELF_TEST,
             CAPABILITY_THRESHOLD,
             f"{CAPABILITY_PATTERN_GROUPS}0-{self.channel_count - 1}",
         })
@@ -415,6 +446,9 @@ class DSLogicDriver(AnalyzerDriverBase):
     def enter_bootloader(self) -> bool:
         return False
 
+    def run_self_test(self) -> list[SelfTestResult]:
+        return self_test.run_self_test(self)
+
     # ------------------------------------------------------------- capture
     def trigger_spec(self, session: CaptureSession) -> Optional[TriggerSpec]:
         """The DSView simple trigger for ``session``; ``None`` when it cannot be expressed."""
@@ -457,6 +491,13 @@ class DSLogicDriver(AnalyzerDriverBase):
             and total <= limits.max_total_samples
         ):
             return None
+        keep = 0
+        if session.continuous:
+            if mode != AcquisitionMode.STREAM:
+                return None
+            # The device streams as long as it can count; the latest ``total`` samples are kept.
+            keep = -(-total // protocol.ATOMIC_SAMPLES) * protocol.ATOMIC_SAMPLES
+            total = protocol.STREAM_MAX_SAMPLES
         return CaptureSetup(
             profile=self.profile,
             super_speed=self.info.super_speed,
@@ -466,11 +507,16 @@ class DSLogicDriver(AnalyzerDriverBase):
             pre_trigger=pre,
             mode=mode,
             trigger=trigger,
+            keep_samples=keep,
         )
 
     def start_capture(
-        self, session: CaptureSession, completed_handler: Optional[CaptureCompletedHandler] = None
+        self,
+        session: CaptureSession,
+        completed_handler: Optional[CaptureCompletedHandler] = None,
+        internal_test: bool = False,
     ) -> CaptureError:
+        """Starts ``session``; ``internal_test`` captures the test counter of the FPGA instead."""
         with self._lock:
             if self._capturing:
                 return CaptureError.BUSY
@@ -478,6 +524,8 @@ class DSLogicDriver(AnalyzerDriverBase):
             if setup is None:
                 log.debug("Capture rejected: invalid settings")
                 return CaptureError.BAD_PARAMS
+            if internal_test:
+                setup = dataclasses.replace(setup, internal_test=True)
 
             try:
                 if session.threshold_voltage is not None:
@@ -539,7 +587,9 @@ class DSLogicDriver(AnalyzerDriverBase):
                 if stall_timeout is not None and time.monotonic() - started > stall_timeout:
                     raise UsbError("the DSLogic stopped sending data (USB too slow?)") from None
                 continue
-            if data:
+            # A read that ends after a stop was requested may hold what the FPGA sent after
+            # CTR0_FORCE_RDY, which is not sample data: drop it.
+            if data and not self._abort.is_set():
                 return data
         return None
 
@@ -561,20 +611,46 @@ class DSLogicDriver(AnalyzerDriverBase):
                 raise UsbError("invalid trigger header from the DSLogic")
 
             expected = protocol.captured_bytes(setup, header)
-            buffer = np.empty(expected, dtype=np.uint8)
+            row = 8 * setup.channel_count  # 64 samples of every channel
+            if setup.keep_samples:
+                store: SampleStore = RingStore(setup.channels, setup.keep_samples)
+            else:
+                store = SampleStore(setup.channels, expected // row * protocol.ATOMIC_SAMPLES)
+            # This thread only reads, so a read is always waiting for the device; unpacking in
+            # between would slow a stream at the limit of USB 2 down to about 90 %.
+            chunks: "queue.Queue[Optional[bytes]]" = queue.Queue()
+            failures: list[BaseException] = []
+            unpacker = threading.Thread(
+                target=self._unpack_chunks,
+                args=(chunks, store, session, stream, failures),
+                name="pipilogicanalyzer-dslogic-unpack",
+                daemon=True,
+            )
+            unpacker.start()
             received = 0
+            stopped = False
             chunk = protocol.transfer_size(setup)
-            while received < expected:
-                remaining = (expected - received + packet - 1) // packet * packet
-                data = self._read_some(min(chunk, remaining), STREAM_STALL_TIMEOUT if stream else None)
-                if data is None:
-                    return self._finish_aborted()
-                take = min(len(data), expected - received)
-                buffer[received : received + take] = np.frombuffer(data, dtype=np.uint8, count=take)
-                received += take
+            try:
+                while received < expected and not failures:
+                    remaining = (expected - received + packet - 1) // packet * packet
+                    data = self._read_some(min(chunk, remaining), STREAM_STALL_TIMEOUT if stream else None)
+                    if data is None:
+                        stopped = True
+                        break
+                    take = min(len(data), expected - received)
+                    chunks.put(data if take == len(data) else data[:take])
+                    received += take
+            finally:
+                chunks.put(None)
+                unpacker.join()
+            if failures:
+                raise failures[0]
+            if stopped and not (stream and store.total):
+                return self._finish_aborted()  # a stopped stream keeps what arrived, as in DSView
 
             self._stop_device()
-            self._store_samples(session, setup, header, buffer.tobytes())
+            samples, first = store.result()
+            self._store_samples(session, setup, header, samples, first)
             self._capturing = False
             log.debug("Capture complete: %d bytes, trigger at %d", received, header.real_pos)
             self._raise_capture_completed(CaptureCompletedArgs(success=True, session=session), completed_handler)
@@ -588,15 +664,44 @@ class DSLogicDriver(AnalyzerDriverBase):
                 CaptureCompletedArgs(success=False, session=session, error=str(error)), completed_handler
             )
 
-    def _store_samples(
-        self, session: CaptureSession, setup: CaptureSetup, header: protocol.TriggerHeader, data: bytes
+    def _unpack_chunks(
+        self,
+        chunks: "queue.Queue[Optional[bytes]]",
+        store: SampleStore,
+        session: CaptureSession,
+        stream: bool,
+        failures: list[BaseException],
     ) -> None:
-        samples = protocol.deinterleave(data, setup.channels)
+        """Unpacks the transfers of the reading thread; reports a stream's progress."""
+        pending = bytearray()
+        reported = time.monotonic()
+        try:
+            while (data := chunks.get()) is not None:
+                if failures:
+                    continue
+                pending += data
+                del pending[: _add_transfer(store, pending)]
+                if stream and store.total and time.monotonic() - reported >= PROGRESS_INTERVAL:
+                    reported = time.monotonic()
+                    views, first = store.window()
+                    self._raise_capture_progress(CaptureProgressArgs(session, views, first))
+        except Exception as error:  # noqa: BLE001 - raised again by the reading thread
+            failures.append(error)
+
+    def _store_samples(
+        self,
+        session: CaptureSession,
+        setup: CaptureSetup,
+        header: protocol.TriggerHeader,
+        samples: dict[int, np.ndarray],
+        first_sample: int = 0,
+    ) -> None:
+        """``first_sample``: stream position of the samples kept by an endless stream."""
         total = len(next(iter(samples.values()))) if samples else 0
         for channel in session.capture_channels:
             channel.samples = samples.get(channel.channel_number, np.zeros(total, dtype=np.uint8))
         if setup.trigger.enabled:
-            pre = min(header.real_pos, total)
+            pre = min(max(header.real_pos - first_sample, 0), total)
         else:
             pre = 0
         session.pre_trigger_samples = pre

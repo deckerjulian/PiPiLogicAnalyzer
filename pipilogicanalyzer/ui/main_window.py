@@ -65,6 +65,7 @@ from ..driver.base import (
     AnalyzerDriverBase,
     AnalyzerDriverType,
     CaptureCompletedArgs,
+    CaptureProgressArgs,
     CaptureError,
     DeviceConnectionError,
 )
@@ -116,13 +117,25 @@ POWER_POLL_INTERVAL_MS = 30_000
 BOARD_WATCH_INTERVAL_MS = 2_000
 WINDOW_STATE_FILE = "window-state.json"
 ZOOM_SLIDER_STEPS = 1000
+#: A streaming capture shows its last 1/10 s until the user zooms
+LIVE_WINDOW_DIVISOR = 10
 CAPTURE_FILE_FILTER = "Logic analyzer captures (*.lac *.lac.gz);;All files (*)"
 
 
+def long_duration(seconds: float) -> str:
+    """``to_small_time`` below a minute, else minutes and hours (a long stream)."""
+    if seconds < 60:
+        return to_small_time(seconds)
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes:02d} min" if hours else f"{minutes} min {secs:02d} s"
+
+
 class CaptureBridge(QObject):
-    """Marshals capture completion from the driver thread to the UI thread."""
+    """Marshals capture completion and progress from the driver thread to the UI thread."""
 
     completed = Signal(object)
+    progress = Signal(object)
 
 
 class MainWindow(QMainWindow):
@@ -154,6 +167,17 @@ class MainWindow(QMainWindow):
 
         self.bridge = CaptureBridge(self)
         self.bridge.completed.connect(self._on_capture_completed)
+        self.bridge.progress.connect(self._on_capture_progress)
+        #: The capture started from this window until its completion was handled.
+        self._running_capture: Optional[CaptureSession] = None
+        #: The capture streaming in (live display): shown session and the one the driver fills.
+        self._live_session: Optional[CaptureSession] = None
+        self._live_source: Optional[CaptureSession] = None
+        #: Samples the live display shows, and what it last set (to notice the user zooming).
+        self._live_window = 0
+        self._live_visible = 0
+        #: stream position of the first sample shown (an endless stream drops the oldest ones)
+        self._live_first = 0
 
         self._build_ui()
         self._build_menu()
@@ -170,6 +194,7 @@ class MainWindow(QMainWindow):
 
         self.model.view_changed.connect(self._sync_view_controls)
         self.model.capture_changed.connect(self._on_capture_changed)
+        self.model.samples_appended.connect(self._sync_view_controls)
 
         self._update_title()
         self.refresh_ports()
@@ -953,6 +978,7 @@ class MainWindow(QMainWindow):
             self.driver.dispose()  # the emulated driver of a loaded file
         self.driver = driver
         driver.add_capture_completed_handler(self.bridge.completed.emit)
+        driver.add_capture_progress_handler(self.bridge.progress.emit)
 
         self._set_device_label(driver.device_version or "Unknown")
         self.port_combo.setEnabled(False)
@@ -1410,8 +1436,10 @@ class MainWindow(QMainWindow):
         if self.driver is None:
             return
 
+        self._running_capture = session
         error = self.driver.start_capture(session)
         if error != CaptureError.NONE:
+            self._running_capture = None
             messages.error(self, "Capture", "The capture could not be started.", error.message)
             return
 
@@ -1425,10 +1453,56 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Capture aborted", 5000)
         self._update_actions()
 
+    def _on_capture_progress(self, args: CaptureProgressArgs) -> None:
+        """Shows a streaming capture while it runs, following its end unless scrolled back."""
+        if args.session is not self._running_capture or args.sample_count == 0:
+            return  # queued behind the completion
+        model = self.model
+        live = self._live_session
+        if live is None or self._live_source is not args.session:
+            live = args.session.clone_settings()
+            for channel in live.capture_channels:
+                channel.samples = args.samples.get(channel.channel_number)
+            self._live_session, self._live_source = live, args.session
+            self._live_window = max(live.frequency // LIVE_WINDOW_DIVISOR, 1_000)
+            self._live_first = args.first_sample
+            model.set_session(live, live=True, first_sample=args.first_sample)
+            follow = True
+        else:
+            if model.visible_samples != self._live_visible:
+                self._live_window = model.visible_samples  # zoomed while streaming
+            follow = model.first_sample + model.visible_samples >= model.sample_count - 1
+            for channel in live.capture_channels:
+                channel.samples = args.samples.get(channel.channel_number, channel.samples)
+            model.extend_live(args.first_sample)
+        dropped = args.first_sample - self._live_first
+        self._live_first = args.first_sample
+
+        count = model.sample_count
+        if follow:
+            model.set_view(count - self._live_window, self._live_window)
+        elif dropped:
+            # Scrolled back: keep the samples on screen until they drop out of the window.
+            model.set_view(model.first_sample - dropped, model.visible_samples)
+        self._live_visible = model.visible_samples
+        rate = max(live.frequency, 1)
+        if args.session.continuous:
+            streamed = args.first_sample + count
+            text = (f"Streaming until stopped: {long_duration(streamed / rate)}, "
+                    f"keeping the last {to_thousands(count)} samples ({to_small_time(count / rate)})")
+        else:
+            text = (f"Streaming: {to_thousands(count)} of {to_thousands(args.session.total_samples)} "
+                    f"samples ({to_small_time(count / rate)})")
+        self.statusBar().showMessage(text)
+
     def _on_capture_completed(self, args: CaptureCompletedArgs) -> None:
         self._update_actions()
+        was_live = self._live_session is not None
+        self._live_session = self._live_source = self._running_capture = None
 
         if not args.success:
+            if was_live:
+                self.model.set_session(None)
             self._pending_simulation = None
             messages.error(
                 self,
@@ -1458,11 +1532,20 @@ class MainWindow(QMainWindow):
                 aligned = "; " + report
         # Before loading: the capture change decodes with the new decoders once.
         self._apply_simulation_decoders(args.session)
-        self.load_session(args.session, reset_view=True)
+        # After a live display the view stays where the user watched the samples arrive.
+        self.load_session(args.session, reset_view=not was_live)
         self.statusBar().showMessage(
             f"Captured {to_thousands(args.session.total_samples)} samples "
             f"at {to_large_frequency(args.session.frequency)}{aligned}"
         )
+        if args.error:
+            # Samples arrived, but the capture ended early (a stream the link could not keep up with)
+            messages.warning(
+                self,
+                "Capture",
+                f"The capture ended early after {to_thousands(args.session.total_samples)} samples.",
+                args.error,
+            )
 
     def _remember_unaligned(self, session: CaptureSession) -> None:
         """Keep the samples as captured, so another method can be chosen later."""
@@ -2160,7 +2243,7 @@ class MainWindow(QMainWindow):
         self.action_export_vcd.setEnabled(has_capture)
         self.action_device_info.setEnabled(is_real_device)
         self.action_bootloader.setEnabled(self._has_pico_device() and not capturing)
-        self.action_board_test.setEnabled(self._has_pico_device() and not capturing)
+        self.action_board_test.setEnabled(self._has_real_device() and not capturing)
         self.action_simulation.setEnabled(not capturing)
         self.action_firmware.setEnabled(not capturing)
         self.action_network_settings.setEnabled(

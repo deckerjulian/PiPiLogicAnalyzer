@@ -8,17 +8,38 @@ whose version has a section in this file (see [Creating a release](README.md#cre
 
 ### Application
 
-- **DreamSourceLab DSLogic Plus, U3Pro16 and U3Pro32** (experimental, not yet tested on
-  hardware): a USB driver following the DSLogic driver of DSView. Buffer and stream captures at
-  the rates of the device (up to 400 MHz / 1 GHz), edge, level pattern and immediate triggers,
-  adjustable input threshold. The FPGA bitstreams come from an installed DSView or are downloaded
-  once from the DSView repository; they are not shipped.
+- **DreamSourceLab DSLogic Plus, U2Pro16, U3Pro16 and U3Pro32** (experimental, tested on a
+  U2Pro16): a USB driver following the DSLogic driver of DSView, including its FPGA security
+  handshake. Buffer and stream captures at the rates of the device (up to 400 MHz / 1 GHz), edge,
+  level pattern and immediate triggers, adjustable input threshold. The FPGA bitstreams come from
+  an installed DSView or are downloaded once from the DSView repository; they are not shipped.
+- DSLogic stream captures are shown while they run, following their end; *Stop* keeps the samples
+  received so far. *Until stopped* streams endlessly and keeps the latest samples in a ring
+  buffer. Reading and unpacking run in separate threads, so a stream at the USB 2 limit
+  (20 MHz × 16 channels) keeps up.
+- Board self-test for the DSLogic: the internal test counter of the FPGA checks the capture memory,
+  buffer and stream transfers and the triggers bit by bit; the inputs are checked to read low.
+- Self-test titles keep their acronyms ("RAM", "FPGA").
+- **Stream captures with the PiPiLogicAnalyzer boards** (firmware of this project, over USB):
+  the samples are sent while capturing and shown live, with a fixed length or until stopped.
+  Up to 800 kHz with 8 channels, 400 kHz with 16, 200 kHz with 24; an overflow of the USB link
+  ends the stream with a warning and keeps the samples before it. The board self-test streams
+  a test counter and checks it sample by sample.
+- Capture dialog: the highest rate follows the acquisition mode (a stream is limited by its
+  link); devices whose stream starts at once offer only "None" as its trigger.
 - Capture dialog: devices with a fixed list of rates get a list instead of the free value; an
   acquisition mode (buffer/stream), a threshold and "no trigger" appear where the device has them.
   The edge trigger offers all channels of devices with more than 24.
 - `.lac` files store the acquisition mode and the input threshold of the capture settings.
 - Selecting the new analyzer after a firmware installation works again (the device list lookup
   missed its entries).
+
+### Firmware
+
+- Stream capture (capture request with trigger type 6, USB only): the DMA channels fill the
+  capture buffer without end and the samples are sent in chunks while they arrive, until the host
+  stops the stream; an overtaken buffer ends it with an overflow marker. `STREAM=800000` in the
+  capabilities; `triggerValue = 1` streams a PIO test counter instead of the inputs.
 
 ### Project
 
