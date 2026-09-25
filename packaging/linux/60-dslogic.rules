@@ -1,0 +1,5 @@
+# Access to DreamSourceLab DSLogic analyzers (USB vendor 0x2a0e) for every user.
+#   sudo cp 60-dslogic.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# then unplug and plug in the analyzer again.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2a0e", MODE="0666"

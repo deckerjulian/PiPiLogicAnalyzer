@@ -59,6 +59,15 @@ CAPABILITY_EDGE_TRIGGER_OUT = "EDGE_TRIGGER_OUT"
 #: Prefix of the capability naming the channel groups a pattern trigger can cover:
 #: ``PATTERN_GROUPS=0-20/21-23`` (channels on consecutive GPIOs, counted from 0).
 CAPABILITY_PATTERN_GROUPS = "PATTERN_GROUPS="
+#: Captures can start without a trigger (trigger type ``IMMEDIATE``).
+CAPABILITY_IMMEDIATE_TRIGGER = "IMMEDIATE_TRIGGER"
+#: The input threshold voltage can be set (``CaptureSession.threshold_voltage``).
+CAPABILITY_THRESHOLD = "THRESHOLD"
+
+#: Acquisition modes (``CaptureSession.acquisition_mode``): into the memory of the device, or
+#: streamed over USB while capturing.
+ACQUISITION_BUFFER = "buffer"
+ACQUISITION_STREAM = "stream"
 
 #: Pattern trigger channels of firmware that does not report its groups: channels 1 to 16.
 DEFAULT_PATTERN_GROUPS: tuple[tuple[int, int], ...] = ((0, 16),)
@@ -172,6 +181,8 @@ class AnalyzerDriverType(Enum):
     NETWORK = "Network"
     MULTI = "Multi"
     EMULATED = "Emulated"
+    #: DreamSourceLab DSLogic (USB)
+    DSLOGIC = "DSLogic"
 
 
 def capture_mode_for_bits(bits: Sequence[int]) -> CaptureMode:
@@ -320,7 +331,7 @@ class AnalyzerDriverBase:
     def get_capture_mode(self, channels: Sequence[int]) -> CaptureMode:
         return capture_mode_for_bits(self.sample_bits(channels))
 
-    def get_limits(self, channels: Sequence[int]) -> CaptureLimits:
+    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
         mode = self.get_capture_mode(channels)
         total_samples = self.buffer_size // mode.bytes_per_sample
         return CaptureLimits(
@@ -344,6 +355,20 @@ class AnalyzerDriverBase:
             buffer_size=self.buffer_size,
             mode_limits=limits,
         )
+
+    def acquisition_modes(self) -> tuple[str, ...]:
+        """``ACQUISITION_*`` modes the device offers; empty: the only mode is the buffer."""
+        return ()
+
+    def sample_rates(
+        self, channels: Sequence[int], acquisition_mode: Optional[str] = None
+    ) -> Optional[list[int]]:
+        """Fixed sampling rates usable with ``channels``; ``None``: any rate up to the maximum."""
+        return None
+
+    def has_external_trigger(self) -> bool:
+        """The edge trigger can use an external trigger input (channel ``channel_count``)."""
+        return True
 
     # ---------------------------------------------------------------- network
     def get_voltage_status(self) -> Optional[str]:

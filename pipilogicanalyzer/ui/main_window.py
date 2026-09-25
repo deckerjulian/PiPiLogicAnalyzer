@@ -20,6 +20,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -55,6 +56,9 @@ from ..core.profiles import (
 )
 from ..core.regions import SampleRegion
 from ..driver import detector
+from ..driver.dslogic import driver as dslogic_driver
+from ..driver.dslogic import resources as dslogic_resources
+from ..driver.dslogic import usb as dslogic_usb
 from ..driver.analyzer import PiPiLogicAnalyzerDriver
 from ..driver.base import (
     CAPABILITY_SIMULATION,
@@ -880,6 +884,7 @@ class MainWindow(QMainWindow):
         """Detected analyzers followed by the network/multi device entries; other serial ports are left out."""
         self.port_combo.clear()
         detected = {device.port_name: device for device in detector.detect()}
+        dslogics = dslogic_usb.list_devices()
 
         if detected:
             self.port_combo.addItem(
@@ -889,7 +894,9 @@ class MainWindow(QMainWindow):
             for port, device in detected.items():
                 serial = f", S/N {device.serial_number}" if device.serial_number else ""
                 self.port_combo.addItem(f"PiPiLogicAnalyzer on {port}{serial}", ("serial", port))
-        else:
+        for device in dslogics:
+            self.port_combo.addItem(device.description, ("dslogic", device.location))
+        if not detected and not dslogics:
             self.port_combo.addItem("No analyzer detected", None)
 
         self.port_combo.insertSeparator(self.port_combo.count())
@@ -897,6 +904,13 @@ class MainWindow(QMainWindow):
         self.port_combo.addItem("Multiple devices...", ("multi", None))
         self.port_combo.setCurrentIndex(0)
         self._check_for_new_boards()
+
+    def _port_index(self, data: tuple) -> int:
+        """Index of the device list entry carrying ``data`` (``findData`` misses Python tuples)."""
+        for index in range(self.port_combo.count()):
+            if self.port_combo.itemData(index) == data:
+                return index
+        return -1
 
     def toggle_connection(self) -> None:
         if self._has_real_device():
@@ -924,6 +938,8 @@ class MainWindow(QMainWindow):
                 driver = self._connect_network()
             elif kind == "multi":
                 driver = self._connect_multi()
+            elif kind == "dslogic":
+                driver = self._connect_dslogic(value)
             else:
                 driver = self._connect_autodetect()
         except (DeviceConnectionError, OSError, ValueError) as error:
@@ -951,6 +967,57 @@ class MainWindow(QMainWindow):
         self._check_connected_firmware(driver)
 
         self._update_actions()
+
+    def _connect_dslogic(self, location: str) -> Optional[AnalyzerDriverBase]:
+        info = dslogic_usb.find_device(location)
+        if info is None:
+            raise DeviceConnectionError("The DSLogic is no longer connected. Press Refresh.")
+        info = dslogic_driver.prepare(info)
+        while True:
+            try:
+                return dslogic_driver.DSLogicDriver(info)
+            except dslogic_driver.BitstreamMissingError as missing:
+                if not self._provide_dslogic_bitstream(missing):
+                    return None
+
+    def _provide_dslogic_bitstream(self, missing: "dslogic_driver.BitstreamMissingError") -> bool:
+        """Ask for the FPGA bitstream of a DSLogic; ``True`` when it may be there now."""
+        options = ["Choose DSView folder..."]
+        if dslogic_resources.downloadable(missing.name):
+            options.insert(0, "Download from DSView")
+        choice = messages.choose(
+            self,
+            "FPGA bitstream needed",
+            f"The {missing.model} needs its FPGA bitstream {missing.name}.",
+            options,
+            "The bitstreams belong to DreamSourceLab's DSView and are not part of "
+            "PiPiLogicAnalyzer. They are taken from an installed DSView (its 'res' folder), or "
+            "downloaded once from the DSView repository on GitHub "
+            f"(commit {dslogic_resources.DSVIEW_COMMIT[:7]}) into the settings directory.",
+        )
+        if choice is None:
+            return False
+        if options[choice].startswith("Download"):
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                dslogic_resources.download(missing.name)
+            except dslogic_resources.ResourceError as error:
+                messages.error(self, "Download", "The bitstream could not be downloaded.", str(error))
+                return False
+            finally:
+                QApplication.restoreOverrideCursor()
+            return True
+        folder = QFileDialog.getExistingDirectory(self, "DSView 'res' folder")
+        if not folder:
+            return False
+        if dslogic_resources.find(missing.name, [folder]) is None:
+            messages.warning(
+                self, "FPGA bitstream", f"{missing.name} is not in this folder.",
+                "Choose the 'res' folder of DSView, e.g. C:\\Program Files\\DSView\\res.",
+            )
+            return False
+        dslogic_resources.set_chosen_directory(folder)
+        return True
 
     def _connect_network(self) -> Optional[AnalyzerDriverBase]:
         dialog = NetworkConnectDialog(parent=self)
@@ -1150,7 +1217,12 @@ class MainWindow(QMainWindow):
             AnalyzerDriverType.SERIAL,
             AnalyzerDriverType.NETWORK,
             AnalyzerDriverType.MULTI,
+            AnalyzerDriverType.DSLOGIC,
         )
+
+    def _has_pico_device(self) -> bool:
+        """A board with the PiPiLogicAnalyzer firmware (bootloader, self-test, firmware update)."""
+        return self._has_real_device() and self.driver.driver_type != AnalyzerDriverType.DSLOGIC
 
     def _check_for_new_boards(self) -> None:
         """Show a notice for boards in bootloader mode or with foreign firmware."""
@@ -1195,7 +1267,7 @@ class MainWindow(QMainWindow):
             )
 
     def _restart_connected_into_bootloader(self) -> bool:
-        if not self._has_real_device() or self.driver.is_capturing:
+        if not self._has_pico_device() or self.driver.is_capturing:
             return False
         if not self.driver.enter_bootloader():
             return False
@@ -1204,7 +1276,7 @@ class MainWindow(QMainWindow):
 
     def _connected_devices(self) -> list[ConnectedDevice]:
         """Installed firmware of the connected analyzer, one entry per board of a multi device set."""
-        if not self._has_real_device():
+        if not self._has_pico_device():
             return []
         boards = self.driver.devices if self.driver.driver_type == AnalyzerDriverType.MULTI else [self.driver]
         devices = []
@@ -1218,7 +1290,7 @@ class MainWindow(QMainWindow):
         return devices
 
     def install_firmware(self) -> None:
-        connected = self.driver if self._has_real_device() else None
+        connected = self.driver if self._has_pico_device() else None
         if connected is not None and connected.is_capturing:
             return
         # A board on the network cannot be flashed from here; it only shows its firmware.
@@ -1232,7 +1304,7 @@ class MainWindow(QMainWindow):
         if not self._has_real_device():
             self.refresh_ports()
             if dialog.new_port:
-                index = self.port_combo.findData(("serial", dialog.new_port))
+                index = self._port_index(("serial", dialog.new_port))
                 if index >= 0:
                     self.port_combo.setCurrentIndex(index)
                 self.statusBar().showMessage(f"Firmware installed, the analyzer is on {dialog.new_port}")
@@ -2087,8 +2159,8 @@ class MainWindow(QMainWindow):
         self.action_export_csv.setEnabled(has_capture)
         self.action_export_vcd.setEnabled(has_capture)
         self.action_device_info.setEnabled(is_real_device)
-        self.action_bootloader.setEnabled(is_real_device and not capturing)
-        self.action_board_test.setEnabled(is_real_device and not capturing)
+        self.action_bootloader.setEnabled(self._has_pico_device() and not capturing)
+        self.action_board_test.setEnabled(self._has_pico_device() and not capturing)
         self.action_simulation.setEnabled(not capturing)
         self.action_firmware.setEnabled(not capturing)
         self.action_network_settings.setEnabled(

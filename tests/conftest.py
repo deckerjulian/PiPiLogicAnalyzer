@@ -23,6 +23,14 @@ def isolated_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_usb_devices(monkeypatch):
+    """The tests never touch real USB devices (DSLogic enumeration through libusb)."""
+    from pipilogicanalyzer.driver.dslogic import usb
+
+    monkeypatch.setattr(usb, "list_devices", lambda: [])
+
+
+@pytest.fixture(autouse=True)
 def no_unanswered_message_boxes(monkeypatch):
     """A message box nobody answers would block the test run forever; fail instead.
 

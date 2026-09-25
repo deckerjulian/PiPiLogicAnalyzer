@@ -123,6 +123,13 @@ def test_single_board_captures_are_not_touched():
     assert alignment.channels_per_device_of(session) is None
 
 
+def test_dslogic_captures_with_32_channels_are_one_board():
+    session, _address = capture(offset=2)
+    assert alignment.channels_per_device_of(session) == 24
+    session.threshold_voltage = 1.0  # only set by devices with an adjustable threshold (DSLogic)
+    assert alignment.channels_per_device_of(session) is None
+
+
 def test_every_available_method_is_offered():
     session, _address = capture(offset=-3)
 

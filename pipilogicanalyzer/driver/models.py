@@ -41,6 +41,8 @@ class TriggerType(IntEnum):
     #: Edge trigger that also drives the trigger output: the board triggering a multi device set
     #: (firmware of this project, capability ``EDGE_TRIGGER_OUT``).
     EDGE_OUT = 5
+    #: No trigger, the capture starts at once (capability ``IMMEDIATE_TRIGGER``, DSLogic)
+    IMMEDIATE = 6
 
     @property
     def label(self) -> str:
@@ -51,6 +53,7 @@ class TriggerType(IntEnum):
             TriggerType.BLAST: "Blast",
             TriggerType.SIMULATION: "Simulation",
             TriggerType.EDGE_OUT: "Edge (trigger output)",
+            TriggerType.IMMEDIATE: "None",
         }[self]
 
 
@@ -138,6 +141,10 @@ class CaptureSession:
     trigger_inverted: bool = False
     trigger_bit_count: int = 0
     trigger_pattern: int = 0
+    #: ``"buffer"`` or ``"stream"`` (``ACQUISITION_*`` of the driver base), devices with both modes
+    acquisition_mode: str = "buffer"
+    #: Input threshold in volts for devices with an adjustable threshold, ``None``: device default
+    threshold_voltage: Optional[float] = None
 
     @property
     def total_samples(self) -> int:
@@ -177,6 +184,8 @@ class CaptureSession:
                 return SimulationPattern(self.trigger_pattern).label
             except ValueError:
                 return f"Pattern {self.trigger_pattern}"
+        if self.trigger_type == TriggerType.IMMEDIATE:
+            return "Immediate"
         if self.trigger_type in (TriggerType.EDGE, TriggerType.BLAST, TriggerType.EDGE_OUT):
             return "Negative" if self.trigger_inverted else "Positive"
         return "".join(

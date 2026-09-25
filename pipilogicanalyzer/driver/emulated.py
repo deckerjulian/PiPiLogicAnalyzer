@@ -130,7 +130,7 @@ class EmulatedAnalyzerDriver(AnalyzerDriverBase):
             return CaptureMode.CHANNELS_16
         return CaptureMode.CHANNELS_24
 
-    def get_limits(self, channels: Sequence[int]) -> CaptureLimits:
+    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
         split = self._split_channels_per_device(channels)
         limits = [AnalyzerDriverBase.get_limits(self, group) for group in split]
         return CaptureLimits(
