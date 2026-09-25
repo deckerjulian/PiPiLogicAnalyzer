@@ -38,6 +38,12 @@ void GetPatternTriggerGroups(char* buffer, uint32_t size);
 bool StartCaptureSimulation(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t pattern, CHANNEL_MODE captureMode);
 //Pattern test of the capture buffer (clears it afterwards)
 bool TestCaptureBuffer(uint32_t* failedOffset);
+//Stream capture: raw input words without end until StopCapture (testPattern: a counter instead)
+bool StartCaptureStream(uint32_t freq, const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode, bool testPattern);
+uint64_t StreamWrittenSamples();
+uint8_t* GetStreamBuffer(uint32_t* bufferSamples, uint8_t* bytesPerSample);
+//Bit of every captured channel in the stream samples, e.g. "0,1,2,24"
+void GetStreamSampleBits(char* buffer, uint32_t size);
 void StopCapture();
 bool IsCapturing();
 uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* captureMode);

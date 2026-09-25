@@ -20,6 +20,29 @@ LOOP:
 .wrap
 
 ;--------------------------------------------------------------------------------------------
+.program STREAM_CAPTURE
+;Stream capture: samples without end, the host stops it
+
+.wrap_target
+
+    in pins 32                  ;capture
+
+.wrap
+
+;--------------------------------------------------------------------------------------------
+.program STREAM_TEST
+;Test pattern of the stream capture instead of the inputs: a counter running down from 0,
+;one value every two cycles
+
+.wrap_target
+START:
+
+    in x 32                     ;sample = counter
+    jmp x-- START               ;count down (at 0 the wrap continues at START as well)
+
+.wrap
+
+;--------------------------------------------------------------------------------------------
 .program POSITIVE_CAPTURE
 
     pull

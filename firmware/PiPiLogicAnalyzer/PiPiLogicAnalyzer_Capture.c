@@ -56,11 +56,14 @@ static uint8_t lastCaptureType;
 static uint32_t lastTail;
 static CHANNEL_MODE lastCaptureMode = MODE_8_CHANNEL;
 static const pio_program_t* lastCaptureProgram;      //Program loaded by the simple capture
+static const pio_program_t* lastStreamProgram;       //Program loaded by the stream capture
 static bool lastBurstMeasure;                        //Burst measurement (NMI + systick) set up?
 static uint32_t oldSysTickCsr;                       //Systick configuration before the measurement
 
 //Static information of the current capture
 static volatile bool captureFinished;               //Written from interrupt handlers
+static volatile uint32_t streamPasses;              //Stream: complete passes of the DMA channels over the buffer
+static irq_handler_t activeDmaHandler;              //DMA_IRQ_0 handler of the ping-pong channels
 static bool captureProcessed;
 
 //NEW//
@@ -85,6 +88,7 @@ static uint8_t captureBuffer[CAPTURE_BUFFER_SIZE] __attribute__((aligned(4)));
 #define CAPTURE_TYPE_FAST 2
 #define CAPTURE_TYPE_BLAST 3
 #define CAPTURE_TYPE_SIMULATION 4
+#define CAPTURE_TYPE_STREAM 5
 
 //-----------------------------------------------------------------------------
 //--------------Complex trigger PIO program------------------------------------
@@ -409,7 +413,7 @@ void abort_DMAs()
     dma_channel_set_irq0_enabled(dmaPingPong1, false); //Enable IRQ 0
     irq_set_enabled(DMA_IRQ_0, false);
 
-    irq_remove_handler (DMA_IRQ_0, dma_handler);
+    irq_remove_handler (DMA_IRQ_0, activeDmaHandler);
 
     //Unclaim the channels
     dma_channel_unclaim(dmaPingPong0);
@@ -623,7 +627,14 @@ void configureBlastDMA(CHANNEL_MODE channelMode, uint32_t length)
 }
 
 //Configure the two DMA channels
+static void configurePingPongDMAs(CHANNEL_MODE channelMode, irq_handler_t handler);
+
 void configureCaptureDMAs(CHANNEL_MODE channelMode)
+{
+    configurePingPongDMAs(channelMode, dma_handler);
+}
+
+static void configurePingPongDMAs(CHANNEL_MODE channelMode, irq_handler_t handler)
 {
 
     enum dma_channel_transfer_size transferSize;
@@ -672,7 +683,8 @@ void configureCaptureDMAs(CHANNEL_MODE channelMode)
     dma_channel_set_irq0_enabled(dmaPingPong1, true); //Enable IRQ 0
 
     //Set interrupt handler and enable it
-    irq_set_exclusive_handler(DMA_IRQ_0, dma_handler);
+    activeDmaHandler = handler;
+    irq_set_exclusive_handler(DMA_IRQ_0, handler);
     irq_set_enabled(DMA_IRQ_0, true);
     irq_set_priority(DMA_IRQ_0, 0);
 
@@ -680,6 +692,8 @@ void configureCaptureDMAs(CHANNEL_MODE channelMode)
     dma_channel_configure(dmaPingPong0, &dmaPingPong0Config, captureBuffer, &capturePIO->rxf[sm_Capture], transferCount, true); //Configure the and trigger it
 
 }
+
+static void stream_capture_completed();
 
 void StopCapture()
 {
@@ -703,7 +717,9 @@ void StopCapture()
 
         #ifdef SUPPORTS_COMPLEX_TRIGGER
 
-        if(lastCaptureType == CAPTURE_TYPE_SIMPLE)
+        if(lastCaptureType == CAPTURE_TYPE_STREAM)
+            stream_capture_completed();
+        else if(lastCaptureType == CAPTURE_TYPE_SIMPLE)
             simple_capture_completed();
         else if(lastCaptureType == CAPTURE_TYPE_COMPLEX)
             complex_capture_completed();
@@ -714,7 +730,9 @@ void StopCapture()
 
         #else
 
-        if(lastCaptureType == CAPTURE_TYPE_SIMPLE)
+        if(lastCaptureType == CAPTURE_TYPE_STREAM)
+            stream_capture_completed();
+        else if(lastCaptureType == CAPTURE_TYPE_SIMPLE)
             simple_capture_completed();
         else if(lastCaptureType == CAPTURE_TYPE_BLAST)
             blast_capture_completed();
@@ -1244,6 +1262,142 @@ bool StartCaptureBlast(uint32_t freq, uint32_t length, const uint8_t* capturePin
 
     //We're done
     return true;
+}
+
+//-----------------------------------------------------------------------------
+//--------------Stream capture-------------------------------------------------
+//-----------------------------------------------------------------------------
+//The two DMA channels fill the whole buffer alternately without end. The main loop sends the
+//samples while they arrive (StreamWrittenSamples) until the host stops the stream. The samples
+//are the raw input words (bit n = GPIO INPUT_PIN_BASE + n): sorting the bits of every sample
+//would cost more time than the USB transfer leaves.
+
+//Stream DMA channel handler: rewinds the finished channel and counts the pass
+void __not_in_flash_func(stream_dma_handler)()
+{
+    uint32_t channel = dma_channel_get_irq0_status(dmaPingPong0) ? dmaPingPong0 : dmaPingPong1;
+    dma_channel_acknowledge_irq0(channel);
+    dma_channel_set_write_addr(channel, captureBuffer, false);
+    streamPasses++;
+}
+
+static void stream_capture_completed()
+{
+    pio_sm_set_enabled(capturePIO, sm_Capture, false);
+    abort_DMAs();
+    disable_gpios();
+
+    pio_sm_unclaim(capturePIO, sm_Capture);
+    pio_remove_program(capturePIO, lastStreamProgram, captureOffset);
+
+    captureFinished = true;
+}
+
+bool StartCaptureStream(uint32_t freq, const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode, bool testPattern)
+{
+    if(captureMode != MODE_8_CHANNEL && captureMode != MODE_16_CHANNEL && captureMode != MODE_24_CHANNEL)
+        return false;
+
+    //Frequency out of range? (0 divided by zero, too low values exceed the PIO clock divider)
+    if(freq == 0 || freq > MAX_FREQ || (float)clock_get_hz(clk_sys) / (float)freq > 65536.0f)
+        return false;
+
+    if(capturePinCount < 1 || capturePinCount > MAX_CHANNELS)
+        return false;
+
+    if(!capture_pins_valid(capturePins, capturePinCount, captureMode))
+        return false;
+
+    lastPreSize = 0;
+    lastPostSize = 0;
+    lastLoopCount = 0;
+    lastCapturePinCount = capturePinCount;
+    lastCaptureMode = captureMode;
+    streamPasses = 0;
+
+    for(uint8_t i = 0; i < capturePinCount; i++)
+        lastCapturePins[i] = pinMap[capturePins[i]];
+
+    //One sample per PIO cycle, the test pattern takes two
+    float clockDiv = (float)clock_get_hz(clk_sys) / (float)(freq) / (testPattern ? 2.0f : 1.0f);
+    if(clockDiv < 1.0f)
+        return false;
+
+    capturePIO = pio0;
+    pio_clear_instruction_memory(capturePIO);
+
+    sm_Capture = pio_claim_unused_sm(capturePIO, true);
+    pio_sm_clear_fifos(capturePIO, sm_Capture);
+    pio_sm_restart(capturePIO, sm_Capture);
+
+    lastStreamProgram = testPattern ? &STREAM_TEST_program : &STREAM_CAPTURE_program;
+    captureOffset = pio_add_program(capturePIO, lastStreamProgram);
+
+    for(int i = 0; i < MAX_CHANNELS; i++)
+        pio_sm_set_consecutive_pindirs(capturePIO, sm_Capture, pinMap[i], 1, false);
+
+    for(uint8_t i = 0; i < MAX_CHANNELS; i++)
+        pio_gpio_init(capturePIO, pinMap[i]);
+
+    pio_sm_config smConfig = testPattern ? STREAM_TEST_program_get_default_config(captureOffset)
+                                         : STREAM_CAPTURE_program_get_default_config(captureOffset);
+    sm_config_set_in_pins(&smConfig, INPUT_PIN_BASE);
+    sm_config_set_clkdiv(&smConfig, clockDiv);
+    sm_config_set_in_shift(&smConfig, true, true, 0); //Autopush per dword
+
+    pio_sm_set_enabled(capturePIO, sm_Capture, false);
+    pio_sm_init(capturePIO, sm_Capture, captureOffset, &smConfig);
+
+    configurePingPongDMAs(captureMode, stream_dma_handler);
+
+    captureFinished = false;
+    captureProcessed = true; //Nothing to sort, GetBuffer is not used
+    lastCaptureType = CAPTURE_TYPE_STREAM;
+
+    pio_sm_set_enabled(capturePIO, sm_Capture, true);
+
+    return true;
+}
+
+uint64_t StreamWrittenSamples()
+{
+    uint32_t passes;
+    uint32_t remaining;
+
+    do
+    {
+        passes = streamPasses;
+
+        //The channel in the middle of its pass. Right after the hand-over the finished channel may
+        //still wait for its interrupt: then the count is one pass low for a moment, never high.
+        if(dma_channel_is_busy(dmaPingPong0))
+            remaining = dma_channel_hw_addr(dmaPingPong0)->transfer_count & 0x0FFFFFFF;
+        else if(dma_channel_is_busy(dmaPingPong1))
+            remaining = dma_channel_hw_addr(dmaPingPong1)->transfer_count & 0x0FFFFFFF;
+        else
+            remaining = transferCount;
+
+    } while(passes != streamPasses);
+
+    //The channel counts a transfer down when it starts it: the last one may not be written yet
+    uint32_t done = transferCount - remaining;
+    return (uint64_t)passes * transferCount + (done ? done - 1 : 0);
+}
+
+uint8_t* GetStreamBuffer(uint32_t* bufferSamples, uint8_t* bytesPerSample)
+{
+    *bufferSamples = transferCount;
+    *bytesPerSample = lastCaptureMode == MODE_8_CHANNEL ? 1 : (lastCaptureMode == MODE_16_CHANNEL ? 2 : 4);
+    return captureBuffer;
+}
+
+void GetStreamSampleBits(char* buffer, uint32_t size)
+{
+    uint32_t used = 0;
+    buffer[0] = 0;
+
+    for(uint8_t i = 0; i < lastCapturePinCount && used + 4 < size; i++)
+        used += snprintf(buffer + used, size - used, i ? ",%d" : "%d", lastCapturePins[i] - INPUT_PIN_BASE);
 }
 
 bool StartCaptureSimple(uint32_t freq, uint32_t preLength, uint32_t postLength, uint16_t loopCount, uint8_t measureBursts, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPin, bool invertTrigger, CHANNEL_MODE captureMode)
