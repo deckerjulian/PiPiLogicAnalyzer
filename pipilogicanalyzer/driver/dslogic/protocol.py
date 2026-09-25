@@ -79,6 +79,8 @@ VTH_ADDR = 0x78
 CTR0_ADDR = 0x70
 ADCC_ADDR = 0x48
 HDL_VERSION_ADDR = 0x04
+SEC_CTRL_ADDR = 0x73
+SEC_DATA_ADDR = 0x75
 
 # CTR0 bits
 CTR0_NONE = 0
@@ -92,6 +94,16 @@ QUAR_MODE_BIT = 6
 SLOW_ACQ_BIT = 10
 STREAM_MODE_BIT = 12
 
+# Security handshake of the boards with CAPS_FEATURE_SECURITY (command.h): the FPGA only
+# captures after it received the key words stored in the EEPROM of the board.
+SECU_READY = 1 << 3
+SECU_PASS = 1 << 4
+SECU_STEPS = 8
+SECU_START = 0x0513
+SECU_CHECK = 0x0219
+SECU_EEP_ADDR = 0x3C00
+SECU_TRY_COUNT = 8
+
 TRIG_CHECKID = 0x55555555
 NUM_TRIGGER_STAGES = 16
 TRIGGER_PROBES = 16
@@ -103,7 +115,7 @@ SAMPLES_ALIGN = 1024
 MAX_TRIGGER_PERCENT_BUFFER = 90
 MAX_TRIGGER_PERCENT_STREAM = 10
 
-#: ``adc_clk_init_500m``: sets up the 500 MHz sampling clock of the U3 models (ADF4360).
+#: ``adc_clk_init_500m``: sets up the 500 MHz sampling clock (ADF4360) of the U2Pro16 and U3 models.
 #: (register, bytes written one by one, delay in ms before the entry)
 ADC_CLOCK_INIT = (
     (ADCC_ADDR + 2, (0x01,), 0),
@@ -214,10 +226,14 @@ class Profile:
     rates: tuple[int, ...]
     half_rate: int
     quarter_rate: int
-    #: USB 3 models: FX3, 1 kB header, ADF4360 sampling clock
+    #: USB 3 models: FX3, 1 kB header
     usb3: bool
     #: threshold DAC scaled for 2.5 V instead of 3.3 V (Plus with Pango FPGA)
     max25_vth: bool = False
+    #: 500 MHz / 1 GHz sampling clock from an ADF4360 (U2Pro16, U3Pro16, U3Pro32)
+    adf4360: bool = False
+    #: the FPGA needs the security handshake before it captures
+    security: bool = False
     modes_high: tuple[ChannelMode, ...] = ()
     modes_super: tuple[ChannelMode, ...] = ()
 
@@ -234,16 +250,20 @@ PROFILES: dict[int, Profile] = {
                     SAMPLE_RATES_400, 200_000_000, 400_000_000, False, modes_high=PLUS_MODES),
     0x0030: Profile(0x0030, "DSLogic Plus", "DSLogicPlus.fw", "DSLogicPlus-pgl12.bin", 16, 256 << 20,
                     SAMPLE_RATES_400, 200_000_000, 400_000_000, False, max25_vth=True,
-                    modes_high=PLUS_MODES),
+                    security=True, modes_high=PLUS_MODES),
     0x0034: Profile(0x0034, "DSLogic Plus", "DSLogicPlus-pgl12-2.fw", "DSLogicPlus-pgl12-2.bin", 16,
                     256 << 20, SAMPLE_RATES_400, 200_000_000, 400_000_000, False, max25_vth=True,
-                    modes_high=PLUS_MODES),
+                    security=True, modes_high=PLUS_MODES),
     0x002A: Profile(0x002A, "DSLogic U3Pro16", "DSLogicU3Pro16.fw", "DSLogicU3Pro16.bin", 16, 2 << 30,
-                    SAMPLE_RATES_1000, 500_000_000, 1_000_000_000, True,
+                    SAMPLE_RATES_1000, 500_000_000, 1_000_000_000, True, adf4360=True,
                     modes_high=U3PRO16_HIGH, modes_super=U3PRO16_SUPER),
     0x002C: Profile(0x002C, "DSLogic U3Pro32", "DSLogicU3Pro32.fw", "DSLogicU3Pro32.bin", 32, 2 << 30,
-                    SAMPLE_RATES_1000, 500_000_000, 1_000_000_000, True,
+                    SAMPLE_RATES_1000, 500_000_000, 1_000_000_000, True, adf4360=True,
                     modes_high=U3PRO32_HIGH, modes_super=U3PRO32_SUPER),
+    # The U3Pro16 electronics on an FX2: USB 2 only, 4 GB memory
+    0x002D: Profile(0x002D, "DSLogic U2Pro16", "DSLogicU2Pro16.fw", "DSLogicU2Pro16.bin", 16, 4 << 30,
+                    SAMPLE_RATES_1000, 500_000_000, 1_000_000_000, False, adf4360=True,
+                    security=True, modes_high=U3PRO16_HIGH),
 }
 
 
@@ -265,6 +285,11 @@ def length24(value: int) -> bytes:
     if not 0 <= value < 1 << 24:
         raise ValueError("length does not fit into 24 bits")
     return value.to_bytes(3, "little")
+
+
+def security_key(eeprom: bytes) -> tuple[int, ...]:
+    """The key words of the security handshake from the EEPROM at ``SECU_EEP_ADDR``."""
+    return struct.unpack(f"<{SECU_STEPS}H", eeprom[: 2 * SECU_STEPS])
 
 
 def threshold_code(voltage: float, max25_vth: bool) -> int:
@@ -500,7 +525,7 @@ def trigger_replication(profile: Profile, mode: int) -> tuple[bool, bool]:
     """(quarter, half) replication of the trigger pattern (``dsl_fpga_arm``)."""
     quarter_mode = bool(mode & (1 << QUAR_MODE_BIT))
     half_mode = bool(mode & (1 << HALF_MODE_BIT))
-    if profile.usb3:  # ADF4360 clock: 1 GHz uses the half replication, 500 MHz none
+    if profile.adf4360:  # ADF4360 clock: 1 GHz uses the half replication, 500 MHz none
         return False, quarter_mode
     return quarter_mode, half_mode
 

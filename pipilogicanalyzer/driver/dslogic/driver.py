@@ -6,7 +6,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Driver for the DreamSourceLab DSLogic Plus, U3Pro16 and U3Pro32."""
+"""Driver for the DreamSourceLab DSLogic Plus, U2Pro16, U3Pro16 and U3Pro32."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def prepare(
 ) -> UsbDeviceInfo:
     """Makes sure the board runs the firmware of this driver; returns its (new) bus position.
 
-    The Plus, U3Pro16 and U3Pro32 normally start their firmware from their own memory. Only when
+    The Plus, U2Pro16, U3Pro16 and U3Pro32 normally start their firmware from their own memory. Only when
     one does not (an FX2 board still waiting for a RAM download) is DSView's firmware image
     loaded, if it can be found.
     """
@@ -190,6 +190,9 @@ class DSLogicDriver(AnalyzerDriverBase):
     def write_register(self, address: int, value: int) -> None:
         self._write(protocol.CTL_I2C_REG, bytes([value & 0xFF]), offset=address)
 
+    def read_register(self, address: int) -> int:
+        return self._read(protocol.CTL_I2C_STATUS, 1, offset=address)[0]
+
     # ----------------------------------------------------------------- open
     def _open(self) -> None:
         try:
@@ -215,8 +218,11 @@ class DSLogicDriver(AnalyzerDriverBase):
                 self._configure_fpga()
 
             self.write_register(protocol.CTR0_ADDR, protocol.CTR0_NONE)
+            if self.profile.security:
+                passed = self._security_check()
+                log.debug("Security check %s", "passed" if passed else "failed")
             self.set_threshold(DEFAULT_THRESHOLD)
-            if self.profile.usb3:
+            if self.profile.adf4360:
                 for address, values, delay_ms in protocol.ADC_CLOCK_INIT:
                     if delay_ms:
                         time.sleep(delay_ms / 1000)
@@ -254,6 +260,44 @@ class DSLogicDriver(AnalyzerDriverBase):
         self._write(protocol.CTL_WORDWIDE, bytes([protocol.WR_WORDWIDE]))
         self.hdl_version = protocol.HDL_VERSION
         log.debug("FPGA configured with %s (%d bytes)", name, len(bitstream))
+
+    def _security_write(self, command: int, value: int) -> None:
+        self.write_register(protocol.SEC_DATA_ADDR, value)
+        self.write_register(protocol.SEC_DATA_ADDR + 1, value >> 8)
+        self.write_register(protocol.SEC_CTRL_ADDR, command)
+        self.write_register(protocol.SEC_CTRL_ADDR + 1, command >> 8)
+
+    def _security_passed(self) -> bool:
+        return bool(self.read_register(protocol.SEC_CTRL_ADDR) & protocol.SECU_PASS)
+
+    def _security_check(self) -> bool:
+        """``dsl_secuCheck``: unlocks the FPGA, which does not capture before.
+
+        As in DSView a failure is only logged; the device then captures nothing.
+        """
+        key = protocol.security_key(
+            self._read(protocol.CTL_NVM, 2 * protocol.SECU_STEPS, offset=protocol.SECU_EEP_ADDR)
+        )
+        for control in (0, 1):  # reset
+            if control:
+                time.sleep(0.01)
+            self.write_register(protocol.SEC_CTRL_ADDR, control)
+            self.write_register(protocol.SEC_CTRL_ADDR + 1, 0)
+        if self._security_passed():
+            return True
+        self._security_write(protocol.SECU_START, 0)
+        tries = protocol.SECU_TRY_COUNT
+        for step in reversed(range(protocol.SECU_STEPS)):
+            if self._security_passed():
+                break
+            while not self.read_register(protocol.SEC_CTRL_ADDR) & protocol.SECU_READY:
+                tries -= 1
+                if tries < 0:
+                    return False
+            if self.read_register(protocol.SEC_DATA_ADDR + 1) or self.read_register(protocol.SEC_DATA_ADDR):
+                return False
+            self._security_write(protocol.SECU_CHECK, key[step])
+        return self._security_passed()
 
     def set_threshold(self, voltage: float) -> None:
         if self._threshold == voltage:

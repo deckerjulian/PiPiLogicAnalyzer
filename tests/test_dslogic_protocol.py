@@ -97,6 +97,24 @@ def test_trigger_words_and_replication():
     assert value == 0x0202
 
 
+def test_trigger_replication_follows_the_sampling_clock():
+    half = 1 << protocol.HALF_MODE_BIT
+    quarter = 1 << protocol.QUAR_MODE_BIT
+    assert protocol.trigger_replication(PLUS, quarter) == (True, False)
+    assert protocol.trigger_replication(PLUS, half) == (False, True)
+    # ADF4360 boards, also the U2Pro16 on USB 2: 1 GHz uses the half replication
+    for profile in (U3PRO16, protocol.PROFILES[0x002D]):
+        assert protocol.trigger_replication(profile, quarter) == (False, True)
+        assert protocol.trigger_replication(profile, half) == (False, False)
+
+
+def test_security_key_from_the_eeprom():
+    eeprom = bytes.fromhex("b543b62eca373e265b3d72cf325c6e0f")
+    assert protocol.security_key(eeprom) == (
+        0x43B5, 0x2EB6, 0x37CA, 0x263E, 0x3D5B, 0xCF72, 0x5C32, 0x0F6E,
+    )
+
+
 def test_trigger_in_the_settings():
     capture = setup(trigger=TriggerSpec({1: "R"}), rate=400_000_000, channels=(0, 1))
     fields = words(protocol.build_settings(capture))

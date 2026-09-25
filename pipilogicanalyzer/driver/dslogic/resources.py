@@ -32,6 +32,7 @@ KNOWN_FILES: dict[str, tuple[int, str]] = {
     "DSLogicPlus.bin": (341160, "6a6f8dc0ed27dbfbd41dd98b030da52d8e2c5c7f840c23ed903c7d5fe38e11dd"),
     "DSLogicPlus-pgl12.bin": (530620, "340413e053a765c38ee87e89f45a55ad2530a98ad132ccb7e8a9a0b0c99d0ee2"),
     "DSLogicPlus-pgl12-2.bin": (530620, "b4ee3d3042d8c7cf3536403407490ffabc7ff0699332da331a04c1e6f0bad067"),
+    "DSLogicU2Pro16.bin": (465304, "c0be3b52222a9efea8fc5cc59f579c6880e73e9f103982d2aeb4c443ca64d8c9"),
     "DSLogicU3Pro16.bin": (465304, "0ae5a6e52eb9d6db27c3591d3d0df5c34c48c8509d25c65c6ea1f008f622a56e"),
     "DSLogicU3Pro32.bin": (465304, "0dc3251be0476cf964fa521ce2a34651ae82724e96fd4272cadc0cc27c86a17d"),
 }

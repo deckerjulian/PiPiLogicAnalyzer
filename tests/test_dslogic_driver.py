@@ -40,6 +40,11 @@ class FakeDSLogic(UsbDevice):
         self.closed = False
         self.started = threading.Event()
         self._pending_read: tuple[int, int, int] = (0, 0, 0)
+        #: key of the security handshake in the EEPROM and the words the FPGA got so far
+        self.security_key = tuple(range(0x1111, 0x9999, 0x1111))
+        self.security_words: list[int] = []
+        self.security_passed = False
+        self._security = {protocol.SEC_CTRL_ADDR + i: 0 for i in range(4)}
 
     # control
     def control_out(self, request, data, timeout_ms=3000):
@@ -53,6 +58,21 @@ class FakeDSLogic(UsbDevice):
             self.fpga_done = True  # the bitstream (or the settings) ended
         if dest == protocol.CTL_START:
             self.started.set()
+        if dest == protocol.CTL_I2C_REG and offset in self._security:
+            self._security[offset] = payload[0]
+            if offset == protocol.SEC_CTRL_ADDR + 1:
+                self._security_command()
+
+    def _security_command(self):
+        command = self._security[protocol.SEC_CTRL_ADDR + 1] << 8 | self._security[protocol.SEC_CTRL_ADDR]
+        data = self._security[protocol.SEC_DATA_ADDR + 1] << 8 | self._security[protocol.SEC_DATA_ADDR]
+        if command == 0:
+            self.security_words.clear()
+            self.security_passed = False
+        elif command == protocol.SECU_CHECK:
+            self.security_words.append(data)
+            # the FPGA expects the key from its last word to its first
+            self.security_passed = self.security_words == list(reversed(self.security_key))
 
     def control_in(self, request, length, timeout_ms=3000):
         dest, offset, size = self._pending_read
@@ -61,6 +81,10 @@ class FakeDSLogic(UsbDevice):
         if dest == protocol.CTL_HW_STATUS:
             status = protocol.FPGA_INIT_B | protocol.SYS_CLR | protocol.GPIF_DONE
             return bytes([status | (protocol.FPGA_DONE if self.fpga_done else 0)])
+        if dest == protocol.CTL_NVM and offset == protocol.SECU_EEP_ADDR:
+            return struct.pack(f"<{protocol.SECU_STEPS}H", *self.security_key)[:size]
+        if dest == protocol.CTL_I2C_STATUS and offset == protocol.SEC_CTRL_ADDR:
+            return bytes([protocol.SECU_READY | (protocol.SECU_PASS if self.security_passed else 0)])
         if dest == protocol.CTL_I2C_STATUS:
             data = bytearray(size)
             if size > protocol.HDL_VERSION_ADDR:
@@ -163,6 +187,24 @@ def test_u3_models_initialise_the_sampling_clock():
     registers = [offset for dest, offset, _data in device.writes if dest == protocol.CTL_I2C_REG]
     assert registers.count(protocol.ADCC_ADDR) == 12 and protocol.ADCC_ADDR + 2 in registers
     assert driver.channel_count == 32 and driver.max_frequency == 1_000_000_000
+
+
+def test_u2pro16_sets_up_the_adf4360_clock_and_passes_the_security_check():
+    device = FakeDSLogic(info(0x002D), fpga_done=False)
+    driver = open_driver(device)
+    registers = [offset for dest, offset, _data in device.writes if dest == protocol.CTL_I2C_REG]
+    assert registers.count(protocol.ADCC_ADDR) == 12
+    assert device.security_passed
+    assert device.security_words == list(reversed(device.security_key))
+    assert driver.profile.header_size == 512
+    assert driver.channel_count == 16 and driver.max_frequency == 1_000_000_000
+    assert driver.device_details()["MEMORY"] == "4096 Mbit"
+
+
+def test_boards_without_security_skip_the_check():
+    device = FakeDSLogic(info(0x002A))
+    open_driver(device)
+    assert protocol.SEC_CTRL_ADDR not in [offset for dest, offset, _data in device.writes]
 
 
 def test_missing_bitstream_is_reported():
