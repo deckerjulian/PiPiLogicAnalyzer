@@ -463,6 +463,75 @@ QProgressBar::chunk {{
 QMessageBox QLabel {{
     min-width: 320px;
 }}
+QPushButton[variant="tool"] {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    padding: 4px 6px;
+}}
+QPushButton[variant="tool"]:hover:!disabled {{
+    background-color: #36363b;
+    border-color: {BORDER};
+}}
+QPushButton[variant="tool"]:checked {{
+    background-color: #263652;
+    border-color: #3b5577;
+}}
+QFrame[role="viewbar"] {{
+    background-color: {PANEL};
+    border-top: 1px solid {BORDER};
+}}
+QFrame[role="viewbar"] QLabel {{
+    background-color: transparent;
+}}
+QMainWindow::separator {{
+    background-color: {BORDER};
+    width: 1px;
+    height: 1px;
+}}
+QMainWindow::separator:hover {{
+    background-color: {ACCENT};
+}}
+QDockWidget {{
+    titlebar-close-icon: none;
+    color: {TEXT_MUTED};
+    font-size: 11px;
+    font-weight: 600;
+}}
+QDockWidget::title {{
+    background-color: {PANEL};
+    padding: 5px 8px;
+    border-bottom: 1px solid {BORDER};
+    text-align: left;
+}}
+QDockWidget::close-button {{
+    background: transparent;
+    border: none;
+    padding: 0;
+}}
+QTabWidget#side-tabs::pane {{
+    border: none;
+    border-top: 1px solid {BORDER};
+    top: 0;
+}}
+QTabWidget#side-tabs > QTabBar {{
+    background-color: {PANEL};
+}}
+QTabWidget#side-tabs > QTabBar::tab {{
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    margin: 0;
+    padding: 8px 10px 6px 10px;
+    color: {TEXT_MUTED};
+}}
+QTabWidget#side-tabs > QTabBar::tab:hover {{
+    color: {TEXT};
+}}
+QTabWidget#side-tabs > QTabBar::tab:selected {{
+    color: {TEXT};
+    border-bottom: 2px solid {ACCENT};
+}}
 """
 
 

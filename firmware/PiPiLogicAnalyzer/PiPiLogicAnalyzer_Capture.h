@@ -44,6 +44,19 @@ uint64_t StreamWrittenSamples();
 uint8_t* GetStreamBuffer(uint32_t* bufferSamples, uint8_t* bytesPerSample);
 //Bit of every captured channel in the stream samples, e.g. "0,1,2,24"
 void GetStreamSampleBits(char* buffer, uint32_t size);
+//Trigger sequence / state mode (trigger type 7): command 10 configures the stages and the clock,
+//the next capture request with trigger type 7 uses the configuration
+bool SetCaptureSequence(const uint8_t* data, uint32_t length);
+bool StartCaptureSequence(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode);
+//Evaluates the samples captured since the last call (main loop, while IsSequenceCapture())
+void SequenceCaptureStep();
+bool IsSequenceCapture();
+//Measures the speed of the sequence evaluation (once at start-up, uses the capture buffer)
+void InitSequenceCapture();
+//Highest sample rate of a capture with a trigger sequence; measuredRate: worst case measured
+uint32_t GetSequenceMaxRate(uint32_t* measuredRate);
+//Highest clock frequency of the state mode
+uint32_t GetStateMaxClock();
 void StopCapture();
 bool IsCapturing();
 uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* captureMode);

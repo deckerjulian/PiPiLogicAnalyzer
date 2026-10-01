@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ...core import colors
 from ...sigrok.composition import compose
+from ...sigrok.links import linked_segments, read_parts
 from ..view_model import AnnotationHover, CaptureViewModel
 from .navigation import WheelNavigator
 
@@ -33,6 +34,19 @@ NAME_COLUMN_WIDTH = 150
 MIN_SEGMENT_WIDTH = 3.0
 #: Segments checked before the one starting at the pointer (overlapping classes in a row).
 LOOKBEHIND_SEGMENTS = 16
+#: Values listed in the tooltip of an entry made of several
+MAX_LISTED_PARTS = 12
+
+
+def build_hover(groups, channels, group, segment) -> AnnotationHover:
+    """The hover of ``segment``: the entries that belong to it in every row, and either the values
+    it is made of (an instruction: its bus cycles) or the channel levels it was read from."""
+    links = linked_segments(groups, segment)
+    parts = read_parts(links, group)
+    composition = None
+    if not parts and getattr(group, "info", None) is not None:
+        composition = compose(group.info, group.instance, channels, segment)
+    return AnnotationHover(group=group, segment=segment, composition=composition, links=links, parts=parts)
 
 
 class AnnotationViewer(QWidget):
@@ -172,7 +186,9 @@ class AnnotationViewer(QWidget):
             QRectF(NAME_COLUMN_WIDTH, top, self.width() - NAME_COLUMN_WIDTH, ANNOTATION_HEIGHT)
         )
 
-        hovered = self.model.hover.segment if self.model.hover is not None else None
+        hover = self.model.hover
+        hovered = hover.segment if hover is not None else None
+        linked = hover.linked_ids if hover is not None else set()
         for segment in segments[begin:end]:
             if segment.last_sample < first:
                 continue
@@ -180,18 +196,27 @@ class AnnotationViewer(QWidget):
             x_end = self._x_for(max(segment.last_sample, segment.first_sample + 1))
             width = max(x_end - x_start, MIN_SEGMENT_WIDTH)
             rect = QRectF(x_start, top + 2, width, ANNOTATION_HEIGHT - 4)
-            self._draw_segment(painter, metrics, segment, rect, segment is hovered)
+            self._draw_segment(painter, metrics, segment, rect, segment is hovered, id(segment) in linked)
 
         painter.restore()
 
     def _draw_segment(
-        self, painter: QPainter, metrics: QFontMetricsF, segment, rect: QRectF, hovered: bool = False
+        self, painter: QPainter, metrics: QFontMetricsF, segment, rect: QRectF, hovered: bool = False,
+        linked: bool = False,
     ) -> None:
         color = colors.get_color(segment.type_id % len(colors.PALETTE))
         text_color = colors.find_contrast(color)
 
-        painter.setBrush(color.lighter(125) if hovered else color)
-        painter.setPen(QPen(colors.TEXT_COLOR, 2) if hovered else QPen(QColor(0, 0, 0), 1))
+        if hovered:
+            painter.setBrush(color.lighter(125))
+            painter.setPen(QPen(colors.TEXT_COLOR, 2))
+        elif linked:
+            # Belongs to the hovered entry (its parts, or the entry around it)
+            painter.setBrush(color.lighter(112))
+            painter.setPen(QPen(colors.TEXT_COLOR, 1.2, Qt.DashLine))
+        else:
+            painter.setBrush(color)
+            painter.setPen(QPen(QColor(0, 0, 0), 1))
 
         if rect.width() < 8:
             painter.drawEllipse(rect.center(), rect.width() / 2, rect.height() / 2)
@@ -251,15 +276,19 @@ class AnnotationViewer(QWidget):
             segment = segments[candidate]
             end = max(segment.last_sample, segment.first_sample + 1)
             if segment.first_sample <= sample <= max(end, segment.first_sample + tolerance):
-                composition = None
-                if getattr(group, "info", None) is not None:
-                    composition = compose(group.info, group.instance, self.model.channels, segment)
-                return AnnotationHover(group=group, segment=segment, composition=composition)
+                current = self.model.hover
+                if current is not None and current.segment is segment:
+                    return current  # the links are computed once per entry
+                return build_hover(self.model.annotation_groups, self.model.channels, group, segment)
         return None
 
     @staticmethod
     def tooltip_text(hover: AnnotationHover) -> str:
         lines = [hover.segment.values[0] if hover.segment.values else ""]
+        if hover.parts:
+            lines += [f"  {part.values[0]}" for part in hover.parts[:MAX_LISTED_PARTS] if part.values]
+            if len(hover.parts) > MAX_LISTED_PARTS:
+                lines.append(f"  … {len(hover.parts) - MAX_LISTED_PARTS} more")
         composition = hover.composition
         if composition is not None:
             details = composition.describe()

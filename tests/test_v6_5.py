@@ -14,8 +14,8 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
 from pipilogicanalyzer.core.formatting import to_inferred_frequency
 from pipilogicanalyzer.core.profiles import ProfileStore
 from pipilogicanalyzer.core.settings import settings_directory
-from pipilogicanalyzer.driver import protocol
-from pipilogicanalyzer.driver.analyzer import PiPiLogicAnalyzerDriver
+from pipilogicanalyzer.driver.pico import protocol
+from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
 from pipilogicanalyzer.driver.base import CaptureError, CaptureMode
 from pipilogicanalyzer.driver.models import AnalyzerChannel
 from pipilogicanalyzer.sigrok import engine
@@ -27,7 +27,7 @@ from test_driver import FakeTransport, make_session
 
 # ------------------------------------------------------------------- protocol
 def test_v6_5_capture_request_layout():
-    layout = protocol.LAYOUT_V6_5
+    layout = protocol.REQUEST_LAYOUT
     assert layout.size == 56
 
     raw = protocol.CaptureRequest(
@@ -49,38 +49,17 @@ def test_v6_5_capture_request_layout():
     assert raw[54:56] == bytes([0, 2])
 
 
-@pytest.mark.parametrize(
-    "major, minor, size", [(6, 0, 48), (6, 4, 48), (6, 5, 56), (7, 0, 56)]
-)
-def test_request_layout_follows_the_firmware_version(major, minor, size):
-    assert protocol.layout_for_version(major, minor).size == size
-
-
 # --------------------------------------------------------------------- driver
 @pytest.fixture
 def driver_v65(monkeypatch):
     transport = FakeTransport(channels=32)
     transport._responses[0] = "LOGIC_ANALYZER_V6_5"
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
     instance = PiPiLogicAnalyzerDriver("/dev/fake")
     instance.test_transport = transport  # type: ignore[attr-defined]
     return instance
-
-
-@pytest.fixture
-def driver_v60(monkeypatch):
-    transport = FakeTransport()
-    monkeypatch.setattr(
-        "pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport
-    )
-    return PiPiLogicAnalyzerDriver("/dev/fake")
-
-
-def test_v6_0_devices_keep_the_old_request(driver_v60):
-    assert driver_v60.request_layout is protocol.LAYOUT_V6_0
-    assert driver_v60.max_loop_count == 254
 
 
 def test_v6_5_devices_receive_the_32_channel_request(driver_v65, monkeypatch):
@@ -97,17 +76,17 @@ def test_v6_5_devices_receive_the_32_channel_request(driver_v65, monkeypatch):
 
     request = driver_v65.compose_request(session, CaptureMode.CHANNELS_24)
     expected = protocol.command_packet(
-        protocol.CMD_START_CAPTURE, request.pack(protocol.LAYOUT_V6_5)
+        protocol.CMD_START_CAPTURE, request.pack(protocol.REQUEST_LAYOUT)
     )
     assert bytes(driver_v65.test_transport.written).endswith(expected)
 
 
-def test_more_than_254_bursts_need_v6_5_firmware(driver_v60, driver_v65):
+def test_up_to_65535_bursts(driver_v65):
     session = make_session(channels=1, pre=2, post=6)
     session.loop_count = 1000
-    requested = session.total_samples
-    assert not driver_v60.validate_settings(session, requested)
-    assert driver_v65.validate_settings(session, requested)
+    assert driver_v65.validate_settings(session, session.total_samples)
+    session.loop_count = 65535
+    assert not driver_v65.validate_settings(session, session.total_samples)
 
 
 def test_burst_measurement_limits(driver_v65):

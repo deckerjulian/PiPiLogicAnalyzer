@@ -43,6 +43,59 @@ START:
 .wrap
 
 ;--------------------------------------------------------------------------------------------
+.program SEQUENCE_CAPTURE
+;Trigger sequence capture (trigger type 7), timing mode: samples without end into the ring
+;buffer while the CPU evaluates the sequence. Y counts the samples down from 0xFFFFFFFF; X is the
+;stop value, the bit-inverted number of samples to take, which the CPU sends through the TX FIFO
+;(PULL NOBLOCK keeps X while the FIFO is empty). The program stops exactly after that sample and
+;sets IRQ 0. 5 cycles per sample.
+
+    mov y, ~null                ;sample counter
+
+SAMPLE:
+
+    in pins 32                  ;capture
+    pull noblock                ;new stop value from the CPU, or X again
+    mov x, osr
+    jmp y-- COUNTED             ;count the sample
+COUNTED:
+    jmp x!=y SAMPLE             ;more samples?
+
+    irq 0                       ;notify the CPU that the capture is complete
+
+LOCK:
+
+    jmp LOCK                    ;block the program
+
+;--------------------------------------------------------------------------------------------
+.program STATE_CAPTURE
+;State mode (trigger type 7 with an external clock): one sample on every active edge of the
+;clock input. The clock is the IN pin with the index of the WAIT instructions (relative to
+;INPUT_PIN_BASE); the firmware patches the index and, for the falling edge, the polarities.
+;Counter and stop value like SEQUENCE_CAPTURE. The clock has to stay at the active level for at
+;least 4 and at the inactive level for at least 3 cycles (system clock / 8 with 50% duty cycle).
+
+    mov y, ~null                ;sample counter
+    wait 0 pin 0                ;the first sample needs a complete edge
+
+SAMPLE:
+
+    wait 1 pin 0                ;active edge
+    in pins 32                  ;capture
+    pull noblock                ;new stop value from the CPU, or X again
+    mov x, osr
+    wait 0 pin 0                ;inactive level
+    jmp y-- COUNTED             ;count the sample
+COUNTED:
+    jmp x!=y SAMPLE             ;more samples?
+
+    irq 0                       ;notify the CPU that the capture is complete
+
+LOCK:
+
+    jmp LOCK                    ;block the program
+
+;--------------------------------------------------------------------------------------------
 .program POSITIVE_CAPTURE
 
     pull

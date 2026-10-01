@@ -25,6 +25,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from .sample_store import DiskAllocator, MemoryAllocator, is_on_disk
+
 
 @dataclass(frozen=True)
 class Interval:
@@ -38,6 +40,12 @@ class Interval:
     @property
     def sample_count(self) -> int:
         return self.end - self.start
+
+
+#: Samples indexed at once (bounds the temporary memory of large captures)
+INDEX_BLOCK = 16 << 20
+#: Runs from which the index of a capture on disk goes to disk as well
+DISK_INDEX_RUNS = 4 << 20
 
 
 class ChannelTransitions:
@@ -92,28 +100,33 @@ class ChannelTransitions:
         """Indexes ``samples`` from :attr:`sample_count` up to ``sample_count``.
 
         ``samples`` is the whole channel (window) so far; the work is proportional to the new
-        samples.
+        samples, and done in blocks, so a capture on disk is never loaded at once. The index of
+        such a capture is kept on disk as well.
         """
         old = self.sample_count
         if sample_count <= old:
             return
+        on_disk = is_on_disk(samples)
         if old == 0:
-            part = np.asarray(samples[:sample_count], dtype=np.uint8)
-            changes = np.flatnonzero(part[1:] != part[:-1]) + 1
-            starts = np.concatenate(([0], changes)).astype(np.int64) + self.origin
-            values = part[np.concatenate(([0], changes))]
             self._low = self._high  # nothing of an earlier window is kept
-        else:
-            part = np.asarray(samples[old - 1 : sample_count], dtype=np.uint8)
+            first = np.asarray(samples[:1], dtype=np.uint8)
+            self._append(np.array([self.origin], dtype=np.int64), first, on_disk)
+            old = 1
+        for start in range(old, sample_count, INDEX_BLOCK):
+            end = min(start + INDEX_BLOCK, sample_count)
+            part = np.asarray(samples[start - 1 : end], dtype=np.uint8)
             changes = np.flatnonzero(part[1:] != part[:-1]) + 1
-            starts = changes.astype(np.int64) + (old - 1 + self.origin)
-            values = part[changes]
+            if len(changes):
+                self._append(changes.astype(np.int64) + (start - 1 + self.origin), part[changes], on_disk)
+        self.sample_count = sample_count
 
+    def _append(self, starts: np.ndarray, values: np.ndarray, on_disk: bool) -> None:
         kept = len(self)
         if self._high + len(starts) > len(self._starts):
             capacity = max(2 * (kept + len(starts)), 1024)
-            new_starts = np.empty(capacity, dtype=np.int64)
-            new_values = np.empty(capacity, dtype=np.uint8)
+            allocator = DiskAllocator() if on_disk and capacity > DISK_INDEX_RUNS else MemoryAllocator()
+            new_starts = allocator.zeros(capacity, np.int64)
+            new_values = allocator.zeros(capacity, np.uint8)
             new_starts[:kept] = self.absolute_starts
             new_values[:kept] = self.values
             self._starts, self._values = new_starts, new_values
@@ -121,7 +134,6 @@ class ChannelTransitions:
         self._starts[self._high : self._high + len(starts)] = starts
         self._values[self._high : self._high + len(starts)] = values
         self._high += len(starts)
-        self.sample_count = sample_count
 
     def slide_to(self, origin: int) -> None:
         """Drops the samples before the absolute position ``origin`` (moving window)."""
@@ -188,11 +200,14 @@ class ChannelTransitions:
         """For sample positions ``boundaries``: the level at each (but the last) and the
         number of edges before each, e.g. to draw columns of many samples."""
         starts = self.absolute_starts
-        positions = boundaries + self.origin
-        run_at_boundary = np.searchsorted(starts, positions[:-1], side="right") - 1
+        # Integer positions: searching floats would convert all the starts to floats first.
+        # (a run starts at or before b <=> at or before floor(b); an edge lies before b <=>
+        # before ceil(b))
+        positions = np.asarray(boundaries, dtype=np.float64) + self.origin
+        run_at_boundary = np.searchsorted(starts, np.floor(positions[:-1]).astype(np.int64), side="right") - 1
         run_at_boundary = np.clip(run_at_boundary, 0, len(self) - 1)
         # starts[0] is the start of the first run, not an edge.
-        edges_before = np.searchsorted(starts[1:], positions, side="left")
+        edges_before = np.searchsorted(starts[1:], np.ceil(positions).astype(np.int64), side="left")
         return self.values[run_at_boundary], edges_before
 
 

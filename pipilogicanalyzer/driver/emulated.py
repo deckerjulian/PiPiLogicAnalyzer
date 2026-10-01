@@ -28,6 +28,7 @@ from .base import (
     CaptureError,
     CaptureLimits,
     CaptureMode,
+    DeviceSection,
 )
 from .models import CaptureSession, TriggerType
 
@@ -64,6 +65,16 @@ class EmulatedAnalyzerDriver(AnalyzerDriverBase):
     @property
     def driver_type(self) -> AnalyzerDriverType:
         return AnalyzerDriverType.EMULATED
+
+    @property
+    def is_hardware(self) -> bool:
+        return False
+
+    def describe(self) -> list[DeviceSection]:
+        return [
+            ("Device", [("Identification", self.device_version or "-")]),
+            ("Connection", [("Type", "Emulated"), ("Note", "No hardware: loaded, created or computed captures")]),
+        ]
 
     @property
     def is_network(self) -> bool:
@@ -130,7 +141,9 @@ class EmulatedAnalyzerDriver(AnalyzerDriverBase):
             return CaptureMode.CHANNELS_16
         return CaptureMode.CHANNELS_24
 
-    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
+    def get_limits(
+        self, channels: Sequence[int], acquisition_mode: Optional[str] = None, **_stream_options
+    ) -> CaptureLimits:
         split = self._split_channels_per_device(channels)
         limits = [AnalyzerDriverBase.get_limits(self, group) for group in split]
         return CaptureLimits(

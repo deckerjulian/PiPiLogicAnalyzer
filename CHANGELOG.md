@@ -4,10 +4,60 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). A release is created by pushing a tag `v<version>`
 whose version has a section in this file (see [Creating a release](README.md#creating-a-release)).
 
-## [Unreleased]
+## [7.2.0] - 2026-10-01
 
 ### Application
 
+- **The application requires the firmware it comes with.** Boards report a protocol version
+  (`PROTOCOL:<n>` after the identification); a board with another or older firmware, including
+  the original 6.5 firmware, is no longer opened: connecting it offers the firmware update. The
+  48 byte capture request of V6_0 and the fallbacks for firmware without capabilities were
+  removed.
+- **Analysis tools in the style of professional logic analyzers:** cursors A and B with Δt and
+  1/Δt, statistics of the channels (frequency, duty cycle, pulse widths) and setup/hold times;
+  named markers; search for edges, patterns with don't-cares, pulse widths, gaps, bus values and
+  decoder output (F3); buses and groups with symbol tables; a listing of every change or of the
+  decoder output; charts of bus values and histograms; comparison with a reference capture; state
+  analysis on the edges of a clock channel.
+- **Trigger sequences:** stages of patterns, edges, pulse widths and gaps, with counts and time
+  limits; evaluated by the application on a stream (software trigger, any device that streams)
+  or by the device when it reports `TRIGGER_SEQUENCE`. State mode with an external clock for
+  devices that report `STATE_MODE`.
+- **New main window layout:** rate, length and trigger of the next capture in the toolbar,
+  *Start* captures at once (F5), all settings with Ctrl+F5; the decoders, measurements, search,
+  markers and capture information as tabs of a panel, the listing as a panel below; both can be
+  moved and closed, and the layout is restored. The toolbar groups file, device, capture settings,
+  start/repeat/stop and the panels with icons; every menu entry has an icon; zoom and channel
+  height moved from the side panel to a bar below the waveform.
+- **Start, Repeat and Stop in the middle of the toolbar**; while a device is connected the device
+  list makes room for the capture settings.
+- **Detailed list of an annotation row:** the other rows of the decoder are columns of their own,
+  e.g. the bytes read during each instruction of a disassembly (`D0 F5 EE`) and its memory region;
+  the details of the selected entry show every form of its text, those entries one by one with
+  their time, and the levels of the channels the decoder read. The filter and *Copy* include them.
+- **Hovering an annotation marks what belongs to it** in every row: the bus cycles of an
+  instruction, or the instruction of a bus cycle (dashed outline). An entry made of several values
+  shows where each was read and lists them next to the marked span, instead of one read point with
+  the levels of every channel; a single value keeps its read point, now with the bus values next
+  to it rather than in a corner.
+- **State analysis reads where the data is stable:** it suggests the clock edge and read offset at
+  which the other lines do not change (on a C64: the falling edge of Φ2, one sample before it;
+  the rising edge read the VIC phase and gave wrong addresses), keeps the clock channel so the
+  decoders still find their channels, and *Analyze → Back to the timing capture* returns to the
+  capture it was made of.
+- **sigrok sessions** (`.sr`, PulseView) are exported and opened; decoder output is exported as
+  CSV or JSON.
+- **Command line and Python API** (`pipilogicanalyzer-cli`, `pipilogicanalyzer.api`): list
+  devices, capture, decode, convert between formats; see [docs/cli.md](docs/cli.md).
+- **New look of the waveform:** a time grid and a ruler in time units (0 at the trigger, steps of
+  1, 2 or 5 of ns/µs/ms/s) instead of sample numbers; thinner antialiased lines with the area under
+  a high level lightly filled; dense signals as a translucent band with its envelope instead of a
+  solid block; a calmer default palette of 16 distinct colours; the trigger as a dashed amber line
+  with a flag on the ruler; the overview dims what lies outside the view.
+- **Channel list** in one line per channel: colour strip (click to change), visibility, name and
+  channel number; rename with a double-click or the context menu.
+- **Device information with tabs:** *Overview*, *Capture limits* and *Self-test*; *Device →
+  Self-test…* opens it on the self-test (for the PiPiLogicAnalyzer boards and the DSLogic).
 - **DreamSourceLab DSLogic Plus, U2Pro16, U3Pro16 and U3Pro32** (experimental, tested on a
   U2Pro16): a USB driver following the DSLogic driver of DSView, including its FPGA security
   handshake. Buffer and stream captures at the rates of the device (up to 400 MHz / 1 GHz), edge,
@@ -27,6 +77,17 @@ whose version has a section in this file (see [Creating a release](README.md#cre
   a test counter and checks it sample by sample.
 - Capture dialog: the highest rate follows the acquisition mode (a stream is limited by its
   link); devices whose stream starts at once offer only "None" as its trigger.
+- **Record to disk** (streams of the DSLogic and the PiPiLogicAnalyzer boards): the samples go
+  into memory-mapped files, so a stream is limited by the free disk space instead of about one
+  billion samples. The edge index of such a capture is built in blocks and kept on disk too, the
+  live index is kept when the stream ends, decoders run on request, and a disk that fills up
+  stops the stream. Sample counts beyond 32 bits in the dialog.
+- *Max* next to the sample count, and *Until stopped* starts with the most samples that fit
+  (it kept a small number from earlier settings, e.g. 30,000).
+- The capture overview is drawn from the edge index (two searches per column instead of a sum
+  over every sample) and follows a stream live; the display no longer converts the edge index to
+  floats on every frame, which made large captures slow. Progress of a stream the display cannot
+  keep up with is shown at its newest state instead of queueing.
 - Capture dialog: devices with a fixed list of rates get a list instead of the free value; an
   acquisition mode (buffer/stream), a threshold and "no trigger" appear where the device has them.
   The edge trigger offers all channels of devices with more than 24.
@@ -36,6 +97,11 @@ whose version has a section in this file (see [Creating a release](README.md#cre
 
 ### Firmware
 
+- The identification ends with `PROTOCOL:<n>`, the protocol version the application requires
+  (`FIRMWARE_PROTOCOL`, raised with every protocol change).
+- Trigger sequences evaluated on the board (command 10, trigger type 7) and the state mode with an
+  external clock, reported as `TRIGGER_SEQUENCE`, `TRIGGER_CONDITIONS`, `SEQUENCE_MAX_RATE`,
+  `STATE_MODE` and `STATE_MAX_CLOCK`.
 - Stream capture (capture request with trigger type 6, USB only): the DMA channels fill the
   capture buffer without end and the samples are sent in chunks while they arrive, until the host
   stops the stream; an overtaken buffer ends it with an overflow marker. `STREAM=800000` in the
@@ -45,6 +111,12 @@ whose version has a section in this file (see [Creating a release](README.md#cre
 
 - Dependencies `pyusb` and `libusb-package` (the packaged applications include libusb); the smoke
   test of the builds checks that libusb loads. Linux udev rule for the DSLogic.
+- **Device drivers are independent of the application:** the main window and the dialogs no longer
+  ask which kind of device is connected, the driver describes what its device can do
+  (`is_hardware`, `boards()`, `supports_bootloader`, `has_self_test`, `describe()`, ...). The
+  device list is filled by one backend per kind of device (`ui/devices/`). The driver of the Pico
+  boards (gusmanb's LogicAnalyzer hardware) moved to `driver/pico/`, next to `driver/dslogic/`.
+  [docs/drivers.md](docs/drivers.md) explains how to add a device.
 
 ## [7.1.1] - 2026-09-24
 

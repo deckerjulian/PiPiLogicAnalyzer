@@ -11,8 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver import analyzer, protocol
-from pipilogicanalyzer.driver.analyzer import PiPiLogicAnalyzerDriver
+from pipilogicanalyzer.driver.pico import analyzer, protocol
+from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
 from pipilogicanalyzer.driver.base import (
     ACQUISITION_STREAM,
     CAPABILITY_CONTINUOUS_STREAM,
@@ -43,7 +43,7 @@ class StreamingTransport(FakeTransport):
 def pico(monkeypatch):
     transport = StreamingTransport()
     transport.queue_response("CAPS:SELFTEST,DEVICEINFO,STREAM=800000")
-    monkeypatch.setattr("pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport)
+    monkeypatch.setattr("pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
     monkeypatch.setattr(analyzer, "STREAM_PROGRESS_INTERVAL", 0)
     driver = PiPiLogicAnalyzerDriver("/dev/fake")
     driver.capabilities()
@@ -151,7 +151,7 @@ def test_invalid_streams_are_rejected(pico):
 def test_firmware_without_the_stream_offers_the_buffer_only(monkeypatch):
     transport = FakeTransport()
     transport.queue_response("CAPS:SELFTEST,DEVICEINFO")
-    monkeypatch.setattr("pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport)
+    monkeypatch.setattr("pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
     driver = PiPiLogicAnalyzerDriver("/dev/fake")
     assert driver.acquisition_modes() == ()
     assert driver.start_capture(stream_session()) is CaptureError.BAD_PARAMS
@@ -175,6 +175,7 @@ def test_the_dialog_starts_a_pico_stream_at_once(pico):
         dialog._update_limits()
         assert dialog.frequency_box.maximum() == 400_000
         dialog.continuous_box.setChecked(True)
+        assert dialog.post_samples_box.value() == (1 << 30) // 16  # as many as fit
         dialog.post_samples_box.setValue(50_000)
         dialog._accept()
         session = dialog.selected_settings

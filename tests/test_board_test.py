@@ -15,15 +15,15 @@ from PySide6.QtWidgets import QApplication
 
 from pipilogicanalyzer.core import simulation
 from pipilogicanalyzer.core.simulation import SimulationPattern
-from pipilogicanalyzer.driver import protocol
-from pipilogicanalyzer.driver.analyzer import PiPiLogicAnalyzerDriver
+from pipilogicanalyzer.driver.pico import protocol
+from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
 from pipilogicanalyzer.driver.base import (
     CaptureError,
     CaptureMode,
     SelfTestResult,
     UnsupportedFeatureError,
-    parse_self_test_line,
 )
+from pipilogicanalyzer.driver.pico.protocol import parse_self_test_line
 from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
 from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 from pipilogicanalyzer.ui.dialogs.board_test_dialog import BoardTestDialog
@@ -36,7 +36,7 @@ from test_driver import FakeTransport
 def device(monkeypatch):
     transport = FakeTransport()
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
     driver = PiPiLogicAnalyzerDriver("/dev/fake")
     driver.test_transport = transport  # type: ignore[attr-defined]
@@ -195,7 +195,7 @@ def test_board_test_dialog_explains_missing_firmware_support(application):
 
 
 def test_simulation_dialog_builds_the_session(application):
-    dialog = SimulationDialog(EmulatedAnalyzerDriver(1), on_board=False, board_connected=False)
+    dialog = SimulationDialog(EmulatedAnalyzerDriver(1), on_board=False)
     dialog.channels_box.setValue(7)
     session = dialog.build_session()
 
@@ -236,5 +236,56 @@ def test_main_window_simulates_without_a_board(application, monkeypatch):
         assert window.model.sample_count == 20_000
         if window.provider.registry.get("uart") is not None:
             assert {"uart", "spi", "i2c"} <= {i.decoder_id for i in window.provider.instances}
+    finally:
+        window.close()
+
+
+def test_the_device_information_holds_the_self_test(application):
+    from pipilogicanalyzer.ui.dialogs.device_dialogs import DeviceInfoDialog
+
+    emulated = DeviceInfoDialog(FakeTestDriver([SelfTestResult("RAM", "OK")]))
+    assert emulated.self_test is None and emulated.tabs.count() == 2  # nothing to test
+
+    class Board(FakeTestDriver):
+        @property
+        def is_hardware(self):
+            return True
+
+        @property
+        def has_self_test(self):
+            return True
+
+    dialog = DeviceInfoDialog(Board([SelfTestResult("RAM", "OK")]), initial_tab="self-test")
+    assert dialog.tabs.count() == 3 and dialog.tabs.tabText(dialog.tabs.currentIndex()) == "Self-test"
+    dialog.self_test.start()
+    deadline = time.monotonic() + 5
+    while dialog.self_test.table.rowCount() == 0 and time.monotonic() < deadline:
+        application.processEvents()
+        time.sleep(0.01)
+    assert dialog.self_test.summary.text() == "All 1 tests passed."
+    dialog.show_tab("limits")
+    assert dialog.tabs.tabText(dialog.tabs.currentIndex()) == "Capture limits"
+
+
+def test_the_self_test_menu_opens_the_device_information(application, monkeypatch):
+    from pipilogicanalyzer.ui import main_window as module
+    from pipilogicanalyzer.ui.main_window import MainWindow
+
+    opened = []
+
+    class RecordingDialog:
+        def __init__(self, driver, parent=None, initial_tab="overview"):
+            opened.append(initial_tab)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(module, "DeviceInfoDialog", RecordingDialog)
+    window = MainWindow()
+    try:
+        window.driver = EmulatedAnalyzerDriver(1)
+        window.run_board_test()
+        window.show_device_info()
+        assert opened == ["self-test", "overview"]
     finally:
         window.close()

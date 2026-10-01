@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Optional, Sequence
 
 import numpy as np
@@ -43,6 +43,9 @@ class TriggerType(IntEnum):
     EDGE_OUT = 5
     #: No trigger, the capture starts at once (capability ``IMMEDIATE_TRIGGER``, DSLogic)
     IMMEDIATE = 6
+    #: Trigger sequence of ``CaptureSession.trigger_sequence``: stages of patterns, edges, pulse
+    #: widths and gaps (capability ``TRIGGER_SEQUENCE``, or evaluated by the application on a stream)
+    SEQUENCE = 7
 
     @property
     def label(self) -> str:
@@ -54,7 +57,107 @@ class TriggerType(IntEnum):
             TriggerType.SIMULATION: "Simulation",
             TriggerType.EDGE_OUT: "Edge (trigger output)",
             TriggerType.IMMEDIATE: "None",
+            TriggerType.SEQUENCE: "Sequence",
         }[self]
+
+
+class EdgeKind(str, Enum):
+    RISING = "rising"
+    FALLING = "falling"
+    ANY = "any"
+
+
+class ConditionKind(str, Enum):
+    """What a stage of a trigger sequence waits for."""
+
+    #: The channels of ``mask`` have the levels of ``value``
+    PATTERN = "pattern"
+    #: An edge of ``edge`` on ``channel``
+    EDGE = "edge"
+    #: A pulse on ``channel`` whose width lies in ``[min_ns, max_ns]`` (either may be ``None``);
+    #: ``edge`` RISING: a high pulse, FALLING: a low pulse, ANY: either. It is recognised at its end.
+    PULSE = "pulse"
+    #: ``channel`` stays unchanged for at least ``min_ns`` (timeout); recognised once the time is over
+    GAP = "gap"
+
+
+@dataclass
+class TriggerCondition:
+    kind: ConditionKind = ConditionKind.EDGE
+    #: Channel number of EDGE, PULSE and GAP
+    channel: int = 0
+    edge: EdgeKind = EdgeKind.RISING
+    #: PATTERN: bit ``n`` is channel number ``n``; channels outside the mask are "don't care"
+    mask: int = 0
+    value: int = 0
+    min_ns: Optional[int] = None
+    max_ns: Optional[int] = None
+
+    def describe(self) -> str:
+        name = f"CH{self.channel + 1}"
+        if self.kind == ConditionKind.PATTERN:
+            bits = [n for n in range(64) if self.mask >> n & 1]
+            return "pattern " + (" ".join(f"CH{n + 1}={self.value >> n & 1}" for n in bits) or "(any)")
+        if self.kind == ConditionKind.EDGE:
+            return f"{self.edge.value} edge on {name}"
+        if self.kind == ConditionKind.PULSE:
+            level = {EdgeKind.RISING: "high", EdgeKind.FALLING: "low", EdgeKind.ANY: "any"}[self.edge]
+            limits = []
+            if self.min_ns is not None:
+                limits.append(f"≥ {self.min_ns} ns")
+            if self.max_ns is not None:
+                limits.append(f"≤ {self.max_ns} ns")
+            return f"{level} pulse on {name}" + (f" ({', '.join(limits)})" if limits else "")
+        return f"no edge on {name} for {self.min_ns or 0} ns"
+
+
+@dataclass
+class TriggerStage:
+    condition: TriggerCondition = field(default_factory=TriggerCondition)
+    #: Occurrences of the condition needed to complete the stage
+    count: int = 1
+    #: The stage has to complete within this time after the previous one, else the sequence
+    #: starts again at the first stage (``None``: no limit; ignored for the first stage)
+    within_ns: Optional[int] = None
+
+
+@dataclass
+class TriggerSequence:
+    """Stages completed one after the other; the capture triggers at the end of the last one."""
+
+    stages: list[TriggerStage] = field(default_factory=list)
+
+    def describe(self) -> str:
+        parts = []
+        for index, stage in enumerate(self.stages):
+            text = stage.condition.describe()
+            if stage.count > 1:
+                text += f" ×{stage.count}"
+            if index and stage.within_ns is not None:
+                text += f" within {stage.within_ns} ns"
+            parts.append(text)
+        return " → ".join(parts) or "(empty)"
+
+
+class BusFormat(str, Enum):
+    HEX = "hex"
+    DECIMAL = "decimal"
+    SIGNED = "signed"
+    BINARY = "binary"
+    ASCII = "ascii"
+
+
+@dataclass
+class BusDefinition:
+    """Channels shown together as one value (a bus or a group)."""
+
+    name: str = "Bus"
+    #: Channel numbers, least significant bit first
+    channels: list[int] = field(default_factory=list)
+    format: BusFormat = BusFormat.HEX
+    #: Names shown instead of values (a symbol table), e.g. ``{0xD020: "BORDER"}``
+    symbols: dict[int, str] = field(default_factory=dict)
+    color: Optional[int] = None
 
 
 @dataclass(eq=False)
@@ -148,6 +251,19 @@ class CaptureSession:
     #: Stream until stopped, keeping only the latest ``pre + post`` samples (devices with
     #: ``CAPABILITY_CONTINUOUS_STREAM``)
     continuous: bool = False
+    #: Stream into memory-mapped files instead of memory, limited by the free disk space
+    to_disk: bool = False
+    #: Stages of ``TriggerType.SEQUENCE``
+    trigger_sequence: Optional[TriggerSequence] = None
+    #: The application evaluates the trigger on a stream instead of the device (any device that
+    #: streams); the capture keeps ``pre_trigger_samples`` before and ``post_trigger_samples`` after it
+    software_trigger: bool = False
+    #: State mode: samples are taken on the edges of this channel (external clock) instead of the
+    #: internal rate (capability ``STATE_MODE``); ``None``: timing mode
+    clock_channel: Optional[int] = None
+    clock_edge: EdgeKind = EdgeKind.RISING
+    #: Buses and groups shown with the capture
+    buses: list[BusDefinition] = field(default_factory=list)
 
     @property
     def total_samples(self) -> int:
@@ -157,14 +273,23 @@ class CaptureSession:
         new = copy.copy(self)
         new.capture_channels = [c.clone() for c in self.capture_channels]
         new.bursts = None if self.bursts is None else [copy.copy(b) for b in self.bursts]
+        new.trigger_sequence = copy.deepcopy(self.trigger_sequence)
+        new.buses = copy.deepcopy(self.buses)
         return new
 
     def clone_settings(self) -> "CaptureSession":
         """Clone without sample data (used to persist the capture settings)."""
-        new = self.clone()
-        for channel in new.capture_channels:
-            channel.samples = None
+        new = copy.copy(self)
+        new.capture_channels = []
+        for channel in self.capture_channels:
+            samples, channel.samples = channel.samples, None
+            try:
+                new.capture_channels.append(channel.clone())  # without copying the samples
+            finally:
+                channel.samples = samples
         new.bursts = None
+        new.trigger_sequence = copy.deepcopy(self.trigger_sequence)
+        new.buses = copy.deepcopy(self.buses)
         return new
 
     @property
@@ -189,6 +314,8 @@ class CaptureSession:
                 return f"Pattern {self.trigger_pattern}"
         if self.trigger_type == TriggerType.IMMEDIATE:
             return "Immediate"
+        if self.trigger_type == TriggerType.SEQUENCE:
+            return self.trigger_sequence.describe() if self.trigger_sequence else "(empty)"
         if self.trigger_type in (TriggerType.EDGE, TriggerType.BLAST, TriggerType.EDGE_OUT):
             return "Negative" if self.trigger_inverted else "Positive"
         return "".join(

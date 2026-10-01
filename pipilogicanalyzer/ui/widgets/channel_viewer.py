@@ -18,15 +18,17 @@ column above the scrolling one, so they stay in view while scrolling vertically.
 
 from __future__ import annotations
 
+import html
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QColorDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -36,18 +38,23 @@ from PySide6.QtWidgets import (
 from ...core import colors
 from ...driver.models import AnalyzerChannel
 from ..icons import icon
-from ..theme import ACCENT_HOVER, TEXT_DISABLED
+from ..theme import ACCENT_HOVER, TEXT, TEXT_DISABLED, TEXT_MUTED
 from ..view_model import CHANNEL_HEIGHT_STEP, DEFAULT_CHANNEL_HEIGHT, CaptureViewModel
 
 CHANNEL_COLUMN_WIDTH = 150
-#: Rows lower than this hide the name field.
-COMPACT_ROW_HEIGHT = 40
+#: Rows lower than this show only the channel number or name, in a smaller font.
+COMPACT_ROW_HEIGHT = 28
+COLOR_STRIP_WIDTH = 4
 
 _FLAT_BUTTON = "background: transparent; border: none; padding: 0; min-height: 0;"
 
 
 class ChannelRow(QWidget):
-    """One channel: visibility, pin, colour and name."""
+    """One channel in a single line: colour strip, visibility, number and name, pin.
+
+    Double-click the name to rename the channel (or use the context menu), click the colour
+    strip to change its colour.
+    """
 
     visibility_toggled = Signal(object)
     pin_toggled = Signal(object)
@@ -59,67 +66,128 @@ class ChannelRow(QWidget):
         self.channel = channel
         self.pinned = False
         self.compact = False
-        self.setAutoFillBackground(True)
+        self._background = background
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_menu)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(2)
-        self._layout = layout
-
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(4)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(COLOR_STRIP_WIDTH + 4, 0, 4, 1)
+        layout.setSpacing(4)
 
         self.visibility_button = QToolButton(self)
         self.visibility_button.setAutoRaise(True)
         self.visibility_button.setCursor(Qt.PointingHandCursor)
         self.visibility_button.setToolTip("Show/hide this channel")
-        self.visibility_button.setFixedWidth(22)
+        self.visibility_button.setFixedWidth(18)
+        self.visibility_button.setStyleSheet(_FLAT_BUTTON)
         self.visibility_button.clicked.connect(lambda: self.visibility_toggled.emit(self.channel))
-        header.addWidget(self.visibility_button)
+        layout.addWidget(self.visibility_button)
 
-        self.label = QLabel(channel.textual_channel_number, self)
-        self.label.setCursor(Qt.PointingHandCursor)
-        self.label.setToolTip("Click to change the colour of this channel")
-        self.label.mousePressEvent = self._label_clicked  # type: ignore[assignment]
-        header.addWidget(self.label, 1)
+        self.label = QLabel(self)
+        self.label.setToolTip("Double-click to rename, right-click for more")
+        self.label.setTextFormat(Qt.RichText)
+        self.label.mouseDoubleClickEvent = lambda _event: self.start_rename()  # type: ignore[assignment]
+        layout.addWidget(self.label, 1)
+
+        self.name_edit = QLineEdit(channel.channel_name, self)
+        self.name_edit.setPlaceholderText("Name")
+        self.name_edit.setVisible(False)
+        self.name_edit.editingFinished.connect(self._finish_rename)
+        layout.addWidget(self.name_edit, 1)
 
         self.pin_button = QToolButton(self)
         self.pin_button.setAutoRaise(True)
         self.pin_button.setCursor(Qt.PointingHandCursor)
-        self.pin_button.setFixedWidth(20)
+        self.pin_button.setFixedWidth(18)
         self.pin_button.setStyleSheet(_FLAT_BUTTON)
         self.pin_button.clicked.connect(lambda: self.pin_toggled.emit(self.channel))
-        header.addWidget(self.pin_button)
-        layout.addLayout(header)
+        layout.addWidget(self.pin_button)
 
-        self.name_edit = QLineEdit(channel.channel_name, self)
-        self.name_edit.setPlaceholderText("name")
-        self.name_edit.setAlignment(Qt.AlignCenter)
-        self.name_edit.setMaximumHeight(20)
-        self.name_edit.textChanged.connect(self._on_name_changed)
-        layout.addWidget(self.name_edit)
+        # The row height follows the channel height: no child may keep a row taller than its
+        # channel in the waveform.
+        for widget in (self.visibility_button, self.pin_button, self.label, self.name_edit):
+            widget.setSizePolicy(widget.sizePolicy().horizontalPolicy(), QSizePolicy.Ignored)
 
-        # The row height follows the channel height: the buttons and the label must not keep a
-        # row taller than its channel in the waveform.
-        for widget in (self.visibility_button, self.pin_button):
-            widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
-        self.label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
-
-        self.set_background(background)
         self.set_row_height(DEFAULT_CHANNEL_HEIGHT)
 
+    # ------------------------------------------------------------- appearance
     def set_row_height(self, height: int) -> None:
         self.setMinimumHeight(height)
-        compact = height < COMPACT_ROW_HEIGHT
-        self.compact = compact
-        self.name_edit.setVisible(not compact)
-        margin = 0 if compact else 2
-        self._layout.setContentsMargins(4, margin, 4, margin)
+        self.compact = height < COMPACT_ROW_HEIGHT
         self.refresh()
 
-    def _label_clicked(self, event) -> None:
+    def set_background(self, background: QColor) -> None:
+        self._background = background
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self._background)
+        color = colors.get_channel_color(self.channel)
+        if self.channel.hidden:
+            color = QColor(color)
+            color.setAlpha(80)
+        painter.fillRect(QRect(0, 0, COLOR_STRIP_WIDTH, self.height()), color)
+        # The same separator as between the rows of the waveform
+        painter.setPen(colors.ROW_SEPARATOR_COLOR)
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+
+    def refresh(self, pinned: Optional[bool] = None) -> None:
+        if pinned is not None:
+            self.pinned = pinned
+        color = colors.get_channel_color(self.channel)
+        number = f"CH{self.channel.channel_number + 1}"
+        name = html.escape(self.channel.channel_name.strip())
+        size = "11px" if self.compact else "12px"
+        muted = TEXT_DISABLED if self.channel.hidden else TEXT_MUTED
+        text_color = TEXT_DISABLED if self.channel.hidden else TEXT
+        number_color = TEXT_DISABLED if self.channel.hidden else color.name()
+        if name:
+            self.label.setText(
+                f"<span style='font-size:{size}; color:{text_color}; font-weight:600'>{name}</span>"
+                f"&nbsp;<span style='font-size:10px; color:{muted}'>{number}</span>"
+            )
+        else:
+            self.label.setText(
+                f"<span style='font-size:{size}; color:{number_color}; font-weight:600'>{number}</span>"
+            )
+        self.visibility_button.setIcon(icon("eye", TEXT_MUTED if not self.channel.hidden else TEXT_DISABLED))
+        self.visibility_button.setToolTip("Hide this channel" if not self.channel.hidden else "Show this channel")
+        self.pin_button.setIcon(icon("pin", ACCENT_HOVER if self.pinned else TEXT_DISABLED))
+        self.pin_button.setToolTip(
+            "Unpin: scroll this channel with the others"
+            if self.pinned
+            else "Pin: keep this channel at the top while scrolling"
+        )
+        self.update()
+
+    # ---------------------------------------------------------------- editing
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton and event.position().x() <= COLOR_STRIP_WIDTH + 3:
+            self.choose_color()
+            return
+        super().mousePressEvent(event)
+
+    def start_rename(self) -> None:
+        self.label.setVisible(False)
+        self.name_edit.setText(self.channel.channel_name)
+        self.name_edit.setVisible(True)
+        self.name_edit.setFocus()
+        self.name_edit.selectAll()
+
+    def _finish_rename(self) -> None:
+        if not self.name_edit.isVisible():
+            return
+        self.name_edit.setVisible(False)
+        self.label.setVisible(True)
+        text = self.name_edit.text().strip()
+        if text != self.channel.channel_name:
+            self.channel.channel_name = text
+            self.refresh()
+            self.name_changed.emit(self.channel)
+
+    def choose_color(self) -> None:
         current = colors.get_channel_color(self.channel)
         color = QColorDialog.getColor(current, self, "Channel colour")
         if color.isValid():
@@ -127,36 +195,14 @@ class ChannelRow(QWidget):
             self.refresh()
             self.color_changed.emit(self.channel)
 
-    def _on_name_changed(self, text: str) -> None:
-        self.channel.channel_name = text
-        self.refresh()
-        self.name_changed.emit(self.channel)
-
-    def set_background(self, background: QColor) -> None:
-        palette = self.palette()
-        palette.setColor(self.backgroundRole(), background)
-        self.setPalette(palette)
-        self.name_edit.setStyleSheet(
-            f"background-color: {background.name()}; border: 1px solid #4a4a4a; font-size: 10px;"
-        )
-
-    def refresh(self, pinned: Optional[bool] = None) -> None:
-        if pinned is not None:
-            self.pinned = pinned
-        color = colors.get_channel_color(self.channel)
-        name = self.channel.channel_name.strip()
-        self.label.setText(name if self.compact and name else self.channel.textual_channel_number)
-        self.label.setStyleSheet(f"color: {color.name()}; font-weight: bold;")
-        self.visibility_button.setText("●" if not self.channel.hidden else "○")
-        self.visibility_button.setStyleSheet(
-            f"color: {'#dddddd' if not self.channel.hidden else '#777777'}; font-size: 13px; " + _FLAT_BUTTON
-        )
-        self.pin_button.setIcon(icon("pin", ACCENT_HOVER if self.pinned else TEXT_DISABLED))
-        self.pin_button.setToolTip(
-            "Unpin: scroll this channel with the others"
-            if self.pinned
-            else "Pin: keep this channel at the top while scrolling"
-        )
+    def _show_menu(self, position) -> None:
+        menu = QMenu(self)
+        menu.addAction("Rename...", self.start_rename)
+        menu.addAction("Colour...", self.choose_color)
+        menu.addSeparator()
+        menu.addAction("Show" if self.channel.hidden else "Hide", lambda: self.visibility_toggled.emit(self.channel))
+        menu.addAction("Unpin" if self.pinned else "Pin to the top", lambda: self.pin_toggled.emit(self.channel))
+        menu.exec(self.mapToGlobal(position))
 
 
 class ChannelViewer(QWidget):

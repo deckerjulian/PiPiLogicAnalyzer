@@ -13,22 +13,26 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
     QHeaderView,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
-from ...driver.base import AnalyzerDriverBase, AnalyzerDriverType, SelfTestResult, UnsupportedFeatureError
+from ...driver.base import AnalyzerDriverBase, SelfTestResult, UnsupportedFeatureError
 from ..icons import set_icon
-from ..theme import JITTER_HIGH, JITTER_LOW, JITTER_MEDIUM, set_role, set_variant
+from ..theme import set_role, set_variant
 from .common import Banner, button_box, dialog_layout, heading, hint
 
-SEVERITY_COLORS = {"ok": JITTER_LOW, "warning": JITTER_MEDIUM, "fail": JITTER_HIGH}
+SEVERITY_COLORS = {"ok": QColor(46, 122, 64), "warning": QColor(154, 98, 18), "fail": QColor(168, 50, 50)}
 SEVERITY_TEXT = {"ok": "OK", "warning": "Warning", "fail": "Failed", "info": "Info"}
 
 #: Explanations of the firmware status codes that are not self-explanatory.
@@ -38,18 +42,6 @@ STATUS_HINTS = {
     "INVERTED": "Follows the pull resistors inverted",
     "ACTIVE": "Changes while no probe should be connected",
 }
-
-DESCRIPTION = (
-    "The test checks the capture buffer, the trigger link and every channel input "
-    "using only the internal pull resistors, and records the pull pattern through the "
-    "normal and the blast capture path. Boards with input buffers or level shifters "
-    "report their channels as driven; that is expected there."
-)
-DSLOGIC_DESCRIPTION = (
-    "The test captures the test counter of the FPGA to check the capture memory, the USB "
-    "transfer in buffer and stream mode and the triggers bit by bit, and checks that every "
-    "input reads low."
-)
 
 
 class SelfTestWorker(QThread):
@@ -66,20 +58,22 @@ class SelfTestWorker(QThread):
             self.done.emit(error)
 
 
-class BoardTestDialog(QDialog):
+class BoardTestPanel(QWidget):
+    """Runs the self-test of the device and lists its results (a tab of the device information)."""
+
+    running_changed = Signal(bool)
+
     def __init__(self, driver: AnalyzerDriverBase, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.driver = driver
         self.results: list[SelfTestResult] = []
         self._worker: Optional[SelfTestWorker] = None
 
-        self.setWindowTitle("Board self-test")
-        self.resize(700, 580)
-        layout = dialog_layout(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
-        layout.addWidget(heading(driver.device_version or "Device", self))
-        dslogic = driver.driver_type == AnalyzerDriverType.DSLOGIC
-        layout.addWidget(hint(DSLOGIC_DESCRIPTION if dslogic else DESCRIPTION, self))
+        layout.addWidget(hint(driver.self_test_description, self))
         banner = Banner("warning", self)
         banner.set_message("<b>Disconnect all probes and signals</b> before running the test.")
         layout.addWidget(banner)
@@ -98,33 +92,30 @@ class BoardTestDialog(QDialog):
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         layout.addWidget(self.table, 1)
 
+        row = QHBoxLayout()
         self.summary = hint("Press Run self-test to start.", self)
-        layout.addWidget(self.summary)
-
-        buttons = button_box(self, None)
-        self.start_button = buttons.addButton("Run self-test", QDialogButtonBox.ActionRole)
+        row.addWidget(self.summary, 1)
+        self.start_button = QPushButton("Run self-test", self)
         set_variant(self.start_button, "primary")
         set_icon(self.start_button, "play")
         self.start_button.clicked.connect(self.start)
-        layout.addWidget(buttons)
-        self._buttons = buttons
+        row.addWidget(self.start_button)
+        layout.addLayout(row)
+
+    @property
+    def is_running(self) -> bool:
+        return self._worker is not None and self._worker.isRunning()
 
     def start(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
+        if self.is_running:
             return
         self.table.setRowCount(0)
         self.start_button.setEnabled(False)
-        self._buttons.button(QDialogButtonBox.Close).setEnabled(False)
         self._set_summary("Running the self-test, this takes a few seconds...", "hint")
         self._worker = SelfTestWorker(self.driver, self)
         self._worker.done.connect(self._on_done)
         self._worker.start()
-
-    def done(self, result: int) -> None:  # noqa: D401 - QDialog override
-        # Esc or the window close button: the worker still talks to the device.
-        if self._worker is not None and self._worker.isRunning():
-            return
-        super().done(result)
+        self.running_changed.emit(True)
 
     def _set_summary(self, text: str, role: str) -> None:
         self.summary.setText(text)
@@ -133,7 +124,7 @@ class BoardTestDialog(QDialog):
     def _on_done(self, outcome: object) -> None:
         self.start_button.setEnabled(True)
         self.start_button.setText("Run again")
-        self._buttons.button(QDialogButtonBox.Close).setEnabled(True)
+        self.running_changed.emit(False)
         if isinstance(outcome, UnsupportedFeatureError):
             self._set_summary(
                 "The firmware of this device has no self-test. Flash the firmware from the "
@@ -175,3 +166,43 @@ class BoardTestDialog(QDialog):
             self._set_summary(f"No failures, {warnings} warning(s), {passed} passed.", "warning")
         else:
             self._set_summary(f"All {passed} tests passed.", "success")
+
+
+class BoardTestDialog(QDialog):
+    """The self-test in a window of its own."""
+
+    def __init__(self, driver: AnalyzerDriverBase, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Board self-test")
+        self.resize(700, 580)
+        layout = dialog_layout(self)
+        layout.addWidget(heading(driver.device_version or "Device", self))
+        self.panel = BoardTestPanel(driver, self)
+        layout.addWidget(self.panel, 1)
+        buttons = button_box(self, None)
+        layout.addWidget(buttons)
+        self.panel.running_changed.connect(
+            lambda running: buttons.button(QDialogButtonBox.Close).setEnabled(not running)
+        )
+        self.table = self.panel.table
+        self.summary = self.panel.summary
+        self.start_button = self.panel.start_button
+
+    @property
+    def results(self) -> list[SelfTestResult]:
+        return self.panel.results
+
+    def start(self) -> None:
+        self.panel.start()
+
+    def _on_done(self, outcome: object) -> None:
+        self.panel._on_done(outcome)
+
+    def show_results(self, results: list[SelfTestResult]) -> None:
+        self.panel.show_results(results)
+
+    def done(self, result: int) -> None:  # noqa: D401 - QDialog override
+        # Esc or the window close button: the worker still talks to the device.
+        if self.panel.is_running:
+            return
+        super().done(result)

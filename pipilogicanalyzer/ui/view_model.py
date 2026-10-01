@@ -16,14 +16,16 @@ single observable model owns the state and the widgets subscribe to its signals.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
+import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from ..core.analysis import ChannelTransitions, build_transitions
 from ..core.regions import SampleRegion
-from ..driver.models import AnalyzerChannel, CaptureSession
+from ..core.sample_store import is_on_disk
+from ..driver.models import AnalyzerChannel, BusDefinition, CaptureSession
 
 MIN_VISIBLE_SAMPLES = 4
 #: Height of a channel row in pixels: the rows grow to fill the view, this is their minimum.
@@ -40,7 +42,41 @@ class AnnotationHover:
 
     group: Any  # sigrok.provider.AnnotationGroup
     segment: Any  # sigrok.engine.AnnotationSegment
+    #: Levels of the channels at the read point; only for an entry that is a value of its own
     composition: Any = None  # sigrok.composition.Composition
+    #: The entries of other rows that belong to it (``sigrok.links.LinkedSegment``)
+    links: list = field(default_factory=list)
+    #: The values it is made of (e.g. the bus cycles of an instruction), in time order
+    parts: list = field(default_factory=list)
+
+    @property
+    def linked_ids(self) -> set[int]:
+        return {id(link.segment) for link in self.links}
+
+
+#: Names of the measurement cursors
+CURSORS = ("A", "B")
+
+
+@dataclass(eq=False)
+class Bookmark:
+    """A named position in the capture."""
+
+    sample: int
+    name: str = ""
+
+
+@dataclass
+class SearchHits:
+    """Result of the search panel: positions (and optional end positions) of the matches."""
+
+    starts: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
+    ends: Optional[np.ndarray] = None
+    #: Index of the selected match, -1: none
+    current: int = -1
+
+    def __len__(self) -> int:
+        return len(self.starts)
 
 
 class CaptureViewModel(QObject):
@@ -56,6 +92,10 @@ class CaptureViewModel(QObject):
     channel_height_changed = Signal()
     #: the samples of a live capture grew (:meth:`extend_live`)
     samples_appended = Signal()
+    cursors_changed = Signal()
+    bookmarks_changed = Signal()
+    search_changed = Signal()
+    buses_changed = Signal()
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -71,6 +111,11 @@ class CaptureViewModel(QObject):
         self._user_marker: Optional[int] = None
         self._regions: list[SampleRegion] = []
         self._annotation_groups: list = []
+        self._cursors: dict[str, Optional[int]] = dict.fromkeys(CURSORS)
+        self._bookmarks: list[Bookmark] = []
+        self._search = SearchHits()
+        #: Values of the buses by ``id()`` of their definition, computed when first drawn
+        self._bus_values: dict[int, np.ndarray] = {}
 
     # ---------------------------------------------------------------- capture
     @property
@@ -165,9 +210,53 @@ class CaptureViewModel(QObject):
         self._live = live and session is not None
         self.rebuild_transitions(first_sample if self._live else 0)
         self._user_marker = None
+        self._bus_values.clear()
+        self._cursors = dict.fromkeys(CURSORS)
+        self._bookmarks = []
+        self._search = SearchHits()
         self.set_hover(None)
         self.capture_changed.emit()
         self.marker_changed.emit()
+        self.cursors_changed.emit()
+        self.bookmarks_changed.emit()
+        self.search_changed.emit()
+        self.buses_changed.emit()
+
+    @property
+    def on_disk(self) -> bool:
+        """The samples are memory-mapped files (a stream recorded to disk)."""
+        return self._session is not None and any(
+            is_on_disk(channel.samples) for channel in self._session.capture_channels
+        )
+
+    def finish_live(self, session: CaptureSession, first_sample: int = 0) -> bool:
+        """Shows the completed capture of the live session, keeping its edge index.
+
+        The index then only grows by the samples that arrived after the last update, instead of
+        being built again over the whole capture. ``False`` when it does not fit (then call
+        :meth:`set_session`).
+        """
+        if not self._live or self._session is None:
+            return False
+        numbers = [channel.channel_number for channel in session.capture_channels]
+        if numbers != [channel.channel_number for channel in self._session.capture_channels]:
+            return False
+        for channel, transitions in zip(session.capture_channels, self._transitions):
+            dropped = max(first_sample - transitions.origin, 0)
+            if channel.samples is None or len(channel.samples) < transitions.sample_count - dropped:
+                return False
+        for channel, transitions in zip(session.capture_channels, self._transitions):
+            transitions.slide_to(first_sample)
+            transitions.extend(channel.samples, len(channel.samples))
+        self._pinned.clear()
+        self._session = session
+        self._live = False
+        self._user_marker = None
+        self._bus_values.clear()
+        self.set_hover(None)
+        self.capture_changed.emit()
+        self.marker_changed.emit()
+        return True
 
     def extend_live(self, first_sample: int = 0) -> None:
         """Indexes the samples the channels of the live session got since the last call.
@@ -205,6 +294,7 @@ class CaptureViewModel(QObject):
         self.channels_changed.emit()
 
     def notify_capture_changed(self) -> None:
+        self._bus_values.clear()
         self.capture_changed.emit()
 
     # --------------------------------------------------------------- viewport
@@ -350,3 +440,99 @@ class CaptureViewModel(QObject):
             return
         self._hover = hover
         self.hover_changed.emit()
+
+    # ---------------------------------------------------------------- cursors
+    def cursor(self, name: str) -> Optional[int]:
+        return self._cursors.get(name)
+
+    def set_cursor(self, name: str, sample: Optional[int]) -> None:
+        if sample is not None:
+            sample = int(min(max(sample, 0), max(self.sample_count - 1, 0)))
+        if self._cursors.get(name) == sample:
+            return
+        self._cursors[name] = sample
+        self.cursors_changed.emit()
+
+    def clear_cursors(self) -> None:
+        if any(value is not None for value in self._cursors.values()):
+            self._cursors = dict.fromkeys(CURSORS)
+            self.cursors_changed.emit()
+
+    def cursor_delta(self) -> Optional[int]:
+        """Samples from cursor A to cursor B (``None`` unless both are placed)."""
+        a, b = self._cursors["A"], self._cursors["B"]
+        return None if a is None or b is None else b - a
+
+    def time_of(self, sample: float) -> float:
+        """Seconds of ``sample`` from the trigger."""
+        return (sample - self.pre_trigger_samples) / max(self.frequency, 1)
+
+    # -------------------------------------------------------------- bookmarks
+    @property
+    def bookmarks(self) -> list[Bookmark]:
+        return sorted(self._bookmarks, key=lambda bookmark: bookmark.sample)
+
+    def add_bookmark(self, sample: int, name: str = "") -> Bookmark:
+        bookmark = Bookmark(int(sample), name or f"Marker {len(self._bookmarks) + 1}")
+        self._bookmarks.append(bookmark)
+        self.bookmarks_changed.emit()
+        return bookmark
+
+    def remove_bookmark(self, bookmark: Bookmark) -> None:
+        if bookmark in self._bookmarks:
+            self._bookmarks.remove(bookmark)
+            self.bookmarks_changed.emit()
+
+    def rename_bookmark(self, bookmark: Bookmark, name: str) -> None:
+        bookmark.name = name
+        self.bookmarks_changed.emit()
+
+    def clear_bookmarks(self) -> None:
+        if self._bookmarks:
+            self._bookmarks.clear()
+            self.bookmarks_changed.emit()
+
+    # ----------------------------------------------------------------- search
+    @property
+    def search_hits(self) -> SearchHits:
+        return self._search
+
+    def set_search_hits(self, starts: np.ndarray, ends: Optional[np.ndarray] = None) -> None:
+        self._search = SearchHits(np.asarray(starts, dtype=np.int64), ends, -1)
+        self.search_changed.emit()
+
+    def select_search_hit(self, index: int) -> None:
+        """Selects match ``index`` and brings it into view."""
+        hits = self._search
+        if not len(hits):
+            return
+        index %= len(hits)
+        hits.current = index
+        start = int(hits.starts[index])
+        end = int(hits.ends[index]) if hits.ends is not None else start
+        if end - start >= self._visible_samples:
+            self.set_view(start - (end - start) // 10, int((end - start) * 1.2) + 1)
+        elif not self._first_sample <= start <= self.last_sample or not end <= self.last_sample:
+            self.center_on((start + end) // 2)
+        self.search_changed.emit()
+
+    # ------------------------------------------------------------------ buses
+    @property
+    def buses(self) -> list[BusDefinition]:
+        return list(self._session.buses) if self._session else []
+
+    def set_buses(self, buses: Sequence[BusDefinition]) -> None:
+        if self._session is None:
+            return
+        self._session.buses = list(buses)
+        self._bus_values.clear()
+        self.buses_changed.emit()
+
+    def bus_values(self, bus: BusDefinition) -> np.ndarray:
+        values = self._bus_values.get(id(bus))
+        if values is None or len(values) != self.sample_count:
+            from ..core.buses import bus_values
+
+            values = bus_values(self._session, bus)
+            self._bus_values[id(bus)] = values
+        return values

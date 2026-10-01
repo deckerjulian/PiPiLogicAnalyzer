@@ -49,6 +49,18 @@ static void test_board(SELFTEST_REPORT out, void* context)
     report(out, context, "BOARD", "INFO", detail);
 }
 
+//Speed of the trigger sequence evaluation, measured at start-up (every sample an event of a
+//pulse stage)
+static void test_sequence_speed(SELFTEST_REPORT out, void* context)
+{
+    char detail[160];
+    uint32_t measured = 0;
+    uint32_t maxRate = GetSequenceMaxRate(&measured);
+    snprintf(detail, sizeof(detail), "evaluation %lu samples/s with an event on every sample, sequences up to %lu Hz, state clock up to %lu Hz",
+        (unsigned long)measured, (unsigned long)maxRate, (unsigned long)GetStateMaxClock());
+    report(out, context, "SEQUENCE", "INFO", detail);
+}
+
 static void test_ram(SELFTEST_REPORT out, void* context)
 {
     char detail[64];
@@ -245,6 +257,7 @@ static void test_capture_path(SELFTEST_REPORT out, void* context, uint32_t usabl
 void RunSelfTest(SELFTEST_REPORT out, void* context)
 {
     test_board(out, context);
+    test_sequence_speed(out, context);
     test_ram(out, context);
     test_trigger_link(out, context);
 

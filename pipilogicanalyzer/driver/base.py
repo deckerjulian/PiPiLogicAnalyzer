@@ -10,50 +10,43 @@
 
 from __future__ import annotations
 
-import re
+import threading
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import TYPE_CHECKING, Callable, Optional, Sequence
 
+from ..core.sample_store import disk_sample_bytes
 from .models import CaptureSession, TriggerType
 
 if TYPE_CHECKING:
     import numpy as np
-
-#: Delays (in device clock cycles) introduced by the trigger PIO programs.
-COMPLEX_TRIGGER_DELAY = 5.0
-FAST_TRIGGER_DELAY = 3.0
-#: The edge trigger with trigger output waits in a loop of one or two instructions, like the fast trigger.
-EDGE_OUT_TRIGGER_DELAY = 3.0
-
-
-def trigger_delay_samples(delay: float, max_frequency: int, frequency: int) -> int:
-    """Samples a trigger lagging ``delay`` device clock cycles covers at ``frequency``."""
-    delay_ns = 1_000_000_000.0 / max_frequency * delay
-    sample_period_ns = 1_000_000_000.0 / frequency
-    return int(round((delay_ns / sample_period_ns) + 0.3))
 
 #: Burst measurement limits (firmware V6_5 ``StartCaptureSimple``): the
 #: timestamp block is sized by one byte and each burst needs enough samples.
 MAX_MEASURED_LOOP_COUNT = 253
 MIN_MEASURED_POST_SAMPLES = 100
 
-#: Minimum firmware version supported by this client.
-MIN_MAJOR_VERSION = 6
-MIN_MINOR_VERSION = 0
-
-_VERSION_RE = re.compile(r".*?V([0-9]+)_([0-9]+)$")
-
 
 class DeviceConnectionError(Exception):
     """Raised when a device cannot be opened or reports an invalid identity."""
+
+
+class FirmwareOutdatedError(DeviceConnectionError):
+    """The device runs firmware this application does not work with: it has to be updated."""
+
+    def __init__(self, message: str, device: str = "", location: str = "") -> None:
+        super().__init__(message)
+        #: Identification the device reported, and where it is connected (port or address)
+        self.device = device
+        self.location = location
 
 
 class UnsupportedFeatureError(Exception):
     """Raised when the device (or its firmware) lacks an optional function."""
 
 
-#: Optional firmware functions, reported by ``CMD_CAPABILITIES``.
+#: Optional functions of a device (:meth:`AnalyzerDriverBase.capabilities`); the Pico firmware
+#: reports them with ``CMD_CAPABILITIES``, other drivers name the ones their device has.
 CAPABILITY_SELF_TEST = "SELFTEST"
 CAPABILITY_SIMULATION = "SIMULATION"
 CAPABILITY_DEVICE_INFO = "DEVICEINFO"
@@ -72,9 +65,67 @@ CAPABILITY_CONTINUOUS_STREAM = "CONTINUOUS_STREAM"
 CAPABILITY_STREAM_IMMEDIATE_ONLY = "STREAM_IMMEDIATE_ONLY"
 #: Firmware function: stream captures over USB (``STREAM=<bytes per second>``).
 CAPABILITY_STREAM = "STREAM"
+#: Trigger sequences in the device (``TRIGGER_SEQUENCE=<stages>``; ``TriggerType.SEQUENCE``)
+CAPABILITY_TRIGGER_SEQUENCE = "TRIGGER_SEQUENCE"
+#: Condition kinds the device's trigger sequence understands (``TRIGGER_CONDITIONS=pattern/edge/pulse/gap``)
+CAPABILITY_TRIGGER_CONDITIONS = "TRIGGER_CONDITIONS="
+#: State mode: samples taken on the edges of a clock input (``CaptureSession.clock_channel``)
+CAPABILITY_STATE_MODE = "STATE_MODE"
 
 #: The application keeps one byte per sample and channel: a stream is limited to about 1 GiB of them.
 MAX_SAMPLE_BYTES = 1 << 30
+
+
+#: Seconds between two checks of the free disk space while a stream is recorded to disk
+DISK_CHECK_INTERVAL = 1.0
+DISK_FULL_ERROR = (
+    "The disk is almost full, so the stream recorded to it was stopped. Free some space or keep "
+    "fewer samples."
+)
+
+
+def disk_space_low() -> bool:
+    """The free disk space reached the reserve: a stream recorded to disk has to stop, since
+    writing a full memory-mapped file would crash the application."""
+    return disk_sample_bytes() <= 0
+
+
+class DiskWatch:
+    """Checks :func:`disk_space_low` in a thread of its own: under heavy writing the query can
+    take half a second, which must not hold up the thread reading the device."""
+
+    def __init__(
+        self, interval: float = DISK_CHECK_INTERVAL, on_low: Optional[Callable[[], None]] = None
+    ) -> None:
+        self.low = threading.Event()
+        self._on_low = on_low
+        self._stop = threading.Event()
+        self._interval = interval
+        self._thread = threading.Thread(target=self._run, name="pipilogicanalyzer-disk-watch", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            if disk_space_low():
+                self.low.set()
+                if self._on_low is not None:
+                    self._on_low()
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def stream_sample_bytes(to_disk: bool = False, continuous: bool = False) -> int:
+    """Bytes of samples a stream may keep, over all channels.
+
+    In memory about 1 GiB; on disk the free space less a reserve, of which an endless stream uses
+    half (its ring buffer writes every sample twice).
+    """
+    if not to_disk:
+        return MAX_SAMPLE_BYTES
+    available = disk_sample_bytes()
+    return available // 2 if continuous else available
 
 #: Acquisition modes (``CaptureSession.acquisition_mode``): into the memory of the device, or
 #: streamed over USB while capturing.
@@ -83,24 +134,6 @@ ACQUISITION_STREAM = "stream"
 
 #: Pattern trigger channels of firmware that does not report its groups: channels 1 to 16.
 DEFAULT_PATTERN_GROUPS: tuple[tuple[int, int], ...] = ((0, 16),)
-
-
-def parse_pattern_groups(capabilities: frozenset[str]) -> Optional[tuple[tuple[int, int], ...]]:
-    """``(first channel, channel count)`` of every group of the ``PATTERN_GROUPS`` capability."""
-    for item in capabilities:
-        if not item.startswith(CAPABILITY_PATTERN_GROUPS):
-            continue
-        groups = []
-        for part in item[len(CAPABILITY_PATTERN_GROUPS):].split("/"):
-            first, _, last = part.partition("-")
-            try:
-                first_channel, last_channel = int(first), int(last or first)
-            except ValueError:
-                return None
-            if 0 <= first_channel <= last_channel:
-                groups.append((first_channel, last_channel - first_channel + 1))
-        return tuple(groups) or None
-    return None
 
 
 def pattern_max_bits(trigger_type: TriggerType) -> int:
@@ -140,17 +173,6 @@ class SelfTestResult:
         return {"OK": "ok", "FAIL": "fail", "INFO": "info", "SKIPPED": "info"}.get(
             self.status, "warning"
         )
-
-
-def parse_self_test_line(line: str) -> Optional[SelfTestResult]:
-    if not line.startswith("SELFTEST:"):
-        return None
-    parts = line.strip().split(":", 3)
-    if len(parts) < 3:
-        return None
-    return SelfTestResult(
-        item=parts[1], status=parts[2].strip().upper(), detail=parts[3].strip() if len(parts) > 3 else ""
-    )
 
 
 class CaptureMode(IntEnum):
@@ -200,6 +222,8 @@ class AnalyzerDriverType(Enum):
     EMULATED = "Emulated"
     #: DreamSourceLab DSLogic (USB)
     DSLOGIC = "DSLogic"
+    #: A driver added later; it names itself with ``driver_id``
+    OTHER = "Other"
 
 
 def capture_mode_for_bits(bits: Sequence[int]) -> CaptureMode:
@@ -210,23 +234,6 @@ def capture_mode_for_bits(bits: Sequence[int]) -> CaptureMode:
     if highest < 16:
         return CaptureMode.CHANNELS_16
     return CaptureMode.CHANNELS_24
-
-
-@dataclass
-class DeviceVersion:
-    major: int = 0
-    minor: int = 0
-    is_valid: bool = False
-
-
-def parse_version(device_version: Optional[str]) -> DeviceVersion:
-    match = _VERSION_RE.match(device_version or "")
-    if not match:
-        return DeviceVersion()
-    major = int(match.group(1))
-    minor = int(match.group(2))
-    valid = major > MIN_MAJOR_VERSION or (major == MIN_MAJOR_VERSION and minor >= MIN_MINOR_VERSION)
-    return DeviceVersion(major=major, minor=minor, is_valid=valid)
 
 
 @dataclass
@@ -256,6 +263,8 @@ class CaptureCompletedArgs:
     success: bool
     session: CaptureSession
     error: Optional[str] = None
+    #: stream position of the first sample kept (> 0 when an endless stream dropped samples)
+    first_sample: int = 0
 
 
 CaptureCompletedHandler = Callable[[CaptureCompletedArgs], None]
@@ -282,8 +291,19 @@ class CaptureProgressArgs:
 CaptureProgressHandler = Callable[[CaptureProgressArgs], None]
 
 
+#: A titled group of ``(property, value)`` rows describing a device
+DeviceSection = tuple[str, list[tuple[str, str]]]
+
+GENERIC_SELF_TEST_DESCRIPTION = "The test checks the device with the functions its driver provides."
+
+
 class AnalyzerDriverBase:
-    """Base class shared by every driver implementation."""
+    """Base class shared by every driver implementation.
+
+    The application only talks to devices through this class: a driver describes what its
+    device can do (the properties and methods below) instead of the application asking which
+    kind of device it is. ``docs/drivers.md`` explains how to add a driver.
+    """
 
     def __init__(self) -> None:
         self.tag: object = None
@@ -328,7 +348,8 @@ class AnalyzerDriverBase:
 
     @property
     def blast_frequency(self) -> int:
-        raise NotImplementedError
+        """Rate of the blast mode; 0: the device has none."""
+        return 0
 
     @property
     def max_frequency(self) -> int:
@@ -353,11 +374,20 @@ class AnalyzerDriverBase:
 
     @property
     def driver_type(self) -> AnalyzerDriverType:
-        raise NotImplementedError
+        return AnalyzerDriverType.OTHER
+
+    @property
+    def driver_id(self) -> str:
+        """Short, stable name of the kind of device; it names the stored capture settings.
+
+        Drivers added later override it (their ``driver_type`` is ``OTHER``).
+        """
+        return self.driver_type.value.lower()
 
     @property
     def is_network(self) -> bool:
-        raise NotImplementedError
+        """Connected over the network (its power status is polled)."""
+        return False
 
     @property
     def is_capturing(self) -> bool:
@@ -373,7 +403,8 @@ class AnalyzerDriverBase:
         raise NotImplementedError
 
     def enter_bootloader(self) -> bool:
-        raise NotImplementedError
+        """Restart into the bootloader (see ``supports_bootloader``)."""
+        return False
 
     # ------------------------------------------------------------ device info
     def sample_bits(self, channels: Sequence[int]) -> list[int]:
@@ -383,7 +414,15 @@ class AnalyzerDriverBase:
     def get_capture_mode(self, channels: Sequence[int]) -> CaptureMode:
         return capture_mode_for_bits(self.sample_bits(channels))
 
-    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
+    def get_limits(
+        self,
+        channels: Sequence[int],
+        acquisition_mode: Optional[str] = None,
+        *,
+        to_disk: bool = False,
+        continuous: bool = False,
+    ) -> CaptureLimits:
+        """Limits of a capture; ``to_disk`` and ``continuous`` matter for streams only."""
         mode = self.get_capture_mode(channels)
         total_samples = self.buffer_size // mode.bytes_per_sample
         return CaptureLimits(
@@ -458,6 +497,47 @@ class AnalyzerDriverBase:
     def device_details(self) -> dict[str, str]:
         """Board and firmware build details reported by the firmware (may be empty)."""
         return {}
+
+    @property
+    def has_self_test(self) -> bool:
+        """The driver offers :meth:`run_self_test` (it may still find the firmware lacks it)."""
+        return False
+
+    @property
+    def self_test_description(self) -> str:
+        """What :meth:`run_self_test` checks, shown above the results."""
+        return GENERIC_SELF_TEST_DESCRIPTION
+
+    def describe(self) -> list[DeviceSection]:
+        """Board, firmware and connection of the device for the *Device information* dialog.
+
+        The capture limits are added by the application.
+        """
+        return [("Device", [("Identification", self.device_version or "-")])]
+
+    # --------------------------------------------------------------- features
+    @property
+    def is_hardware(self) -> bool:
+        """A real device; ``False`` for the emulated driver behind loaded and computed captures."""
+        return True
+
+    def boards(self) -> list["AnalyzerDriverBase"]:
+        """The single devices this driver captures with (several for a multi device set)."""
+        return [self]
+
+    @property
+    def board_count(self) -> int:
+        return len(self.boards())
+
+    @property
+    def supports_bootloader(self) -> bool:
+        """:meth:`enter_bootloader` restarts the device for a firmware update."""
+        return False
+
+    @property
+    def supports_network_config(self) -> bool:
+        """:meth:`send_network_config` stores WiFi settings on the device."""
+        return False
 
     # ---------------------------------------------------------------- cleanup
     def dispose(self) -> None:

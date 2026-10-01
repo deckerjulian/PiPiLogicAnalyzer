@@ -25,10 +25,13 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSpinBox,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTreeWidget,
@@ -41,8 +44,9 @@ from ... import __version__
 from ...core.device_info import as_text, describe_device
 from ...core.formatting import to_thousands
 from ...driver.base import AnalyzerDriverBase
-from ...driver.detector import DetectedDevice, UsbPortInfo
-from ..icons import set_icon
+from ...driver.pico.detector import DetectedDevice, UsbPortInfo
+from ..icons import icon, set_icon
+from .board_test_dialog import BoardTestPanel
 from ..theme import ACCENT_HOVER, set_role
 from .common import InlineMessage, button_box, dialog_layout, heading, hint
 
@@ -335,18 +339,31 @@ class MultiComposeDialog(QDialog):
 
 
 class DeviceInfoDialog(QDialog):
-    """Board, firmware, USB connection and capture limits of the connected device."""
+    """Everything about the connected device in one place: board, firmware and connection,
+    the capture limits, and the self-test."""
 
-    def __init__(self, driver: AnalyzerDriverBase, parent: Optional[QWidget] = None) -> None:
+    TABS = ("overview", "limits", "self-test")
+
+    def __init__(
+        self, driver: AnalyzerDriverBase, parent: Optional[QWidget] = None, initial_tab: str = "overview"
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Device information")
-        self.resize(680, 660)
+        self.resize(760, 640)
 
         self.sections = describe_device(driver)
         info = driver.get_device_info()
         layout = dialog_layout(self)
+        layout.addWidget(heading(driver.device_version or "Device", self))
 
-        self.tree = QTreeWidget(self)
+        self.tabs = QTabWidget(self)
+        layout.addWidget(self.tabs, 1)
+
+        # ------------------------------------------------------------ overview
+        overview = QWidget(self)
+        overview_layout = QVBoxLayout(overview)
+        overview_layout.setContentsMargins(12, 12, 12, 12)
+        self.tree = QTreeWidget(overview)
         self.tree.setHeaderLabels(["Property", "Value"])
         self.tree.setColumnWidth(0, 220)
         self.tree.setRootIsDecorated(False)
@@ -361,10 +378,24 @@ class DeviceInfoDialog(QDialog):
                 item = QTreeWidgetItem(section, [key, value])
                 item.setToolTip(1, value)
             section.setExpanded(True)
-        layout.addWidget(self.tree, 2)
+        overview_layout.addWidget(self.tree, 1)
+        copy_row = QHBoxLayout()
+        copy_row.addStretch(1)
+        self.copy_button = QPushButton("Copy to clipboard", overview)
+        self.copy_button.clicked.connect(self._copy)
+        set_icon(self.copy_button, "copy")
+        copy_row.addWidget(self.copy_button)
+        overview_layout.addLayout(copy_row)
+        self.tabs.addTab(overview, icon("info"), "Overview")
 
-        layout.addWidget(heading("Capture limits", self))
-        table = QTableWidget(len(info.mode_limits), 5, self)
+        # -------------------------------------------------------------- limits
+        limits = QWidget(self)
+        limits_layout = QVBoxLayout(limits)
+        limits_layout.setContentsMargins(12, 12, 12, 12)
+        limits_layout.addWidget(
+            hint("Samples a capture in the device buffer can hold, by the number of channels.", limits)
+        )
+        table = QTableWidget(len(info.mode_limits), 5, limits)
         table.setHorizontalHeaderLabels(
             ["Mode", "Min. pre-trigger", "Max. pre-trigger", "Max. post-trigger", "Max. total"]
         )
@@ -374,27 +405,52 @@ class DeviceInfoDialog(QDialog):
         table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        for row, limits in enumerate(info.mode_limits):
+        for row, mode_limits in enumerate(info.mode_limits):
             values = (
                 f"{8 * (row + 1)} channels",
-                to_thousands(limits.min_pre_samples),
-                to_thousands(limits.max_pre_samples),
-                to_thousands(limits.max_post_samples),
-                to_thousands(limits.max_total_samples),
+                to_thousands(mode_limits.min_pre_samples),
+                to_thousands(mode_limits.max_pre_samples),
+                to_thousands(mode_limits.max_post_samples),
+                to_thousands(mode_limits.max_total_samples),
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if column:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 table.setItem(row, column, item)
-        table.setMaximumHeight(table.horizontalHeader().height() + 3 * 30 + 8)
-        layout.addWidget(table)
+        limits_layout.addWidget(table, 1)
+        self.limits_table = table
+        self.tabs.addTab(limits, icon("sliders"), "Capture limits")
+
+        # ----------------------------------------------------------- self-test
+        self.self_test: Optional[BoardTestPanel] = None
+        if driver.is_hardware and driver.has_self_test:
+            test_page = QWidget(self)
+            test_layout = QVBoxLayout(test_page)
+            test_layout.setContentsMargins(12, 12, 12, 12)
+            self.self_test = BoardTestPanel(driver, test_page)
+            test_layout.addWidget(self.self_test)
+            self.tabs.addTab(test_page, icon("checklist"), "Self-test")
 
         buttons = button_box(self, None)
-        self.copy_button = buttons.addButton("Copy to clipboard", QDialogButtonBox.ActionRole)
-        self.copy_button.clicked.connect(self._copy)
-        set_icon(self.copy_button, "copy")
         layout.addWidget(buttons)
+        if self.self_test is not None:
+            close = buttons.button(QDialogButtonBox.Close)
+            self.self_test.running_changed.connect(lambda running: close.setEnabled(not running))
+
+        self.show_tab(initial_tab)
+
+    def show_tab(self, name: str) -> None:
+        """Selects ``overview``, ``limits`` or ``self-test`` (when the device has it)."""
+        index = self.TABS.index(name) if name in self.TABS else 0
+        if index < self.tabs.count():
+            self.tabs.setCurrentIndex(index)
+
+    def done(self, result: int) -> None:  # noqa: D401 - QDialog override
+        # Esc or the window close button: a running self-test still talks to the device
+        if self.self_test is not None and self.self_test.is_running:
+            return
+        super().done(result)
 
     def _copy(self) -> None:
         QApplication.clipboard().setText(self.text())

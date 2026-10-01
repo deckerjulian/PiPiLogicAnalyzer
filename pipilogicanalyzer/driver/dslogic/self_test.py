@@ -28,6 +28,11 @@ from .protocol import AcquisitionMode
 if TYPE_CHECKING:
     from .driver import DSLogicDriver
 
+DESCRIPTION = (
+    "The test captures the test counter of the FPGA to check the capture memory, the USB "
+    "transfer in buffer and stream mode and the triggers bit by bit, and checks that every "
+    "input reads low."
+)
 #: Channels the test counter covers
 COUNTER_CHANNELS = 16
 #: DSView runs its internal test at 100 MHz; there the counter advances once per sample

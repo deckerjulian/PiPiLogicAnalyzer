@@ -6,9 +6,14 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Device drivers for the LogicAnalyzer hardware."""
+"""Device drivers.
 
-from .analyzer import PiPiLogicAnalyzerDriver
+:mod:`.base` defines what the application expects of a driver; every kind of device has a
+package of its own: :mod:`.pico` (the PiPiLogicAnalyzer firmware on Pico boards) and
+:mod:`.dslogic` (DreamSourceLab DSLogic). :mod:`.emulated` stands in for a device while
+captures are loaded or computed.
+"""
+
 from .base import (
     AnalyzerDeviceInfo,
     AnalyzerDriverBase,
@@ -18,12 +23,10 @@ from .base import (
     CaptureLimits,
     CaptureMode,
     DeviceConnectionError,
-    parse_version,
+    DeviceSection,
 )
-from .detector import DetectedDevice, detect, list_serial_ports
 from .emulated import EmulatedAnalyzerDriver
 from .models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType, build_channels
-from .multi import MultiAnalyzerDriver
 
 __all__ = [
     "AnalyzerChannel",
@@ -36,14 +39,9 @@ __all__ = [
     "CaptureLimits",
     "CaptureMode",
     "CaptureSession",
-    "DetectedDevice",
     "DeviceConnectionError",
+    "DeviceSection",
     "EmulatedAnalyzerDriver",
-    "PiPiLogicAnalyzerDriver",
-    "MultiAnalyzerDriver",
     "TriggerType",
     "build_channels",
-    "detect",
-    "list_serial_ports",
-    "parse_version",
 ]

@@ -35,9 +35,10 @@ and licenses.
 Compared with LogicAnalyzer 6.5:
 
 * **Runs everywhere:** a Python/Qt application with ready-to-run builds for Windows, macOS
-  (Apple Silicon and Intel) and Linux. It reads and writes the same `.lac` files and speaks to
-  firmware from V6_0 on; V6_5 and newer devices automatically get the 32 channel request with up
-  to 65,534 bursts.
+  (Apple Silicon and Intel) and Linux. It reads and writes the same `.lac` files. The
+  application works with the firmware it comes with (see
+  [Installing the firmware](#installing-the-firmware)); a board with another firmware is
+  updated when it is connected.
 * **Complete capture workflow:** find, connect, configure, capture, abort and repeat, over USB,
   WiFi and as a multi device set of 2 to 5 cascaded analyzers.
 * **Fast display:** 1,000,000 samples × 24 channels are drawn in about 20 ms per frame (see
@@ -52,13 +53,24 @@ Compared with LogicAnalyzer 6.5:
   while capturing, shown live, for as long as wanted or *until stopped* (keeping the latest
   samples). USB full speed limits the rate to 800 kHz with 8 channels, 400 kHz with 16 and
   200 kHz with 24; the buffer mode keeps its 100/200 MHz. The stream starts at once, without a
-  trigger, and needs USB (not WiFi, not a multi device set).
+  trigger, and needs USB (not WiFi, not a multi device set). *Record to disk* makes it as long
+  as the free disk space allows (about 23 GB per hour at 800 kHz × 8 channels).
 * **DreamSourceLab DSLogic:** the DSLogic Plus, U2Pro16, U3Pro16 and U3Pro32 can be used as well, see
   [DreamSourceLab DSLogic](#dreamsourcelab-dslogic) (experimental).
 * **Sample editor:** cut, copy, paste, delete, shift channels, regions, measurements, and
   samples created with the *Signal Description Language*.
+* **Analysis tools** (see [Analysis](#analysis)): cursors A/B with time and frequency, statistics
+  of every channel, setup and hold times, search for edges, patterns, pulse widths, gaps, bus
+  values and decoder output, buses with symbol tables, a listing of every change, charts and
+  histograms, comparison with a reference capture and state analysis on a clock channel.
+* **Trigger sequences:** up to 8 stages of patterns, edges, pulse widths and gaps with counts and
+  time limits, evaluated by the application on a stream (any device that streams), or by the
+  board where the firmware supports it.
 * **Profiles** as in 6.5, plus export and import as JSON files.
-* **Export** to CSV and VCD (PulseView/GTKWave) and gzip-compressed `.lac.gz` files.
+* **Export** to CSV, VCD (GTKWave) and sigrok sessions `.sr` (PulseView, also opened), decoder
+  output as CSV or JSON, and gzip-compressed `.lac.gz` files.
+* **Command line and Python API** for scripted captures, decoding and conversion, see
+  [docs/cli.md](docs/cli.md).
 
 The bugs fixed in the application are listed in [docs/improvements.md](docs/improvements.md),
 all changes in the [changelog](CHANGELOG.md).
@@ -250,6 +262,47 @@ After a capture the reference line is used when it is available. The status bar 
 the samples as captured; when several methods are possible, it lets you choose one of them or
 leave a board unchanged.
 
+## Analysis
+
+The toolbar holds the settings of the next capture: sample rate, length and the trigger (a click
+opens all settings); **Start** (F5) captures at once, the icons next to it repeat the last capture
+and open the search, the measurements, the listing and the panels. Zoom and channel height are
+in the bar below the waveform. The panels on the right and the listing
+below the waveform (*View → Listing*, Ctrl+2) can be moved, closed and reopened.
+
+* **Cursors:** drag *A* and *B* on the time axis, or press A / B with the pointer over the
+  waveform. *Measure* (Ctrl+M) shows Δt, 1/Δt, the level of every channel at both cursors and the
+  edges between them, and statistics of every channel over the whole capture, the view or the
+  span between the cursors (frequency, duty cycle, shortest and longest pulses), plus the setup
+  and hold time of a data channel around the edges of a clock.
+* **Markers:** M sets a named marker at the pointer; *Markers* lists them with the regions.
+* **Search** (Ctrl+F, F3 / Shift+F3): edges, patterns with don't-cares (`10X1`), pulses of a
+  width range (`1 µs` to `2 µs`), gaps without edges, bus values (`==`, `<`, `in` …) and text
+  of the decoder output. Every match is marked in the waveform.
+* **Buses and groups** (*Analyze → New bus*): several channels shown as one value in hex,
+  decimal, signed, binary or ASCII, with a symbol table (`NAME = 0x1F`, `$D020 NAME`, CSV);
+  saved with the capture.
+* **Listing:** every change of the channels and buses as a table, or the decoder output,
+  following the view; a click marks the sample in the waveform.
+* **Charts and histograms:** a bus value over time; histograms of pulse widths, periods and bus
+  values.
+* **Compare with a reference:** finds the offset between two captures and marks every
+  difference (with a tolerance for edge jitter), as search matches or regions.
+* **State analysis:** resamples a capture on the edges of a clock channel, like an analyzer
+  clocked by the device under test, optionally only while qualifier channels match. It suggests
+  the edge and read offset at which the other lines are stable (on a C64 the falling edge of
+  Φ2); *Back to the timing capture* returns to the original. Decoders that follow the clock
+  themselves, such as the C64 bus, run on the timing capture.
+
+### Trigger sequences
+
+Choose *Sequence* in the capture settings: each stage waits for a pattern, an edge, a pulse of a
+width range or a gap without edges on a channel, a number of times, optionally within a time
+after the previous stage (else the sequence starts over). The capture triggers when the last
+stage completes. On devices that stream, *Evaluate the trigger in the application* looks for any
+trigger in the stream, also on the Pico boards whose streams have no trigger of their own; the
+samples before the trigger are kept from the stream.
+
 ## Profiles
 
 A profile stores capture settings (channels with names and colours, frequency, samples,
@@ -271,15 +324,15 @@ original 6.5 software (including its decoder tree) can be imported.
 
 Neither test needs connected signals.
 
-* ***Device → Board self-test…*** checks the connected board: capture buffer, trigger link,
+* ***Device → Self-test…*** (the *Self-test* tab of *Device information*) checks the connected
+  board: capture buffer, trigger link,
   every channel input using the internal pull resistors, a real capture through PIO/DMA in
   normal and blast mode, and a stream of a test counter over USB at the highest stream rate.
-  Requires the firmware of this project, see
-  [firmware/README.md](firmware/README.md#self-test-and-simulation).
+  See [firmware/README.md](firmware/README.md#self-test-and-simulation).
 * ***Capture → Simulated capture…*** records test signals: a counter, a walking bit, or UART,
   SPI and I2C carrying the text "PiPiLogicAnalyzer". With this firmware the board generates the
   signals and transfers them like a real capture, which tests the firmware, USB/WiFi and the
-  application. Without a board, or with the original firmware, the application computes the same
+  application. Without a board the application computes the same
   signals. For the protocol pattern the matching UART, SPI and I2C decoders are added on request.
 
 ## Installing the firmware
@@ -287,8 +340,11 @@ Neither test needs connected signals.
 While no analyzer is connected, the application looks for Raspberry Pi boards without the
 PiPiLogicAnalyzer firmware every two seconds: boards in bootloader mode (drive `RPI-RP2` or
 `RP2350`) or running other firmware such as MicroPython. A banner with *Install firmware…*
-appears when one is found. For a connected analyzer with an older or the original firmware the
-banner offers *Update firmware…*.
+appears when one is found.
+
+Every version of the application works only with the firmware it comes with (the firmware
+reports its protocol version when it is identified). Connecting a board with an older or the
+original firmware offers *Update firmware…* instead; after the update it connects as usual.
 
 *Device → Install or update firmware…*:
 
@@ -345,13 +401,20 @@ tested on a U2Pro16; the other models have not been tested on hardware yet, repo
   lower rates. A stream is shown while it runs, following its end (zoom or scroll back at any
   time); *Stop* keeps the samples received so far, and the decoders run when it ends. With
   *Until stopped* a stream runs until *Stop* (up to 2³⁶ samples, about an hour at 20 MHz) and
-  keeps only its latest samples, as many as the sample count says; older ones are dropped. The input
+  keeps only its latest samples, as many as the sample count says; older ones are dropped.
+  *Record to disk* keeps a stream in memory-mapped files instead of memory: the operating system
+  holds only the parts in use in RAM, and the limit is the free disk space less 4 GB (an endless
+  stream uses half of it) instead of about one billion samples. At 20 MHz × 16 channels that is
+  320 MB/s, about 19 GB per minute. The files are deleted with the capture; decoders then run
+  on request, and captures larger than the memory limit cannot be saved or exported yet. A disk
+  that fills up stops the stream, keeping what arrived. The input
   threshold (0–5 V, default 1.0 V) is set in the same dialog. A capture holds at most about one
   billion samples over all channels, the memory the application needs.
 * **Triggers:** an edge on any channel, a level pattern on consecutive channels, or none (the
   capture starts at once). Blast mode and bursts are features of the PiPiLogicAnalyzer hardware
   and are not offered for the DSLogic.
-* **Board self-test** (*Device* menu): the FPGA captures its internal test counter instead of
+* **Self-test** (*Device* menu, a tab of *Device information*): the FPGA captures its internal
+  test counter instead of
   the inputs, which checks the capture memory, the USB transfer in buffer and stream mode (at the
   highest stream rate of 16 channels) and the pattern and edge triggers bit by bit, without any
   signal. It also lists the firmware, the FPGA, the USB speed and the security check of the board,
@@ -384,16 +447,22 @@ the decoders, or add the `C64 bus` decoder yourself; its *Disassembly* row shows
 | Action | Input |
 | --- | --- |
 | Zoom | mouse wheel over the waveform, ruler or annotations (`Shift`: bigger steps), `+` / `-` (also with `Ctrl`), pinch on a trackpad, `Ctrl` `0` (fit) |
-| Channel height (more channels on the screen) | `Alt` + mouse wheel over the waveform or the channel names, `Ctrl` `Shift` `↑` / `↓`, `Ctrl` `Shift` `0` (default), slider *Channel height* in the *View* box; low channels show their name instead of the name field |
+| Channel height (more channels on the screen) | `Alt` + mouse wheel over the waveform or the channel names, `Ctrl` `Shift` `↑` / `↓`, `Ctrl` `Shift` `0` (default), slider in the view bar below the waveform; low channels show their name instead of the name field |
 | Scroll horizontally | swipe left/right on a trackpad, `←` `→` (10 %), drag the waveform, `Ctrl` + mouse wheel, horizontal wheel, scroll bar |
 | Scroll through the channels | swipe up/down on a trackpad, scroll bar |
 | Go to trigger | `Ctrl` `T` |
 | Page/step | `Ctrl` `↑` `↓` (full page), `Shift` `←` `→` (one sample) |
-| Start / repeat / stop capture | `F5` / `Ctrl` `R` / `Shift` `F5` |
+| Start capture (toolbar settings) / all settings / repeat / stop | `F5` / `Ctrl` `F5` / `Ctrl` `R` / `Shift` `F5` |
+| Cursors A and B | drag them on the ruler, or press `A` / `B` with the pointer over the waveform; right-click in the ruler: *Place cursor A/B here*, *Cursors to the selection* |
+| Named marker | `M` with the pointer over the waveform, or right-click in the ruler |
+| Search / next / previous match | `Ctrl` `F` / `F3` / `Shift` `F3` |
+| Measurements / analysis panels / listing | `Ctrl` `M` / `Ctrl` `1` / `Ctrl` `2` |
+| Edit or remove a bus | double-click or right-click its row |
 | Set/remove marker | click into the ruler |
 | Select a range | drag in the ruler (`Shift` + click extends the selection) |
 | Sample menu | right-click in the ruler (copy, paste, delete, measure, region …) |
-| See how a decoded value is made up | rest the pointer on an annotation: its samples are marked across all channels, a dashed line shows where the decoder read the value, and every channel it read shows its level (`A15 = 1 (+$8000)`); buses such as A0…A15 also show their value (`A = $FFFC`), and lines changing next to the read point are marked with `~` |
+| See how a decoded value is made up | rest the pointer on an annotation: its samples are marked across all channels, a dashed line shows where the decoder read the value, and every channel it read shows its level (`A15 = 1 (+$8000)`); buses such as A0…A15 also show their value (`A = $FFFC`), and lines changing next to the read point are marked with `~`. The entries of other rows that belong to it are outlined (the bus cycles of an instruction, the instruction of a bus cycle); an entry made of several values, such as an instruction, shows where each of them was read and lists them next to it |
+| List an annotation row | click the name of the row: a list with the other rows of the decoder as columns (e.g. the bytes of each instruction) and the details of the selected entry |
 | Show/hide a channel | dot left of the channel name |
 | Pin a channel | pin right of the channel name: pinned channels stay at the top while the others scroll (*View → Unpin all channels*) |
 | Change a channel colour | click the channel name |
@@ -410,21 +479,24 @@ the decoders, or add the `C64 bus` decoder yourself; its *Disassembly* row shows
 | `.lac.gz` | ✓ | ✓ | same structure, gzip-compressed |
 | `.csv` | – | ✓ | optionally with a time column relative to the trigger |
 | `.vcd` | – | ✓ | for PulseView, GTKWave, … |
+| `.sr` | ✓ | ✓ | sigrok session (PulseView, sigrok-cli) |
 
 ## Project structure
 
 ```
 pipilogicanalyzer/
-├── driver/      device drivers: protocol, serial/network, multi device, detection
-├── core/        analysis (transition index, measurements), files, colours, settings, firmware
+├── driver/      device drivers: base class, pico/ (PiPiLogicAnalyzer firmware), dslogic/ (DSLogic)
+├── core/        analysis (edges, statistics, buses, search, trigger engine, compare, state mode), files (.lac, .sr, CSV, VCD), settings, firmware
 ├── sdl/         Signal Description Language (samples created by hand)
 ├── sigrok/      sigrokdecode compatible runtime, decoder search and execution
-└── ui/          Qt interface: main window, widgets, dialogs, theme, icons
+└── ui/          Qt interface: main window, widgets, panels/ (measure, search, markers, listing), dialogs, devices/, theme
 decoders/        sigrok protocol decoders (libsigrokdecode, LogicAnalyzer 6.5, c64bus)
 firmware/        firmware for Pico/Pico 2/Pico W/Zero/Interceptor (C, Pico SDK)
 packaging/       PyInstaller build, icons, AppImage
 tests/           pytest suite (driver, analysis, files, SDL, decoders, GUI, packaging)
 ```
+
+Adding support for another analyzer is described in [docs/drivers.md](docs/drivers.md).
 
 ## Performance
 

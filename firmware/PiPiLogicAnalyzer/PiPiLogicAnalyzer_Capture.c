@@ -22,6 +22,7 @@
 #include "hardware/structs/systick.h"
 #include "hardware/structs/bus_ctrl.h"
 #include "PiPiLogicAnalyzer.pio.h"
+#include "PiPiLogicAnalyzer_Sequence.h"
 
 #if defined(CORE_TYPE_2)
 #include <RP2350.h>
@@ -89,6 +90,7 @@ static uint8_t captureBuffer[CAPTURE_BUFFER_SIZE] __attribute__((aligned(4)));
 #define CAPTURE_TYPE_BLAST 3
 #define CAPTURE_TYPE_SIMULATION 4
 #define CAPTURE_TYPE_STREAM 5
+#define CAPTURE_TYPE_SEQUENCE 6
 
 //-----------------------------------------------------------------------------
 //--------------Complex trigger PIO program------------------------------------
@@ -694,6 +696,7 @@ static void configurePingPongDMAs(CHANNEL_MODE channelMode, irq_handler_t handle
 }
 
 static void stream_capture_completed();
+static void sequence_capture_completed();
 
 void StopCapture()
 {
@@ -719,6 +722,8 @@ void StopCapture()
 
         if(lastCaptureType == CAPTURE_TYPE_STREAM)
             stream_capture_completed();
+        else if(lastCaptureType == CAPTURE_TYPE_SEQUENCE)
+            sequence_capture_completed();
         else if(lastCaptureType == CAPTURE_TYPE_SIMPLE)
             simple_capture_completed();
         else if(lastCaptureType == CAPTURE_TYPE_COMPLEX)
@@ -732,6 +737,8 @@ void StopCapture()
 
         if(lastCaptureType == CAPTURE_TYPE_STREAM)
             stream_capture_completed();
+        else if(lastCaptureType == CAPTURE_TYPE_SEQUENCE)
+            sequence_capture_completed();
         else if(lastCaptureType == CAPTURE_TYPE_SIMPLE)
             simple_capture_completed();
         else if(lastCaptureType == CAPTURE_TYPE_BLAST)
@@ -1398,6 +1405,536 @@ void GetStreamSampleBits(char* buffer, uint32_t size)
 
     for(uint8_t i = 0; i < lastCapturePinCount && used + 4 < size; i++)
         used += snprintf(buffer + used, size - used, i ? ",%d" : "%d", lastCapturePins[i] - INPUT_PIN_BASE);
+}
+
+//-----------------------------------------------------------------------------
+//--------------Trigger sequence and state mode capture------------------------
+//-----------------------------------------------------------------------------
+//Trigger type 7. The PIO samples without end into the ring buffer like the stream capture
+//(SEQUENCE_CAPTURE at the requested rate, STATE_CAPTURE on the edges of an external clock); the
+//main loop evaluates the trigger sequence behind the DMA (PiPiLogicAnalyzer_Sequence.c). Once it
+//completes at sample T, the stop value T + post is sent to the PIO program, which stops exactly
+//after that sample. The capture then ends like the other captures: lastTail is the last sample
+//and GetBuffer sorts the pre + post samples before it.
+//
+//If the evaluation falls behind so far that the DMA overwrites samples it still needs, the
+//capture ends without samples (length 0), which the host reports as an error.
+
+//PIO cycles per sample of SEQUENCE_CAPTURE
+#define SEQUENCE_CYCLES 5
+//Minimum PIO cycles per clock period of STATE_CAPTURE (50% duty cycle)
+#define STATE_CYCLES 8
+//Samples evaluated per call of SequenceCaptureStep (the main loop checks for a cancel in between)
+#define SEQUENCE_CHUNK 16384
+//Stop value sent while no trigger is known: far ahead of the samples taken so far
+#define SEQUENCE_FAR_AHEAD (1u << 31)
+#define SEQUENCE_FAR_REFRESH (1u << 30)
+//Payload of command 10
+#define SEQUENCE_FORMAT_VERSION 1
+#define SEQUENCE_HEADER_SIZE 4
+#define SEQUENCE_STAGE_SIZE 28
+#define SEQUENCE_FLAG_STATE_MODE 0x01
+#define SEQUENCE_FLAG_CLOCK_FALLING 0x02
+//Samples of the benchmark at start-up (every sample is an event, see InitSequenceCapture)
+#define SEQUENCE_BENCHMARK_SAMPLES 16384
+
+typedef enum
+{
+    SEQUENCE_PHASE_SCAN,    //Evaluating the sequence
+    SEQUENCE_PHASE_POST     //Triggered, waiting for the post-trigger samples
+
+} SEQUENCE_PHASE;
+
+//Configuration of command 10, in channel numbers (bit/mask), used by the next capture request
+static SEQ_STAGE sequenceStages[SEQ_MAX_STAGES];
+static uint8_t sequenceStageCount;
+static bool sequenceConfigured;
+static bool sequenceStateMode;
+static bool sequenceClockFalling;
+static uint8_t sequenceClockChannel;
+
+//Running capture
+static SEQ_STATE sequenceState;
+static SEQUENCE_PHASE sequencePhase;
+static uint64_t sequenceTrigger;            //Trigger sample
+static uint64_t sequenceStop;               //Samples to take (trigger + post)
+static bool sequenceStopSent;
+static uint64_t sequenceFarSent;            //Samples written when the last far stop value was sent
+static uint8_t sequenceClockPin = 0xFF;
+static uint16_t sequenceInstructions[32];
+static pio_program_t sequenceProgram;
+
+//Measured at start-up
+static uint32_t sequenceBenchmarkRate;
+static uint32_t sequenceMaxRate;
+
+static uint32_t read_u32(const uint8_t* data)
+{
+    return (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
+bool SetCaptureSequence(const uint8_t* data, uint32_t length)
+{
+    sequenceConfigured = false;
+
+    if(length < SEQUENCE_HEADER_SIZE || data[0] != SEQUENCE_FORMAT_VERSION)
+        return false;
+
+    uint8_t flags = data[1];
+    uint8_t clockChannel = data[2];
+    uint8_t stageCount = data[3];
+
+    if(flags & ~(SEQUENCE_FLAG_STATE_MODE | SEQUENCE_FLAG_CLOCK_FALLING))
+        return false;
+
+    if(stageCount > SEQ_MAX_STAGES || length != SEQUENCE_HEADER_SIZE + (uint32_t)stageCount * SEQUENCE_STAGE_SIZE)
+        return false;
+
+    if((flags & SEQUENCE_FLAG_STATE_MODE) && clockChannel >= MAX_CHANNELS)
+        return false;
+
+    //Channels of a pattern: bit n = channel n
+    uint32_t channelMask = MAX_CHANNELS >= 32 ? 0xFFFFFFFFu : ((1u << MAX_CHANNELS) - 1);
+
+    for(uint8_t i = 0; i < stageCount; i++)
+    {
+        const uint8_t* source = data + SEQUENCE_HEADER_SIZE + i * SEQUENCE_STAGE_SIZE;
+        SEQ_STAGE* stage = &sequenceStages[i];
+
+        stage->kind = source[0];
+        stage->bit = source[1];
+        stage->edge = source[2];
+        stage->mask = read_u32(source + 4);
+        stage->value = read_u32(source + 8);
+        stage->minSamples = read_u32(source + 12);
+        stage->maxSamples = read_u32(source + 16);
+        stage->count = read_u32(source + 20);
+        stage->withinSamples = read_u32(source + 24);
+
+        if(source[3] != 0 || stage->kind > SEQ_GAP)
+            return false;
+
+        if(stage->kind == SEQ_PATTERN ? (stage->mask & ~channelMask) != 0 : stage->bit >= MAX_CHANNELS)
+            return false;
+    }
+
+    //Times, counts and edges; channel numbers fit in 32 bits like sample bits
+    if(!seq_validate(sequenceStages, stageCount, 32))
+        return false;
+
+    sequenceStageCount = stageCount;
+    sequenceStateMode = (flags & SEQUENCE_FLAG_STATE_MODE) != 0;
+    sequenceClockFalling = (flags & SEQUENCE_FLAG_CLOCK_FALLING) != 0;
+    sequenceClockChannel = clockChannel;
+    sequenceConfigured = true;
+    return true;
+}
+
+//Sample bit of a channel, 0xFF if its GPIO is not part of the samples
+static uint8_t channel_sample_bit(uint8_t channel)
+{
+    uint8_t pin = pinMap[channel];
+
+    if(pin < INPUT_PIN_BASE || pin - INPUT_PIN_BASE >= 32)
+        return 0xFF;
+
+    return pin - INPUT_PIN_BASE;
+}
+
+//Converts the channels of the configured stages into sample bits
+static bool map_sequence_stages(uint8_t sampleBits)
+{
+    sequenceState.stageCount = sequenceStageCount;
+
+    for(uint8_t i = 0; i < sequenceStageCount; i++)
+    {
+        SEQ_STAGE* stage = &sequenceState.stages[i];
+        *stage = sequenceStages[i];
+
+        if(stage->kind == SEQ_PATTERN)
+        {
+            uint32_t mask = 0;
+            uint32_t value = 0;
+
+            for(uint8_t channel = 0; channel < MAX_CHANNELS; channel++)
+            {
+                if(!(stage->mask >> channel & 1))
+                    continue;
+
+                uint8_t bit = channel_sample_bit(channel);
+                if(bit >= sampleBits)
+                    return false;
+
+                mask |= 1u << bit;
+                if(stage->value >> channel & 1)
+                    value |= 1u << bit;
+            }
+
+            stage->mask = mask;
+            stage->value = value;
+        }
+        else
+        {
+            stage->bit = channel_sample_bit(stage->bit);
+            if(stage->bit >= sampleBits)
+                return false;
+        }
+    }
+
+    return seq_validate(sequenceState.stages, sequenceState.stageCount, sampleBits);
+}
+
+static void sequence_capture_completed()
+{
+    pio_sm_set_enabled(capturePIO, sm_Capture, false);
+    abort_DMAs();
+    disable_gpios();
+
+    if(sequenceClockPin != 0xFF)
+    {
+        gpio_deinit(sequenceClockPin);
+        sequenceClockPin = 0xFF;
+    }
+
+    pio_interrupt_clear(capturePIO, 0);
+    pio_sm_unclaim(capturePIO, sm_Capture);
+    pio_remove_program(capturePIO, &sequenceProgram, captureOffset);
+
+    captureFinished = true;
+}
+
+//The evaluation fell behind: the capture ends without samples
+static void sequence_overflow()
+{
+    lastPreSize = 0;
+    lastPostSize = 0;
+    lastLoopCount = 0;
+    lastStartPosition = 0;
+    captureProcessed = true;
+    sequence_capture_completed();
+}
+
+//Ends the capture after the post-trigger samples; exact: the PIO program stopped by itself
+static void sequence_finish(bool exact)
+{
+    if(!exact)
+        pio_sm_set_enabled(capturePIO, sm_Capture, false);
+
+    //Let the DMA store the samples still in the FIFO
+    for(int i = 0; i < 1000 && !pio_sm_is_rx_fifo_empty(capturePIO, sm_Capture); i++)
+        busy_wait_us(1);
+    busy_wait_us(2);
+
+    //The stop value may have arrived just in time after all
+    if(capturePIO->irq & 1)
+        exact = true;
+
+    //Samples written, at most (StreamWrittenSamples may be one low and the DMA was busy)
+    uint64_t written = exact ? sequenceStop : StreamWrittenSamples() + 2;
+
+    //The oldest pre-trigger sample (negative: before the start, still zero in the cleared buffer)
+    //must not have been overwritten
+    int64_t oldest = (int64_t)sequenceTrigger - (int64_t)lastPreSize;
+    if((int64_t)written - oldest > (int64_t)transferCount)
+    {
+        sequence_overflow();
+        return;
+    }
+
+    lastTail = (uint32_t)((sequenceStop - 1) % transferCount);
+    sequence_capture_completed();
+}
+
+static void sequence_send_stop(uint32_t samples)
+{
+    //The PIO program stops when its counter (~samples taken) equals X
+    pio_sm_put(capturePIO, sm_Capture, ~samples);
+}
+
+void SequenceCaptureStep()
+{
+    if(captureFinished || lastCaptureType != CAPTURE_TYPE_SEQUENCE)
+        return;
+
+    if(sequencePhase == SEQUENCE_PHASE_SCAN)
+    {
+        uint64_t written = StreamWrittenSamples();
+        uint64_t start = sequenceState.position;
+
+        //Keep the stop value of the PIO program far ahead of the samples
+        if(written - sequenceFarSent >= SEQUENCE_FAR_REFRESH && !pio_sm_is_tx_fifo_full(capturePIO, sm_Capture))
+        {
+            sequence_send_stop((uint32_t)(written + SEQUENCE_FAR_AHEAD));
+            sequenceFarSent = written;
+        }
+
+        if(written <= start)
+            return;
+
+        uint64_t end = written - start > SEQUENCE_CHUNK ? start + SEQUENCE_CHUNK : written;
+        uint8_t bytesPerSample = lastCaptureMode == MODE_8_CHANNEL ? 1 : (lastCaptureMode == MODE_16_CHANNEL ? 2 : 4);
+        bool triggered = seq_scan(&sequenceState, captureBuffer, transferCount, bytesPerSample, end);
+
+        //The evaluated samples and the one before them must still have been in the buffer
+        if(StreamWrittenSamples() + 2 >= start + transferCount)
+        {
+            sequence_overflow();
+            return;
+        }
+
+        if(!triggered)
+            return;
+
+        sequenceTrigger = sequenceState.triggerSample;
+        sequenceStop = sequenceTrigger + lastPostSize;
+        sequenceStopSent = false;
+        sequencePhase = SEQUENCE_PHASE_POST;
+    }
+
+    if(!sequenceStopSent && !pio_sm_is_tx_fifo_full(capturePIO, sm_Capture))
+    {
+        sequence_send_stop((uint32_t)sequenceStop);
+        sequenceStopSent = true;
+    }
+
+    if(capturePIO->irq & 1)
+        sequence_finish(true); //Stopped exactly after the last sample
+    else if(StreamWrittenSamples() >= sequenceStop)
+        sequence_finish(false); //The stop value came too late (evaluation behind the capture)
+}
+
+bool IsSequenceCapture()
+{
+    return lastCaptureType == CAPTURE_TYPE_SEQUENCE && !captureFinished;
+}
+
+bool StartCaptureSequence(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode)
+{
+    //A configuration is used by one capture request only
+    bool configured = sequenceConfigured;
+    sequenceConfigured = false;
+
+    if(!configured)
+        return false;
+
+    uint32_t maxSamples;
+    uint8_t sampleBits;
+
+    switch(captureMode)
+    {
+        case MODE_8_CHANNEL:
+            maxSamples = CAPTURE_BUFFER_SIZE;
+            sampleBits = 8;
+            break;
+        case MODE_16_CHANNEL:
+            maxSamples = CAPTURE_BUFFER_SIZE / 2;
+            sampleBits = 16;
+            break;
+        case MODE_24_CHANNEL:
+            maxSamples = CAPTURE_BUFFER_SIZE / 4;
+            sampleBits = 32;
+            break;
+        default:
+            return false;
+    }
+
+    if(postLength < 1 || (uint64_t)preLength + postLength > maxSamples)
+        return false;
+
+    if(capturePinCount < 1 || capturePinCount > MAX_CHANNELS)
+        return false;
+
+    if(!capture_pins_valid(capturePins, capturePinCount, captureMode))
+        return false;
+
+    //The stages have to look at bits of the samples
+    if(!map_sequence_stages(sampleBits))
+        return false;
+
+    float clockDiv = 1.0f;
+    uint8_t clockIndex = 0;
+
+    if(sequenceStateMode)
+    {
+        //The frequency is ignored, the clock input paces the samples
+        clockIndex = channel_sample_bit(sequenceClockChannel);
+        if(clockIndex >= 32)
+            return false;
+    }
+    else
+    {
+        uint32_t systemClock = clock_get_hz(clk_sys);
+
+        if(freq == 0 || freq > MAX_FREQ || (uint64_t)freq * SEQUENCE_CYCLES > systemClock)
+            return false;
+
+        //The evaluation has to keep up with the samples
+        if(sequenceStageCount > 0 && freq > sequenceMaxRate)
+            return false;
+
+        clockDiv = (float)systemClock / ((float)freq * SEQUENCE_CYCLES);
+        if(clockDiv > 65536.0f)
+            return false;
+    }
+
+    //Program with the clock input in its WAIT instructions (state mode)
+    const pio_program_t* source = sequenceStateMode ? &STATE_CAPTURE_program : &SEQUENCE_CAPTURE_program;
+    memcpy(sequenceInstructions, source->instructions, source->length * sizeof(uint16_t));
+
+    if(sequenceStateMode)
+    {
+        for(uint8_t i = 0; i < source->length; i++)
+        {
+            //WAIT with the source PIN: index in bits 0-4, polarity in bit 7
+            if((sequenceInstructions[i] & 0xE060) == 0x2020)
+            {
+                sequenceInstructions[i] = (sequenceInstructions[i] & ~0x1F) | clockIndex;
+                if(sequenceClockFalling)
+                    sequenceInstructions[i] ^= 0x80;
+            }
+        }
+    }
+
+    sequenceProgram = *source;
+    sequenceProgram.instructions = sequenceInstructions;
+
+    memset(captureBuffer, 0, sizeof(captureBuffer));
+
+    lastPreSize = preLength;
+    lastPostSize = postLength;
+    lastLoopCount = 0;
+    lastCapturePinCount = capturePinCount;
+    lastCaptureMode = captureMode;
+    lastBurstMeasure = false;
+    timestampIndex = 0;
+    streamPasses = 0;
+
+    for(uint8_t i = 0; i < capturePinCount; i++)
+        lastCapturePins[i] = pinMap[capturePins[i]];
+
+    sequenceClockPin = sequenceStateMode ? pinMap[sequenceClockChannel] : 0xFF;
+
+    capturePIO = pio0;
+    pio_clear_instruction_memory(capturePIO);
+
+    sm_Capture = pio_claim_unused_sm(capturePIO, true);
+    pio_sm_clear_fifos(capturePIO, sm_Capture);
+    pio_sm_restart(capturePIO, sm_Capture);
+
+    captureOffset = pio_add_program(capturePIO, &sequenceProgram);
+
+    for(int i = 0; i < MAX_CHANNELS; i++)
+        pio_sm_set_consecutive_pindirs(capturePIO, sm_Capture, pinMap[i], 1, false);
+
+    for(uint8_t i = 0; i < MAX_CHANNELS; i++)
+        pio_gpio_init(capturePIO, pinMap[i]);
+
+    pio_sm_config smConfig = sequenceStateMode ? STATE_CAPTURE_program_get_default_config(captureOffset)
+                                               : SEQUENCE_CAPTURE_program_get_default_config(captureOffset);
+    sm_config_set_in_pins(&smConfig, INPUT_PIN_BASE);
+    sm_config_set_clkdiv(&smConfig, clockDiv);
+    sm_config_set_in_shift(&smConfig, true, true, 0); //Autopush per dword
+
+    pio_sm_set_enabled(capturePIO, sm_Capture, false);
+    pio_sm_init(capturePIO, sm_Capture, captureOffset, &smConfig);
+
+    //Polled by SequenceCaptureStep, no interrupt
+    pio_set_irq0_source_enabled(capturePIO, pis_interrupt0, false);
+    pio_interrupt_clear(capturePIO, 0);
+
+    seq_start(&sequenceState);
+    sequenceFarSent = 0;
+
+    if(sequenceStageCount == 0)
+    {
+        //Without stages (state mode "immediate"): the trigger follows the pre-trigger samples
+        sequenceTrigger = preLength;
+        sequenceStop = (uint64_t)preLength + postLength;
+        sequencePhase = SEQUENCE_PHASE_POST;
+        sequence_send_stop((uint32_t)sequenceStop);
+        sequenceStopSent = true;
+    }
+    else
+    {
+        sequencePhase = SEQUENCE_PHASE_SCAN;
+        sequence_send_stop(SEQUENCE_FAR_AHEAD);
+        sequenceStopSent = false;
+    }
+
+    configurePingPongDMAs(captureMode, stream_dma_handler);
+
+    captureFinished = false;
+    captureProcessed = false;
+    lastCaptureType = CAPTURE_TYPE_SEQUENCE;
+
+    pio_sm_set_enabled(capturePIO, sm_Capture, true);
+
+    return true;
+}
+
+void InitSequenceCapture()
+{
+    //Benchmark: every sample is an event of the current stage, a pulse stage whose channel toggles
+    //on every sample (the most expensive evaluation of a sample with one pulse channel)
+    SEQ_STATE* state = &sequenceState;
+    uint32_t* samples = (uint32_t*)captureBuffer;
+    uint32_t count = SEQUENCE_BENCHMARK_SAMPLES;
+
+    if(count > CAPTURE_BUFFER_SIZE / 4)
+        count = CAPTURE_BUFFER_SIZE / 4;
+
+    memset(state, 0, sizeof(*state));
+    state->stageCount = SEQ_MAX_STAGES;
+
+    for(uint8_t i = 0; i < SEQ_MAX_STAGES; i++)
+    {
+        SEQ_STAGE* stage = &state->stages[i];
+        stage->kind = i == 0 ? SEQ_PULSE : SEQ_EDGE;
+        stage->edge = SEQ_ANY;
+        stage->bit = 0;
+        stage->minSamples = 1000; //Never reached: the sequence stays in the first stage
+        stage->maxSamples = SEQ_NO_LIMIT;
+        stage->count = 1;
+        stage->withinSamples = SEQ_NO_LIMIT;
+    }
+
+    for(uint32_t i = 0; i < count; i++)
+        samples[i] = (i & 1) ? 0xFF : 0x00;
+
+    seq_start(state);
+    uint64_t begin = time_us_64();
+    seq_scan(state, samples, count, 4, count);
+    uint64_t elapsed = time_us_64() - begin;
+
+    memset(captureBuffer, 0, sizeof(captureBuffer));
+    memset(state, 0, sizeof(*state));
+
+    if(elapsed == 0)
+        elapsed = 1;
+
+    sequenceBenchmarkRate = (uint32_t)((uint64_t)count * 1000000u / elapsed);
+
+    //Margin for the DMA, the interrupts (USB) and further pulse channels, rounded down to 1 kHz
+    uint32_t rate = sequenceBenchmarkRate / 5 * 4;
+    rate -= rate % 1000;
+
+    uint32_t limit = clock_get_hz(clk_sys) / SEQUENCE_CYCLES;
+    if(limit > MAX_FREQ)
+        limit = MAX_FREQ;
+
+    sequenceMaxRate = rate < limit ? rate : limit;
+}
+
+uint32_t GetSequenceMaxRate(uint32_t* measuredRate)
+{
+    if(measuredRate)
+        *measuredRate = sequenceBenchmarkRate;
+    return sequenceMaxRate;
+}
+
+uint32_t GetStateMaxClock()
+{
+    return clock_get_hz(clk_sys) / STATE_CYCLES;
 }
 
 bool StartCaptureSimple(uint32_t freq, uint32_t preLength, uint32_t postLength, uint16_t loopCount, uint8_t measureBursts, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPin, bool invertTrigger, CHANNEL_MODE captureMode)

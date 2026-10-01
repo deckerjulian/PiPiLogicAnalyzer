@@ -14,10 +14,9 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from pipilogicanalyzer.core import device_info, firmware
-from pipilogicanalyzer.driver import detector, protocol
-from pipilogicanalyzer.driver.analyzer import PiPiLogicAnalyzerDriver
-from pipilogicanalyzer.driver.base import AnalyzerDriverType
-from pipilogicanalyzer.driver.detector import DetectedDevice, ForeignPico, UsbPortInfo
+from pipilogicanalyzer.driver.pico import detector, protocol
+from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
+from pipilogicanalyzer.driver.pico.detector import DetectedDevice, ForeignPico, UsbPortInfo
 from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
 from pipilogicanalyzer.ui.dialogs.device_dialogs import DeviceInfoDialog
 from pipilogicanalyzer.ui.dialogs.firmware_dialog import ConnectedDevice, FirmwareDialog
@@ -211,7 +210,7 @@ def test_multi_connect_dialog_shows_serial_numbers(application, monkeypatch):
 
 
 def test_device_list_only_offers_analyzers(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as main_window_module
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
     from pipilogicanalyzer.ui.main_window import MainWindow
 
     ports = [
@@ -220,13 +219,14 @@ def test_device_list_only_offers_analyzers(application, monkeypatch):
         fake_port(device="/dev/ttyS0"),
     ]
     monkeypatch.setattr(detector.list_ports, "comports", lambda: ports)
-    monkeypatch.setattr(main_window_module.firmware_images, "find_boot_drives", lambda: [])
+    monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
     window = MainWindow()
     try:
         window.refresh_ports()
         combo = window.port_combo
         items = [combo.itemData(index) for index in range(combo.count()) if combo.itemText(index)]
-        assert items == [
+        assert {item.backend for item in items} == {"pico"}
+        assert [(item.kind, item.value) for item in items] == [
             ("autodetect", None),
             ("serial", "/dev/analyzer"),
             ("network", None),
@@ -259,7 +259,7 @@ def extended_device(monkeypatch):
     transport = FakeTransport()
     transport._responses[0] = "LOGIC_ANALYZER_PICO_V6_5"
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
     driver = PiPiLogicAnalyzerDriver("/dev/fake")
     for line in (
@@ -301,7 +301,8 @@ def test_device_description_of_an_extended_board(extended_device, monkeypatch):
     assert device["Build setting"] == "BOARD_PICO"
     assert device["Firmware version"] == "6.5"
     assert device["Microcontroller"] == "RP2040"
-    assert "Board self-test" in device["Additional functions"]
+    assert "Board self-test" in device["Functions"]
+    assert device["Firmware protocol"] == str(protocol.FIRMWARE_PROTOCOL)
 
     build = dict(sections["Firmware build"])
     assert build["Unique board ID"] == "E6614103E7654321"
@@ -313,18 +314,6 @@ def test_device_description_of_an_extended_board(extended_device, monkeypatch):
     assert connection["USB vendor:product"] == "1209:3020"
     assert connection["Product"] == "PiPiLogicAnalyzer"
     assert "Max. bursts" in dict(sections["Capture"])
-
-
-def test_device_description_of_original_firmware(monkeypatch):
-    transport = FakeTransport()
-    transport.queue_response("ERR_UNKNOWN_MSG")
-    monkeypatch.setattr(
-        "pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport
-    )
-    monkeypatch.setattr(detector, "port_details", lambda port: None)
-    sections = dict(device_info.describe_device(PiPiLogicAnalyzerDriver("/dev/fake")))
-    assert "Firmware build" not in sections
-    assert dict(sections["Device"])["Firmware type"].startswith("Original or older")
 
 
 @pytest.fixture(scope="module")
@@ -471,12 +460,11 @@ def test_detected_analyzers_are_asked_for_their_firmware(application, tmp_path):
     dialog.done(0)
 
 
-def test_version_7_firmware_is_accepted_with_the_v6_5_request():
-    from pipilogicanalyzer.driver.base import parse_version
+def test_version_7_firmware_is_described():
+    from pipilogicanalyzer.driver.pico.protocol import parse_version
 
     version = parse_version("LOGIC_ANALYZER_PICO_V7_0")
-    assert version.is_valid and (version.major, version.minor) == (7, 0)
-    assert protocol.layout_for_version(version.major, version.minor) is protocol.LAYOUT_V6_5
+    assert (version.major, version.minor) == (7, 0)
     assert firmware.describe_firmware("LOGIC_ANALYZER_PICO_V7_0") == "firmware 7.0 · Raspberry Pi Pico · RP2040"
 
 
@@ -490,30 +478,43 @@ def test_firmware_descriptions():
 
 
 # ---------------------------------------------------------------- main window
-class OriginalFirmwareDriver(EmulatedAnalyzerDriver):
-    @property
-    def driver_type(self):
-        return AnalyzerDriverType.SERIAL
-
-    def capabilities(self):
-        return frozenset()
-
-
 def test_main_window_notices_boards_without_firmware(application, tmp_path, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as main_window_module
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
     from pipilogicanalyzer.ui.main_window import MainWindow
 
     drive = firmware.boot_drive_at(str(make_drive(tmp_path, "RPI-RP2", "RPI-RP2")))
-    monkeypatch.setattr(main_window_module.firmware_images, "find_boot_drives", lambda: [drive])
-    monkeypatch.setattr(main_window_module.detector, "detect_foreign_picos", lambda: [])
+    monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [drive])
+    monkeypatch.setattr(pico_devices.detector, "detect_foreign_picos", lambda: [])
     window = MainWindow()
     try:
         window._check_for_new_boards()
         assert not window.firmware_notice.isHidden()
         assert "bootloader mode" in window.firmware_notice.text()
+    finally:
+        window.close()
 
-        window._check_connected_firmware(OriginalFirmwareDriver(1))
-        assert window.firmware_notice_button.text() == "Update firmware..."
+
+def test_a_board_with_outdated_firmware_is_offered_the_update(application, monkeypatch):
+    from pipilogicanalyzer.driver.base import FirmwareOutdatedError
+    from pipilogicanalyzer.ui import messages
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
+    from pipilogicanalyzer.ui.main_window import MainWindow
+
+    def outdated(backend, entry, parent):
+        raise FirmwareOutdatedError("Install the firmware.", "LOGIC_ANALYZER_V6_5", "/dev/old")
+
+    monkeypatch.setattr(pico_devices.PicoBackend, "connect", outdated)
+    questions = []
+    monkeypatch.setattr(messages, "confirm", lambda *args, **kwargs: questions.append(args[2]) or True)
+    window = MainWindow()
+    updates = []
+    monkeypatch.setattr(window, "install_firmware", lambda: updates.append(True))
+    try:
+        window.port_combo.clear()
+        window.port_combo.addItem("old board", pico_devices.serial_entry("/dev/old"))
+        window.connect_device()
+        assert window.driver is None and updates == [True]
+        assert "/dev/old" in questions[0]
     finally:
         window.close()
 
@@ -565,3 +566,13 @@ def test_both_firmware_identities_are_understood(tmp_path):
     path = make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2",
                     content=b"\x00PIPI_LOGIC_ANALYZER_PICO_V7_1\x00")
     assert firmware.read_uf2(str(path)).version == "7.1"
+
+
+def test_firmware_and_application_share_the_protocol_version():
+    """``FIRMWARE_PROTOCOL`` is raised in both places together."""
+    import re
+
+    cmake = os.path.join(os.path.dirname(__file__), "..", "firmware", "PiPiLogicAnalyzer", "CMakeLists.txt")
+    with open(cmake, encoding="utf-8") as handle:
+        match = re.search(r"add_compile_definitions\(FIRMWARE_PROTOCOL=(\d+)\)", handle.read())
+    assert match and int(match.group(1)) == protocol.FIRMWARE_PROTOCOL

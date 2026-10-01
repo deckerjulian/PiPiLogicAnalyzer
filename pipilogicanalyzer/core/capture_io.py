@@ -29,7 +29,19 @@ from typing import Any, Iterable, Optional, Sequence, TextIO
 
 import numpy as np
 
-from ..driver.models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType
+from ..driver.models import (
+    AnalyzerChannel,
+    BurstInfo,
+    BusDefinition,
+    BusFormat,
+    CaptureSession,
+    ConditionKind,
+    EdgeKind,
+    TriggerCondition,
+    TriggerSequence,
+    TriggerStage,
+    TriggerType,
+)
 from .regions import SampleRegion
 
 
@@ -114,6 +126,14 @@ def session_to_dict(session: CaptureSession, include_samples: bool = True) -> di
         "AcquisitionMode": session.acquisition_mode,
         "ThresholdVoltage": session.threshold_voltage,
         "Continuous": session.continuous,
+        "ToDisk": session.to_disk,
+        # Extensions of this application (like the four keys above): the original software
+        # ignores unknown properties, and files without them load with the defaults.
+        "TriggerSequence": sequence_to_dict(session.trigger_sequence),
+        "SoftwareTrigger": bool(session.software_trigger),
+        "ClockChannel": None if session.clock_channel is None else int(session.clock_channel),
+        "ClockEdge": session.clock_edge.value,
+        "Buses": [bus_to_dict(bus) for bus in session.buses],
     }
 
 
@@ -134,6 +154,16 @@ def session_from_dict(data: dict) -> CaptureSession:
             float(data["ThresholdVoltage"]) if data.get("ThresholdVoltage") is not None else None
         ),
         continuous=bool(data.get("Continuous", False)),
+        to_disk=bool(data.get("ToDisk", False)),
+        trigger_sequence=sequence_from_dict(data.get("TriggerSequence")),
+        software_trigger=bool(data.get("SoftwareTrigger", False)),
+        clock_channel=(
+            int(data["ClockChannel"]) if data.get("ClockChannel") is not None else None
+        ),
+        clock_edge=_enum(EdgeKind, data.get("ClockEdge"), EdgeKind.RISING),
+        buses=[
+            bus_from_dict(item) for item in (data.get("Buses") or []) if isinstance(item, dict)
+        ],
     )
     session.capture_channels = [
         channel_from_dict(item) for item in (data.get("CaptureChannels") or [])
@@ -150,6 +180,99 @@ def session_from_dict(data: dict) -> CaptureSession:
             for item in bursts
         ]
     return session
+
+
+def _enum(kind, value: Any, default):
+    """``kind(value)``, or ``default`` for a missing or unknown value."""
+    try:
+        return kind(value)
+    except ValueError:
+        return default
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    return None if value is None else int(value)
+
+
+def sequence_to_dict(sequence: Optional[TriggerSequence]) -> Optional[dict]:
+    """Trigger sequence as stored in the ``TriggerSequence`` key (``None``: no sequence)."""
+    if sequence is None:
+        return None
+    return {
+        "Stages": [
+            {
+                "Condition": {
+                    "Kind": stage.condition.kind.value,
+                    "Channel": int(stage.condition.channel),
+                    "Edge": stage.condition.edge.value,
+                    "Mask": int(stage.condition.mask),
+                    "Value": int(stage.condition.value),
+                    "MinNs": _optional_int(stage.condition.min_ns),
+                    "MaxNs": _optional_int(stage.condition.max_ns),
+                },
+                "Count": int(stage.count),
+                "WithinNs": _optional_int(stage.within_ns),
+            }
+            for stage in sequence.stages
+        ]
+    }
+
+
+def sequence_from_dict(data: Any) -> Optional[TriggerSequence]:
+    if not isinstance(data, dict):
+        return None
+    stages = []
+    for item in data.get("Stages") or []:
+        if not isinstance(item, dict):
+            continue
+        condition = item.get("Condition") or {}
+        stages.append(
+            TriggerStage(
+                condition=TriggerCondition(
+                    kind=_enum(ConditionKind, condition.get("Kind"), ConditionKind.EDGE),
+                    channel=int(condition.get("Channel", 0)),
+                    edge=_enum(EdgeKind, condition.get("Edge"), EdgeKind.RISING),
+                    mask=int(condition.get("Mask", 0)),
+                    value=int(condition.get("Value", 0)),
+                    min_ns=_optional_int(condition.get("MinNs")),
+                    max_ns=_optional_int(condition.get("MaxNs")),
+                ),
+                count=int(item.get("Count", 1)),
+                within_ns=_optional_int(item.get("WithinNs")),
+            )
+        )
+    return TriggerSequence(stages=stages)
+
+
+def bus_to_dict(bus: BusDefinition) -> dict:
+    """A bus as stored in the ``Buses`` key; the symbol table has string keys (JSON objects)."""
+    return {
+        "Name": bus.name,
+        "Channels": [int(channel) for channel in bus.channels],
+        "Format": bus.format.value,
+        "Symbols": {str(int(value)): str(name) for value, name in bus.symbols.items()},
+        "Color": _optional_int(bus.color),
+    }
+
+
+def bus_from_dict(data: dict) -> BusDefinition:
+    symbols: dict[int, str] = {}
+    for key, name in (data.get("Symbols") or {}).items():
+        try:
+            value = int(key)
+        except ValueError:
+            try:
+                value = int(str(key), 0)  # "0xD020", written by hand
+            except ValueError:
+                continue
+        symbols[value] = str(name)
+    return BusDefinition(
+        name=str(data.get("Name") or "Bus"),
+        channels=[int(channel) for channel in (data.get("Channels") or [])],
+        format=_enum(BusFormat, data.get("Format"), BusFormat.HEX),
+        symbols=symbols,
+        color=_optional_int(data.get("Color")),
+    )
 
 
 def channel_to_dict(channel: AnalyzerChannel, include_samples: bool = True) -> dict:

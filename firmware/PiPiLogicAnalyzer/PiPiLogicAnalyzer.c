@@ -23,6 +23,7 @@
 #include "PiPiLogicAnalyzer_Structs.h"
 #include "PiPiLogicAnalyzer_Capture.h"
 #include "PiPiLogicAnalyzer_SelfTest.h"
+#include "PiPiLogicAnalyzer_Sequence.h"
 #include "hardware/structs/syscfg.h"
 #include "hardware/structs/systick.h"
 #include "tusb.h"
@@ -95,9 +96,10 @@
     #define LED_OFF() { }
 #endif
 
-//Buffer used to store received data. The longest frame is the WiFi settings request with every
-//byte escaped: 2 + 2 * (1 + 116) + 2 = 238 bytes, so 256 bytes are always enough.
-#define MESSAGE_BUFFER_SIZE 256
+//Buffer used to store received data. The longest frame is the trigger sequence (command 10) of
+//8 stages with every byte escaped: 2 + 2 * (1 + 4 + 8 * 28) + 2 = 462 bytes, so 512 bytes are
+//always enough (the WiFi settings request needs 238).
+#define MESSAGE_BUFFER_SIZE 512
 uint8_t messageBuffer[MESSAGE_BUFFER_SIZE];
 //Position in the buffer
 uint16_t bufferPos = 0;
@@ -118,6 +120,10 @@ uint64_t streamLastSend;    //time_us_64 of the last chunk
 
 bool blink = false;
 uint32_t blinkCount = 0;
+
+//Trigger sequence capture: time of the last check for a cancel request
+#define SEQUENCE_CANCEL_CHECK_US 20000
+uint32_t sequenceCancelCheck;
 
 //Capture request pointer
 CAPTURE_REQUEST* req;
@@ -385,6 +391,8 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                             sendResponse(msg, fromWiFi);
                             sprintf(msg, "CHANNELS:%d\n", MAX_CHANNELS);
                             sendResponse(msg, fromWiFi);
+                            sprintf(msg, "PROTOCOL:%d\n", FIRMWARE_PROTOCOL);
+                            sendResponse(msg, fromWiFi);
                         }
                         break;
 
@@ -426,6 +434,24 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                             streamSent = 0;
                             streamLastSend = time_us_64();
                             streaming = true;
+                            break;
+                        }
+
+                        if(req->triggerType == 7) //Trigger sequence or state mode, configured by command 10
+                        {
+                            if(req->loopCount == 0 && req->measure == 0)
+                                started = StartCaptureSequence(req->frequency, req->preSamples, req->postSamples, (uint8_t*)&req->channels, req->channelCount, req->captureMode);
+
+                            if(started)
+                            {
+                                sendResponse("CAPTURE_STARTED\n", fromWiFi);
+                                capturing = true;
+                                sequenceCancelCheck = time_us_32();
+                                LED_OFF();
+                            }
+                            else
+                                sendResponse("CAPTURE_ERROR\n", fromWiFi);
+
                             break;
                         }
 
@@ -568,28 +594,40 @@ void processData(uint8_t* data, uint length, bool fromWiFi)
                         RunSelfTest(selfTestReport, &fromWiFi);
                         break;
 
-                    case 8: //Optional functions of this firmware (the original answers ERR_UNKNOWN_MSG)
+                    case 8: //Functions of this board (they depend on the board and the connection)
                     {
+                        char capsLine[320] = "CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000";
+                        size_t capsLength;
+
                         #ifdef SUPPORTS_COMPLEX_TRIGGER
 
                             //EDGE_TRIGGER_OUT: trigger type 5, PATTERN_GROUPS: channels a pattern trigger can cover
-                            char capsLine[128] = "CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,PATTERN_GROUPS=";
-                            size_t capsLength = strlen(capsLine);
-                            GetPatternTriggerGroups(capsLine + capsLength, sizeof(capsLine) - capsLength - 1);
-                            strcat(capsLine, "\n");
-                            sendResponse(capsLine, fromWiFi);
-
-                        #else
-
-                            sendResponse("CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000\n", fromWiFi);
+                            strcat(capsLine, ",EDGE_TRIGGER_OUT,PATTERN_GROUPS=");
+                            capsLength = strlen(capsLine);
+                            GetPatternTriggerGroups(capsLine + capsLength, 64);
 
                         #endif
+
+                        //Trigger sequences and state mode (trigger type 7, command 10)
+                        capsLength = strlen(capsLine);
+                        snprintf(capsLine + capsLength, sizeof(capsLine) - capsLength,
+                            ",TRIGGER_SEQUENCE=%d,TRIGGER_CONDITIONS=pattern/edge/pulse/gap,SEQUENCE_MAX_RATE=%lu,STATE_MODE,STATE_MAX_CLOCK=%lu\n",
+                            SEQ_MAX_STAGES, (unsigned long)GetSequenceMaxRate(NULL), (unsigned long)GetStateMaxClock());
+                        sendResponse(capsLine, fromWiFi);
                         break;
                     }
 
                     case 9: //Detailed board and build information
 
                         sendDeviceInfo(fromWiFi);
+                        break;
+
+                    case 10: //Trigger sequence and state mode of the next capture request with trigger type 7
+
+                        if(SetCaptureSequence(&messageBuffer[3], payloadLength > 0 ? (uint32_t)payloadLength : 0))
+                            sendResponse("SEQUENCE_OK\n", fromWiFi);
+                        else
+                            sendResponse("SEQUENCE_ERROR\n", fromWiFi);
                         break;
 
                     default:
@@ -872,6 +910,9 @@ int main()
     //A bit of delay, if the program tries to send data before Windows has identified the device it may crash
     sleep_ms(1000);
 
+    //Speed of the trigger sequence evaluation (SEQUENCE_MAX_RATE)
+    InitSequenceCapture();
+
     //Clear message buffer
     memset(messageBuffer, 0, sizeof(messageBuffer));
 
@@ -989,6 +1030,24 @@ int main()
                 #endif
                 //Done!
                 capturing = false;
+                LED_ON();
+            }
+            else if(IsSequenceCapture())
+            {
+                //Evaluate the trigger sequence, check for a cancel request now and then
+                SequenceCaptureStep();
+
+                if(time_us_32() - sequenceCancelCheck >= SEQUENCE_CANCEL_CHECK_US)
+                {
+                    sequenceCancelCheck = time_us_32();
+
+                    if(processCancel())
+                    {
+                        StopCapture();
+                        capturing = false;
+                        LED_ON();
+                    }
+                }
             }
             else
             {

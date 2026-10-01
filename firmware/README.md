@@ -5,7 +5,8 @@ Firmware for the RP2040/RP2350 logic analyzer. It is based on the firmware of th
 (gusmanb)**, version 6.5 (branch `version/v6_5`, commit `3fa3703`, folder
 `Firmware/LogicAnalyzer_V2`). The capture engine, the PIO programs, the board support and the
 protocol are his work; this project fixes the bugs listed below and adds a self-test, simulated
-captures and device information. Thank you, Agustín, for this excellent firmware!
+captures, device information, stream captures, trigger sequences and a state mode (external
+clock). Thank you, Agustín, for this excellent firmware!
 
 License: GNU General Public License v3, like the original. Not included are
 `Firmware/LogicAnalyzer` (the old V5_2 firmware) and `Firmware/PiMoroni Plus 2 files` (archives,
@@ -13,7 +14,8 @@ schematic and PSRAM helpers the build does not use).
 
 All changes compared with the original are part of the source code in
 [`PiPiLogicAnalyzer/`](PiPiLogicAnalyzer/); they are described in
-[Fixed bugs](#fixed-bugs) and [Self-test and simulation](#self-test-and-simulation).
+[Fixed bugs](#fixed-bugs), [Self-test and simulation](#self-test-and-simulation) and
+[Trigger sequences and state mode](#trigger-sequences-and-state-mode).
 
 ## Building
 
@@ -92,28 +94,31 @@ the original, `TURBO_MODE` is **off** by default and has to be enabled deliberat
 
 ## Working with the application
 
-The firmware identifies itself as `PIPI_LOGIC_ANALYZER_<BOARD>_V7_1` (before the rename: `LOGIC_ANALYZER_<BOARD>_V7_0`, which the application still accepts). Hosts compare the version with
-`V<major>_<minor>`: the application of this project and the original LogicAnalyzer 6.5 software
-both accept every version from V6_5 on and send the 56 byte capture request (32 channel entries,
-16 bit loop count). Requests of a different length are answered with `CAPTURE_ERROR`; the
-original firmware misinterpreted them instead. Software for V6_0 (48 byte request) therefore does
-not work with this firmware, just as with the original 6.5 firmware, which only lacked a clear
-error.
+The firmware identifies itself as `PIPI_LOGIC_ANALYZER_<BOARD>_V7_2`, followed by `FREQ:`,
+`BLASTFREQ:`, `BUFFER:`, `CHANNELS:` and `PROTOCOL:<n>`. The application works only with the
+firmware it comes with: it opens a board only when `PROTOCOL` equals its own protocol version
+(`FIRMWARE_PROTOCOL` in `CMakeLists.txt` and in `pipilogicanalyzer/driver/pico/protocol.py`) and
+offers the firmware update otherwise. **Raise `FIRMWARE_PROTOCOL` with every change of a command,
+request or response**, in both places; compatibility with older applications or firmware is not
+kept. The capture request is the 56 byte request of V6_5 (32 channel entries, 16 bit loop count);
+requests of a different length are answered with `CAPTURE_ERROR`.
 
 ## Self-test and simulation
 
-Additions of this project. The original software never sends the new commands, so the firmware
-stays compatible with it. The application queries the capabilities first and only uses the
-functions the firmware reports.
+Additions of this project. The capabilities describe the functions of the board and the
+connection (e.g. streams only over USB, pattern triggers only on boards with them); the
+application only offers what they list.
 
 | Request | Response |
 | --- | --- |
-| Command 8 (capabilities) | `CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23` (the last two on boards with pattern trigger; `STREAM=<bytes per second>` is the rate a stream capture can send); the original firmware answers `ERR_UNKNOWN_MSG` |
+| Command 8 (capabilities) | `CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23,TRIGGER_SEQUENCE=8,TRIGGER_CONDITIONS=pattern/edge/pulse/gap,SEQUENCE_MAX_RATE=<Hz>,STATE_MODE,STATE_MAX_CLOCK=<Hz>` (`EDGE_TRIGGER_OUT` and `PATTERN_GROUPS` on boards with pattern trigger; `STREAM=<bytes per second>` is the rate a stream capture can send; the last five: see [Trigger sequences and state mode](#trigger-sequences-and-state-mode)) |
 | Command 7 (self-test) | one line `SELFTEST:<test>:<status>:<details>` per test, finally `SELFTEST_END` |
 | Command 9 (device information) | lines `INFO:<key>:<value>`, finally `INFO_END`. Keys: `BOARD`, `FIRMWARE`, `BUILD_DATE`, `SDK`, `CHIP`, `CHIP_REVISION` and `ROM_VERSION` (RP2040 only), `UNIQUE_ID`, `FLASH_SIZE`, `CLOCK`, `TURBO`, `WIFI`, `PATTERN_TRIGGER` |
 | Capture request with `triggerType = 4` | simulated capture, pattern in `triggerValue`, `loopCount` must be 0 |
 | Capture request with `triggerType = 5` | edge trigger on channel `trigger` (falling edge with `inverted`) that also drives the trigger output, like the pattern triggers: the board that triggers a multi device set |
 | Capture request with `triggerType = 6` | stream capture over USB, see [Stream capture](#stream-capture); `triggerValue = 1` streams a test counter instead of the inputs |
+| Command 10 (trigger sequence) | configures the trigger sequence and the state mode of the next capture request with `triggerType = 7`; answered `SEQUENCE_OK` or `SEQUENCE_ERROR` |
+| Capture request with `triggerType = 7` | capture with the trigger sequence and/or state mode of command 10, see [Trigger sequences and state mode](#trigger-sequences-and-state-mode) |
 
 ### Triggers
 
@@ -139,6 +144,7 @@ checked with the internal pull-up and pull-down resistors.
 | `RAM` | write the capture buffer with two bit patterns and read it back | `OK` / `FAIL` |
 | `TRIGGER_LINK` | trigger output drives trigger input (Pico: GPIO 0 → GPIO 1), against the opposite pull | `OK` / `FAIL` / `SKIPPED` |
 | `CH1` … `CHn` | input follows pull-up and pull-down | `OK`, `STUCK_HIGH`, `STUCK_LOW`, `INVERTED` |
+| `SEQUENCE` | speed of the trigger sequence evaluation measured at start-up, `SEQUENCE_MAX_RATE` and `STATE_MAX_CLOCK` | `INFO` |
 | `CAPTURE` | capture the pull pattern (odd channel numbers high, even low) through PIO and DMA, 1000 samples at 1 MHz, channel 1 as trigger | `OK` / `FAIL` / `SKIPPED` |
 | `BLAST_CAPTURE` | the same in blast mode at maximum frequency | `OK` / `FAIL` / `SKIPPED` |
 
@@ -186,11 +192,163 @@ computer and compares both generators sample by sample.
 | 1 | walking bit: one channel is high for 16 samples each |
 | 2 | protocols carrying the text `PiPiLogicAnalyzer\n`, at 1 MHz sampling rate:<br>channel 1: UART 8N1 at f/10 baud (100,000 baud)<br>channels 2–4: SPI CLK, MOSI, CS (mode 0, f/10 clock)<br>channels 5–6: I2C SCL, SDA (write to address 0x50, f/20 bit/s)<br>further channels: counter |
 
+## Trigger sequences and state mode
+
+Additions of this project, reported as capabilities; the application only offers them when the
+firmware reports them, and older applications never send command 10 or trigger type 7. The
+capture request keeps its 56 byte layout: the sequence and the clock are configured by
+command 10 right before the capture request.
+
+### Design
+
+Both use the ring buffer of the stream capture. A PIO program samples without end into the
+capture buffer through the two ping-pong DMA channels (`SEQUENCE_CAPTURE` at the requested rate,
+5 PIO cycles per sample; `STATE_CAPTURE` on the edges of the clock input). The main loop
+evaluates the trigger sequence on the samples behind the DMA write position
+([`PiPiLogicAnalyzer_Sequence.c`](PiPiLogicAnalyzer/PiPiLogicAnalyzer_Sequence.c), plain C,
+compared with a reference implementation by `tests/test_pico_triggers.py`). It skips samples in
+which no watched channel changed with a load, a mask and a compare per sample and only looks at
+the others in detail. Once the last stage completes at sample *T*, the firmware sends the stop
+value *T + post* to the PIO program: it counts its samples in Y and stops exactly after that
+sample (`irq 0`). The capture then ends like every other capture: the last sample is the tail of
+the ring buffer, the pre + post samples before it are sorted into channel order and sent with the
+usual length, data and timestamp byte. The trigger sample is the first post-trigger sample
+(index *pre*).
+
+Why not PIO trigger programs per stage: a PIO block has 32 instructions and 4 state machines, and
+pulse widths, gaps, counts and time limits need counters that a PIO program cannot combine for 8
+stages. The software evaluation handles every condition alike and keeps the PIO capture as
+simple as the stream capture; its price is the sample rate (below).
+
+If the evaluation falls so far behind that the DMA overwrites samples it still needs (the
+evaluated samples or the pre-trigger samples), the capture ends **without samples** (length 0
+followed by the timestamp byte 0); the application reports that the evaluation could not keep up.
+If the stop value reaches the PIO program too late (only when the evaluation lags), the firmware
+stops the capture itself as soon as the post-trigger samples are written and checks that the
+pre-trigger samples are still intact.
+
+### Command 10
+
+Payload (little endian, packed):
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 1 | format version, `1` |
+| 1 | 1 | flags: bit 0 state mode, bit 1 falling clock edge (others 0) |
+| 2 | 1 | clock channel (state mode, else 0) |
+| 3 | 1 | number of stages, 0 to 8 |
+| 4 + 28·n | 28 | stage *n*, below |
+
+Stage:
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 1 | kind: 0 pattern, 1 edge, 2 pulse, 3 gap |
+| 1 | 1 | channel (edge, pulse, gap) |
+| 2 | 1 | edge: 0 rising / high pulse, 1 falling / low pulse, 2 any |
+| 3 | 1 | 0 |
+| 4 | 4 | pattern: channel mask (bit n = channel n) |
+| 8 | 4 | pattern: levels of the masked channels |
+| 12 | 4 | pulse: shortest width, gap: length, in samples |
+| 16 | 4 | pulse: longest width in samples, `0xFFFFFFFF` = no limit |
+| 20 | 4 | occurrences that complete the stage, at least 1 |
+| 24 | 4 | samples after the previous stage within which the stage has to complete, `0xFFFFFFFF` = no limit (ignored for the first stage) |
+
+Times are at most 2^31 − 1 samples. The application converts nanoseconds with the sample rate:
+the shortest pulse width is rounded down, the longest pulse width, the gap and the time limit
+up, so the timing accuracy is ±1 sample period. A configuration is used by the next capture
+request only; a capture request with trigger type 7 without a configuration is answered
+`CAPTURE_ERROR`. The longest command (8 stages, every byte escaped) takes 462 bytes, so the
+receive buffer was enlarged to 512 bytes.
+
+### Capture request with trigger type 7
+
+Channels, capture mode, pre- and post-trigger samples as usual; `loopCount` and `measure` must
+be 0, `trigger`, `inverted/count` and `triggerValue` are ignored. Every channel of the stages
+must be part of the samples of the capture mode (the application chooses the mode by the
+captured *and* the stage channels). Timing mode: the frequency must not exceed
+`SEQUENCE_MAX_RATE` when there are stages (and the system clock / 5). State mode: the frequency
+is ignored.
+
+### Conditions
+
+A stage is evaluated from the sample after the one that completed the previous stage.
+
+* **Pattern:** the masked channels have the given levels. An occurrence is a sample where the
+  pattern starts to match, or the first sample of the stage if it matches already.
+* **Edge:** a rising, falling or any edge of the channel.
+* **Pulse:** a pulse of the channel whose width (samples between its two edges) lies within the
+  limits, recognised at its closing edge; high pulse: rising then falling edge, low pulse:
+  falling then rising, any: both. The opening edge may lie before the stage began (the edges of
+  every pulse channel are recorded in every stage); a pulse whose opening edge was not captured
+  does not count.
+* **Gap:** the channel does not change for the given number of samples, measured from the start
+  of the stage, its last edge or the previous occurrence, whichever is latest; recognised when
+  the time is over.
+* **Count / time limit:** a stage completes after `count` occurrences; if a stage after the first
+  does not complete within its time limit after the previous stage, the sequence starts again
+  with the first stage at that sample.
+
+### Capabilities and limits
+
+| Capability | Meaning |
+| --- | --- |
+| `TRIGGER_SEQUENCE=8` | up to 8 stages |
+| `TRIGGER_CONDITIONS=pattern/edge/pulse/gap` | condition kinds |
+| `SEQUENCE_MAX_RATE=<Hz>` | highest sample rate of a capture with stages, measured at start-up |
+| `STATE_MODE` | state mode (external clock) |
+| `STATE_MAX_CLOCK=<Hz>` | highest clock of the state mode, system clock / 8 |
+
+`SEQUENCE_MAX_RATE` is measured by the firmware at start-up on the board itself: the evaluation
+of 16384 samples in which *every* sample is an event of the current stage (a pulse stage whose
+channel toggles on every sample, the most expensive sample with one pulse channel), minus 20 %
+for the DMA, the USB interrupts and further pulse channels. Signals that change less often are
+evaluated much faster (a sample without a change of a watched channel costs about 8–12 cycles);
+bursts above the rate are absorbed by the ring buffer. Only long stretches of an event on every
+sample above the rate can end a capture without samples. The self-test reports the measured
+speed (`SEQUENCE`). Estimates from the generated code (instruction counts of the emulated
+Cortex-M0+ / M33 code, before the 20 % margin):
+
+| Board | System clock | Event on every sample | Edge stage, quiet watched channel | Pattern stage, a change every 8th sample |
+| --- | --- | --- | --- | --- |
+| RP2040 (Pico, Pico W, Zero, Interceptor) | 200 MHz | ≈ 1.3 Msps | ≈ 17 Msps | ≈ 7 Msps |
+| RP2040 turbo | 400 MHz | ≈ 2.5 Msps | ≈ 35 Msps | ≈ 14 Msps |
+| RP2350 (Pico 2, Pico 2 W) | 200 MHz | ≈ 2 Msps | ≈ 23 Msps | ≈ 11 Msps |
+| RP2350 turbo | 400 MHz | ≈ 4 Msps | ≈ 47 Msps | ≈ 22 Msps |
+
+So `SEQUENCE_MAX_RATE` should be about 1 MHz on RP2040 boards and 1.6 MHz on RP2350 boards (twice
+that with turbo); the value the board reports is what counts. The Pico W and Pico 2 W builds are
+debug builds, but the evaluation is always compiled with `-O3` and runs from RAM.
+
+### State mode
+
+The PIO program waits for the active edge of the clock input (`wait 1 pin` / `wait 0 pin`; the
+firmware patches the input index and the polarity into a copy of `STATE_CAPTURE`) and samples all
+inputs one PIO cycle (5 ns at 200 MHz) after the edge as seen by the input synchronisers, which
+delay clock and data alike. The data therefore has to stay valid for at least ≈ 10 ns after the
+active edge (one cycle plus synchroniser jitter).
+
+* **Clock input:** any channel of the board (channels 1–24, Interceptor 1–28), given by its
+  channel number; its GPIO comes from the pin map. Not the external trigger input. The clock
+  channel may also be captured (it then shows its level after the edge).
+* **Edge:** rising or falling (flag bit 1); one edge only.
+* **Clock frequency:** at most `STATE_MAX_CLOCK` = system clock / 8 (25 MHz, 50 MHz with turbo):
+  the clock has to stay at least 4 cycles at the active and 3 cycles at the inactive level. The
+  first sample needs a complete edge (the program waits for the inactive level first).
+* **Triggers:** the application sends the immediate trigger as a sequence without stages (the
+  trigger follows the pre-trigger samples), the edge and the pattern trigger as a sequence of one
+  stage and a trigger sequence with pattern and edge stages and counts. Pulse, gap and time
+  limits need a time base and are refused. A clock faster than the evaluation can follow works as
+  long as the ring buffer absorbs the difference, otherwise the capture ends without samples
+  (immediate captures are never affected: the PIO program stops by itself).
+* The frequency of the request is ignored; the application shows the samples as states.
+* Without a clock no sample is taken: the capture waits until the application cancels it.
+
 ## Fixed bugs
 
 | File | Problem in the original | Fix |
 | --- | --- | --- |
-| `PiPiLogicAnalyzer.c` | 128 byte receive buffer with an 8 bit index; the overflow check `>= 256` could never trigger. Longer frames overwrote the memory behind it, e.g. WiFi settings with escaped characters (`U` = 0x55 in the password) or garbage after `0x55 0xAA`. | 256 byte buffer, 16 bit index, check before writing. |
+| `PiPiLogicAnalyzer.c` | 128 byte receive buffer with an 8 bit index; the overflow check `>= 256` could never trigger. Longer frames overwrote the memory behind it, e.g. WiFi settings with escaped characters (`U` = 0x55 in the password) or garbage after `0x55 0xAA`. | 256 byte buffer (512 since the trigger sequences), 16 bit index, check before writing. |
 | `PiPiLogicAnalyzer.c` | Capture and WiFi requests were interpreted as structures without a length check, directly in the unaligned buffer. | The length must equal `sizeof` the structure; copied with `memcpy`. |
 | `PiPiLogicAnalyzer.c` | SSID, password and IP were stored without a terminating zero although the WiFi core uses them as C strings. | The last byte of every field is set to 0. |
 | `PiPiLogicAnalyzer.c` | WiFi responses were copied into a 32 byte event with `memcpy` without a length limit. | Responses go through `wifi_transfer` in 32 byte chunks; `printf` with the format string `"%s"`. |
@@ -232,3 +390,20 @@ run. **The changes have not been tested on hardware yet.**
 
 Before relying on it, run the self-test and a simulated capture once and check at least a
 simple, a burst and a blast capture with real signals.
+
+The trigger sequences and the state mode have only been tested without hardware: the evaluation
+on the computer against a reference implementation (`tests/test_pico_triggers.py`), the
+application side against a simulated device. To check on a board:
+
+* The self-test line `SEQUENCE` and `SEQUENCE_MAX_RATE` in the capabilities (about 1 MHz on an
+  RP2040, 1.6 MHz on an RP2350, twice that with turbo).
+* A sequence with every condition kind on a known signal (e.g. a UART or a PWM from a second
+  board): trigger position, pre- and post-trigger samples, pulse widths at the limits (±1 sample).
+* The cancel of a sequence that never completes, and a capture right after it.
+* A sequence at the maximum rate on a signal that toggles on every sample: it has to complete or
+  end with the "could not keep up" message, never with wrong samples.
+* State mode on a clock from a second board (SPI clock): rising and falling edge, immediate,
+  edge, pattern and sequence trigger, up to `STATE_MAX_CLOCK`; check that each sample shows the
+  data of its edge (hold time).
+* The existing captures (edge, pattern, blast, stream) once more, the receive buffer and the
+  capability line changed.

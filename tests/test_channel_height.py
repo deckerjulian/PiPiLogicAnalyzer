@@ -67,9 +67,9 @@ def test_lower_channels_fit_more_channels_on_the_screen(application):
         assert window.channel_height_slider.value() == 20
         assert window.channel_height_label.text() == "20 px"
 
-        # Low rows show the name in the label and stay aligned with the waveform
+        # Low rows are compact and stay aligned with the waveform
         rows = names.visible_rows()
-        assert rows[0].name_edit.isHidden()
+        assert rows[0].compact and rows[0].name_edit.isHidden()
         assert all(abs(row.y() - index * waveform.channel_height()) <= 1 for index, row in enumerate(rows))
         assert abs(rows[0].height() - waveform.channel_height()) <= 1
 
@@ -85,7 +85,13 @@ def test_lower_channels_fit_more_channels_on_the_screen(application):
 
         window.channel_height_slider.setValue(60)
         application.processEvents()
-        assert window.model.channel_height == 60 and not rows[0].name_edit.isHidden()
+        assert window.model.channel_height == 60 and not rows[0].compact
+        # Renaming happens in place
+        rows[0].start_rename()
+        assert not rows[0].name_edit.isHidden() and rows[0].label.isHidden()
+        rows[0].name_edit.setText("CLK")
+        rows[0].name_edit.editingFinished.emit()
+        assert window.model.channels[0].channel_name == "CLK" and "CLK" in rows[0].label.text()
     finally:
         window.model.set_channel_height(DEFAULT_CHANNEL_HEIGHT)
         window.close()

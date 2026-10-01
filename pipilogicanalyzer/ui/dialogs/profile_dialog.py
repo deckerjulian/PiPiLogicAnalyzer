@@ -49,15 +49,23 @@ class ProfileSettingsDriver(EmulatedAnalyzerDriver):
     def __init__(self, settings: Optional[CaptureSession]) -> None:
         super().__init__(1)
         highest = max((channel.channel_number for channel in settings.capture_channels), default=0) if settings else 0
-        self.boards = highest // CHANNELS_PER_BOARD + 1
+        self._boards = highest // CHANNELS_PER_BOARD + 1
 
     @property
     def driver_type(self) -> AnalyzerDriverType:
-        return AnalyzerDriverType.MULTI if self.boards > 1 else AnalyzerDriverType.SERIAL
+        return AnalyzerDriverType.MULTI if self._boards > 1 else AnalyzerDriverType.SERIAL
+
+    @property
+    def is_hardware(self) -> bool:
+        return True
+
+    @property
+    def board_count(self) -> int:
+        return self._boards
 
     @property
     def channel_count(self) -> int:
-        return CHANNELS_PER_BOARD * max(self.boards, 1)
+        return CHANNELS_PER_BOARD * max(self._boards, 1)
 
     @property
     def channels_per_device(self) -> int:
@@ -67,7 +75,7 @@ class ProfileSettingsDriver(EmulatedAnalyzerDriver):
         # Channels 1-21 and 22-24 of every board (consecutive GPIOs of a Pico board)
         return tuple(
             group
-            for board in range(max(self.boards, 1))
+            for board in range(max(self._boards, 1))
             for group in ((board * CHANNELS_PER_BOARD, 21), (board * CHANNELS_PER_BOARD + 21, 3))
         )
 

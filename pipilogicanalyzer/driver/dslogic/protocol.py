@@ -335,6 +335,8 @@ class CaptureSetup:
     internal_test: bool = False
     #: endless stream: keep only the latest samples (a multiple of 64), 0 keeps everything
     keep_samples: int = 0
+    #: stream into memory-mapped files
+    to_disk: bool = False
 
     @property
     def channel_count(self) -> int:

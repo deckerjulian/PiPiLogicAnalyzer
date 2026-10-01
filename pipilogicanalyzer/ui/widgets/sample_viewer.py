@@ -40,12 +40,20 @@ from ...core.analysis import ChannelTransitions
 from ...core.formatting import to_inferred_frequency, to_small_time
 from ..theme import WARNING
 from ..view_model import DEFAULT_CHANNEL_HEIGHT, CaptureViewModel
+from . import overlays, time_axis
 from .navigation import WheelNavigator
 
 #: Default minimum height of a channel; the current one is ``CaptureViewModel.channel_height``.
 MIN_CHANNEL_HEIGHT = DEFAULT_CHANNEL_HEIGHT
-GRID_SAMPLE_LIMIT = 200
-DOT_GRID_SAMPLE_LIMIT = 100
+#: Sample boundaries are drawn from this width of a sample in pixels on
+SAMPLE_GRID_WIDTH = 12
+#: Values listed next to an entry made of several (the bus cycles of an instruction)
+MAX_PART_LINES = 12
+#: Width of the signal line, and the opacity (0-255) of the area under a high level and of a
+#: column with edges
+LINE_WIDTH = 1.5
+HIGH_FILL_ALPHA = 34
+BUSY_FILL_ALPHA = 80
 
 
 class SampleViewer(QWidget):
@@ -63,6 +71,9 @@ class SampleViewer(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
 
         self._pan_origin: Optional[tuple[float, int]] = None
+        #: Cursor being dragged, and the sample under the pointer (for the A/B/M keys)
+        self._dragged_cursor: Optional[str] = None
+        self._pointer_sample: Optional[int] = None
 
         model.capture_changed.connect(self._on_capture_changed)
         model.view_changed.connect(self.update)
@@ -72,6 +83,9 @@ class SampleViewer(QWidget):
         model.hover_changed.connect(self.update)
         model.channels_changed.connect(self._on_capture_changed)
         model.channel_height_changed.connect(self._on_capture_changed)
+        model.cursors_changed.connect(self.update)
+        model.bookmarks_changed.connect(self.update)
+        model.search_changed.connect(self.update)
 
     # ------------------------------------------------------------------ state
     def _channels(self) -> list:
@@ -107,19 +121,30 @@ class SampleViewer(QWidget):
                 colors.BG_CHANNEL_COLORS[index % 2],
             )
 
-        self._draw_regions(painter, bounds)
         self._draw_grid(painter, bounds)
+        self._draw_regions(painter, bounds)
 
-        margin = channel_height / 5.0
+        painter.setPen(QPen(colors.ROW_SEPARATOR_COLOR, 1))
+        for index in range(1, len(channels)):
+            y = round(index * channel_height) - 0.5
+            painter.drawLine(QPointF(0, y), QPointF(bounds.width(), y))
+
+        # Crisp levels: on pixel centres, antialiased edges
+        margin = max(channel_height * 0.22, 3.0)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         for index, channel in enumerate(channels):
             transitions = self.model.transitions_for(channel)
             if transitions is None or transitions.sample_count == 0:
                 continue
-            top = index * channel_height + margin
-            bottom = top + channel_height - margin * 2
+            top = round(index * channel_height + margin) + 0.5
+            bottom = round((index + 1) * channel_height - margin) - 0.5
             self._draw_channel(painter, transitions, top, bottom, channel)
+        painter.setRenderHint(QPainter.Antialiasing, False)
 
         self._draw_markers(painter, bounds)
+        overlays.draw_search_hits(painter, self.model, self._x_for, bounds)
+        overlays.draw_bookmarks(painter, self.model, self._x_for, bounds)
+        overlays.draw_cursors(painter, self.model, self._x_for, bounds)
         self._draw_hover(painter, bounds, channel_height)
 
     def _x_for(self, sample: float) -> float:
@@ -133,24 +158,20 @@ class SampleViewer(QWidget):
             painter.fillRect(QRectF(start, 0, width, bounds.height()), region.region_color)
 
     def _draw_grid(self, painter: QPainter, bounds: QRectF) -> None:
-        visible = self.model.visible_samples
-        if visible >= GRID_SAMPLE_LIMIT:
-            return
-
-        sample_width = self.sample_width()
+        """The time divisions of the ruler, and the sample boundaries when zoomed far in."""
         first = self.model.first_sample
-        last = min(first + visible, self.model.sample_count)
+        visible = self.model.visible_samples
+        sample_width = self.sample_width()
+        if sample_width >= SAMPLE_GRID_WIDTH:
+            painter.setPen(QPen(colors.SAMPLE_LINE_COLOR, 1))
+            for sample in range(first, min(first + visible, self.model.sample_count) + 1):
+                x = round(self._x_for(sample)) + 0.5
+                painter.drawLine(QPointF(x, 0), QPointF(x, bounds.height()))
 
-        pen = QPen(colors.SAMPLE_LINE_COLOR, 1)
-        painter.setPen(pen)
-        for sample in range(first, last):
-            x = (sample - first) * sample_width + sample_width / 2.0
-            painter.drawLine(QPointF(x, 0), QPointF(x, bounds.height()))
-
-        if visible < DOT_GRID_SAMPLE_LIMIT:
-            painter.setPen(QPen(colors.SAMPLE_DASH_COLOR, 1))
-            for sample in range(first, last):
-                x = (sample - first) * sample_width
+        for tick in time_axis.ticks(first, visible, bounds.width(), self.model.frequency, self.model.pre_trigger_samples):
+            x = round(self._x_for(tick.sample)) + 0.5
+            if 0 <= x <= bounds.width():
+                painter.setPen(QPen(colors.GRID_MAJOR_COLOR if tick.major else colors.GRID_MINOR_COLOR, 1))
                 painter.drawLine(QPointF(x, 0), QPointF(x, bounds.height()))
 
     def _draw_channel(
@@ -162,8 +183,10 @@ class SampleViewer(QWidget):
         channel,
     ) -> None:
         color = colors.get_channel_color(channel)
-        pen = QPen(color, 2)
+        pen = QPen(color, LINE_WIDTH)
         pen.setCosmetic(True)
+        pen.setJoinStyle(Qt.MiterJoin)
+        pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
 
         first = self.model.first_sample
@@ -171,7 +194,7 @@ class SampleViewer(QWidget):
         width = self.width()
 
         if visible <= width:
-            self._draw_exact(painter, transitions, top, bottom, first, visible)
+            self._draw_exact(painter, transitions, top, bottom, first, visible, color)
         else:
             self._draw_dense(painter, transitions, top, bottom, first, visible, color)
 
@@ -183,6 +206,7 @@ class SampleViewer(QWidget):
         bottom: float,
         first: int,
         visible: int,
+        color: QColor,
     ) -> None:
         last = min(first + visible, transitions.sample_count) - 1
         starts, values = transitions.runs_in_range(first, last)
@@ -193,18 +217,25 @@ class SampleViewer(QWidget):
         path = QPainterPath()
 
         def x_of(sample: float) -> float:
-            return (sample - first) * sample_width
+            return round((sample - first) * sample_width) + 0.5
 
         y_of = lambda value: top if value else bottom  # noqa: E731 - tiny helper
 
-        path.moveTo(x_of(max(int(starts[0]), first)), y_of(values[0]))
-        for index in range(1, starts.size):
-            edge_x = x_of(int(starts[index]))
-            path.lineTo(edge_x, y_of(values[index - 1]))
-            path.lineTo(edge_x, y_of(values[index]))
-
         end_sample = min(first + visible, transitions.sample_count)
-        path.lineTo(x_of(end_sample), y_of(values[-1]))
+        edges = [x_of(max(int(starts[0]), first))] + [x_of(int(start)) for start in starts[1:]] + [x_of(end_sample)]
+
+        # The area under a high level, lightly filled
+        fill = QColor(color)
+        fill.setAlpha(HIGH_FILL_ALPHA)
+        for index, value in enumerate(values):
+            if value:
+                painter.fillRect(QRectF(edges[index], top, edges[index + 1] - edges[index], bottom - top), fill)
+
+        path.moveTo(edges[0], y_of(values[0]))
+        for index in range(1, starts.size):
+            path.lineTo(edges[index], y_of(values[index - 1]))
+            path.lineTo(edges[index], y_of(values[index]))
+        path.lineTo(edges[-1], y_of(values[-1]))
         painter.drawPath(path)
 
     def _draw_dense(
@@ -234,29 +265,43 @@ class SampleViewer(QWidget):
         starts = np.concatenate(([0], changes))
         ends = np.concatenate((changes, [width]))
 
-        busy_color = QColor(color)
-        busy_color.setAlpha(150)
-
+        # Columns with edges: a translucent band between both levels with its envelope; the
+        # others at their level, a high one lightly filled like in the exact view.
+        busy = QColor(color)
+        busy.setAlpha(BUSY_FILL_ALPHA)
+        fill = QColor(color)
+        fill.setAlpha(HIGH_FILL_ALPHA)
+        previous = None
         for start, end in zip(starts, ends):
-            value = state[start]
+            value = int(state[start])
+            left, right = float(start), float(end)
             if value == 2:
-                painter.fillRect(QRectF(float(start), top, float(end - start), bottom - top), busy_color)
+                painter.fillRect(QRectF(left, top, right - left, bottom - top), busy)
+                painter.drawLine(QPointF(left, top), QPointF(right, top))
+                painter.drawLine(QPointF(left, bottom), QPointF(right, bottom))
             else:
+                if value:
+                    painter.fillRect(QRectF(left, top, right - left, bottom - top), fill)
                 y = top if value else bottom
-                painter.drawLine(QPointF(float(start), y), QPointF(float(end), y))
+                painter.drawLine(QPointF(left, y), QPointF(right, y))
+                if previous is not None and previous != 2 and previous != value:
+                    painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+            previous = value
 
     def _draw_markers(self, painter: QPainter, bounds: QRectF) -> None:
         session = self.model.session
         first = self.model.first_sample
         last = first + self.model.visible_samples
 
-        if session is not None and first <= session.pre_trigger_samples <= last:
-            painter.setPen(QPen(colors.TRIGGER_LINE_COLOR, 2))
-            x = self._x_for(session.pre_trigger_samples)
+        if session is not None and session.pre_trigger_samples and first <= session.pre_trigger_samples <= last:
+            pen = QPen(colors.TRIGGER_LINE_COLOR, 1.5)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            x = round(self._x_for(session.pre_trigger_samples)) + 0.5
             painter.drawLine(QPointF(x, 0), QPointF(x, bounds.height()))
 
         if session is not None and session.bursts:
-            pen = QPen(colors.BURST_LINE_COLOR, 2)
+            pen = QPen(colors.BURST_LINE_COLOR, 1.5)
             pen.setStyle(Qt.DashDotLine)
             painter.setPen(pen)
             for burst in session.bursts:
@@ -266,10 +311,10 @@ class SampleViewer(QWidget):
 
         marker = self.model.user_marker
         if marker is not None and first <= marker <= last:
-            pen = QPen(colors.USER_LINE_COLOR, 2)
-            pen.setStyle(Qt.DashDotLine)
+            pen = QPen(colors.USER_LINE_COLOR, 1.5)
+            pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
-            x = self._x_for(marker)
+            x = round(self._x_for(marker)) + 0.5
             painter.drawLine(QPointF(x, 0), QPointF(x, bounds.height()))
 
     def _draw_hover(self, painter: QPainter, bounds: QRectF, channel_height: float) -> None:
@@ -291,6 +336,9 @@ class SampleViewer(QWidget):
         painter.drawLine(QPointF(start, 0), QPointF(start, bounds.height()))
         painter.drawLine(QPointF(end, 0), QPointF(end, bounds.height()))
 
+        if hover.parts:
+            self._draw_parts(painter, bounds, hover, color, start, end)
+            return
         composition = hover.composition
         if composition is None:
             return
@@ -305,6 +353,9 @@ class SampleViewer(QWidget):
         capture_indexes = {id(channel): index for index, channel in enumerate(self.model.channels)}
         painter.setRenderHint(QPainter.Antialiasing, True)
         metrics = QFontMetricsF(painter.font())
+        #: Widest channel label, the summary of the buses goes next to them
+        label_width = 0.0
+        labels_left = False
 
         for row, channel in enumerate(self._channels()):
             bit = bits.get(capture_indexes.get(id(channel), -1))
@@ -322,6 +373,8 @@ class SampleViewer(QWidget):
             x = sample_x + 8
             if x + width > bounds.width():
                 x = sample_x - 8 - width
+                labels_left = True
+            label_width = max(label_width, width)
             box = QRectF(x, y, width, height)
 
             painter.setBrush(QColor(18, 18, 20, 225))
@@ -334,12 +387,51 @@ class SampleViewer(QWidget):
             painter.setPen(QPen(colors.TEXT_COLOR))
             painter.drawText(box, Qt.AlignCenter, text)
 
-        self._draw_bus_summary(painter, bounds, composition, sample_x, color, metrics)
+        self._draw_bus_summary(painter, bounds, composition, sample_x, color, metrics, label_width, labels_left)
+        painter.setBrush(Qt.NoBrush)
+
+    def _draw_parts(self, painter: QPainter, bounds: QRectF, hover, color: QColor, start: float, end: float) -> None:
+        """An entry made of several values (an instruction of bus cycles): where each was read,
+        and the values next to the marked span."""
+        from ...sigrok.composition import sample_point
+
+        pen = QPen(QColor(255, 255, 255, 120), 1)
+        pen.setStyle(Qt.DotLine)
+        painter.setPen(pen)
+        first, last = self.model.first_sample, self.model.first_sample + self.model.visible_samples
+        for part in hover.parts:
+            point = sample_point(part)
+            if first <= point <= last:
+                x = self._x_for(point) + self.sample_width() / 2.0
+                painter.drawLine(QPointF(x, 0), QPointF(x, bounds.height()))
+
+        metrics = QFontMetricsF(painter.font())
+        lines = [hover.segment.values[0] if hover.segment.values else ""]
+        lines += [f"  {part.values[0]}" for part in hover.parts[:MAX_PART_LINES] if part.values]
+        if len(hover.parts) > MAX_PART_LINES:
+            lines.append(f"  … {len(hover.parts) - MAX_PART_LINES} more")
+        width = max(metrics.horizontalAdvance(line) for line in lines) + 16
+        height = metrics.height() * len(lines) + 10
+        visible = QRectF(self.visibleRegion().boundingRect())
+        if visible.isEmpty():
+            visible = bounds
+        # Next to the marked span, on the side with room
+        x = end + 8 if end + 8 + width <= bounds.width() else max(start - 8 - width, 4.0)
+        box = QRectF(x, visible.top() + 6, width, height)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setBrush(QColor(18, 18, 20, 235))
+        painter.setPen(QPen(color, 1.5))
+        painter.drawRoundedRect(box, 5, 5)
+        painter.setPen(QPen(colors.TEXT_COLOR))
+        for index, line in enumerate(lines):
+            painter.drawText(QPointF(box.left() + 8, box.top() + 5 + metrics.ascent() + index * metrics.height()), line)
         painter.setBrush(Qt.NoBrush)
 
     def _draw_bus_summary(self, painter: QPainter, bounds: QRectF, composition, sample_x: float,
-                          color: QColor, metrics: QFontMetricsF) -> None:
-        """Bus values at the top of the visible part, the bus rows may be scrolled out of view."""
+                          color: QColor, metrics: QFontMetricsF, label_width: float = 0.0,
+                          labels_left: bool = False) -> None:
+        """Bus values at the top of the visible part (the bus rows may be scrolled out of view),
+        next to the channel labels at the read point."""
         if not composition.buses:
             return
         lines = [bus.describe() for bus in composition.buses]
@@ -348,11 +440,13 @@ class SampleViewer(QWidget):
         visible = QRectF(self.visibleRegion().boundingRect())
         if visible.isEmpty():
             visible = bounds
-        # In the top corner away from the sample point, clear of the channel labels next to it.
-        if sample_x < bounds.width() / 2:
-            x = max(bounds.width() - width - 8, 0.0)
+        # Beside the labels at the read point, on the side they are on (else on the other side)
+        right = sample_x + 8 + label_width + 8
+        left = sample_x - 8 - label_width - 8 - width
+        if labels_left:
+            x = left if left >= 4 else sample_x + 8
         else:
-            x = 8.0
+            x = right if right + width <= bounds.width() else max(sample_x - 8 - width, 4.0)
         box = QRectF(x, visible.top() + 6, width, height)
 
         painter.setBrush(QColor(18, 18, 20, 235))
@@ -384,17 +478,43 @@ class SampleViewer(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
         if event.button() == Qt.LeftButton:
-            self._pan_origin = (event.position().x(), self.model.first_sample)
-            self.setCursor(Qt.ClosedHandCursor)
+            self._dragged_cursor = overlays.cursor_at(self.model, event.position().x(), self._x_for)
+            if self._dragged_cursor is None:
+                self._pan_origin = (event.position().x(), self.model.first_sample)
+                self.setCursor(Qt.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
         if event.button() == Qt.LeftButton:
             self._pan_origin = None
+            self._dragged_cursor = None
             self.unsetCursor()
         super().mouseReleaseEvent(event)
 
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """A / B place a cursor at the pointer, M adds a named marker there."""
+        sample = self._pointer_sample
+        key = event.key()
+        if sample is not None and self.model.sample_count and event.modifiers() in (Qt.NoModifier, Qt.KeypadModifier):
+            if key == Qt.Key_A:
+                self.model.set_cursor("A", sample)
+                return
+            if key == Qt.Key_B:
+                self.model.set_cursor("B", sample)
+                return
+            if key == Qt.Key_M:
+                self.model.add_bookmark(sample)
+                return
+        super().keyPressEvent(event)
+
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._pointer_sample = self.model.sample_at(event.position().x(), self.width())
+        if self._dragged_cursor is not None:
+            self.model.set_cursor(self._dragged_cursor, self._pointer_sample)
+            return
+        if self._pan_origin is None:
+            grabbed = overlays.cursor_at(self.model, event.position().x(), self._x_for)
+            self.setCursor(Qt.SizeHorCursor) if grabbed else self.unsetCursor()
         if self._pan_origin is not None:
             origin_x, origin_sample = self._pan_origin
             delta_samples = (origin_x - event.position().x()) / max(self.sample_width(), 1e-9)
@@ -434,5 +554,6 @@ class SampleViewer(QWidget):
         QToolTip.showText(event.globalPosition().toPoint(), text, self)
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._pointer_sample = None
         QToolTip.hideText()
         super().leaveEvent(event)

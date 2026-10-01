@@ -6,7 +6,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Byte transports used by :class:`~pipilogicanalyzer.driver.analyzer.PiPiLogicAnalyzerDriver`.
+"""Byte transports used by :class:`~pipilogicanalyzer.driver.pico.analyzer.PiPiLogicAnalyzerDriver`.
 
 The original C# driver mixed ``SerialPort``/``TcpClient`` handling with the
 protocol logic and relied on ``StreamReader``/``BinaryReader`` buffering, which

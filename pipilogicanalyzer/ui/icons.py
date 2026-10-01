@@ -98,6 +98,32 @@ _SHAPES = {
     "eye": "<path d='M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z'/><circle cx='12' cy='12' r='3'/>",
     "pin": "<path d='M9 3h6l-1 6 3 3v2H7v-2l3-3z'/><path d='M12 14v7'/>",
     "align": "<path d='M4 6h10M4 12h16M4 18h8'/><path d='M18 3v6M18 15v6'/>",
+    "search": "<circle cx='10.5' cy='10.5' r='6.5'/><path d='M15.5 15.5L21 21'/>",
+    "ruler": "<path d='M3 16l13-13 5 5-13 13z'/><path d='M7 12l2 2M10 9l2 2M13 6l2 2'/>",
+    "list": "<path d='M9 6h12M9 12h12M9 18h12'/><path d='M4 6h1M4 12h1M4 18h1'/>",
+    "bus": "<path d='M2 12l3-5h14l3 5-3 5H5z'/><path d='M9 7l6 10'/>",
+    "chart": "<path d='M3 3v18h18'/><path d='M7 15l4-5 3 3 5-7'/>",
+    "histogram": "<path d='M3 21h18'/><path d='M5 21v-6h3v6M10 21V8h3v13M15 21v-9h3v9'/>",
+    "compare": "<path d='M8 3v18M16 3v18'/><path d='M3 8h5M16 16h5M3 16h2M19 8h2'/>",
+    "gear": (
+        "<circle cx='12' cy='12' r='3'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1"
+        "M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1'/>"
+    ),
+    "clock": "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+    "up": "<path d='M6 15l6-6 6 6'/>",
+    "down": "<path d='M6 9l6 6 6-6'/>",
+    "sequence": "<path d='M3 12h4l2-5 3 10 2-5h7'/>",
+    "zoom-in": "<circle cx='10.5' cy='10.5' r='6.5'/><path d='M15.5 15.5L21 21M7.5 10.5h6M10.5 7.5v6'/>",
+    "zoom-out": "<circle cx='10.5' cy='10.5' r='6.5'/><path d='M15.5 15.5L21 21M7.5 10.5h6'/>",
+    "exit": "<path d='M14 4h5v16h-5'/><path d='M10 8l-4 4 4 4M6 12h10'/>",
+    "keyboard": (
+        "<rect x='2' y='6' width='20' height='12' rx='2'/>"
+        "<path d='M6 10h1M10 10h1M14 10h1M18 10h1M7 14h10'/>"
+    ),
+    "book": "<path d='M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z'/><path d='M20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z'/>",
+    "panel": "<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M15 4v16'/>",
+    "rows": "<path d='M4 6h16M4 12h16M4 18h16'/><path d='M2 9v6M22 9v6'/>",
+    "channels": "<path d='M3 7h4v-3h4v6h4v-3h6M3 17h6v-3h4v6h8'/>",
 }
 
 #: Icon colours (normal, disabled) per button variant of the style sheet.
@@ -106,6 +132,7 @@ VARIANT_COLORS = {
     "primary": ("#ffffff", "#7d8796"),
     "danger": ("#ffffff", TEXT_DISABLED),
     "link": (ACCENT_HOVER, TEXT_DISABLED),
+    "tool": (TEXT, TEXT_DISABLED),
 }
 
 

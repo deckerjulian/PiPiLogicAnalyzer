@@ -17,11 +17,11 @@ import webbrowser
 from typing import Optional
 
 import numpy as np
-from PySide6.QtCore import QObject, QTimer, Qt, Signal
+from PySide6.QtCore import QByteArray, QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication,
     QComboBox,
+    QDockWidget,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -34,9 +34,9 @@ from PySide6.QtWidgets import (
     QScrollBar,
     QSizePolicy,
     QSlider,
-    QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTabWidget,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -44,7 +44,6 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..core import alignment, capture_io, settings
-from ..core import firmware as firmware_images
 from ..core import simulation as simulation_signals
 from ..core.formatting import to_large_frequency, to_small_time, to_thousands
 from ..core.profiles import (
@@ -55,41 +54,30 @@ from ..core.profiles import (
     write_profiles_file,
 )
 from ..core.regions import SampleRegion
-from ..driver import detector
-from ..driver.dslogic import driver as dslogic_driver
-from ..driver.dslogic import resources as dslogic_resources
-from ..driver.dslogic import usb as dslogic_usb
-from ..driver.analyzer import PiPiLogicAnalyzerDriver
 from ..driver.base import (
     CAPABILITY_SIMULATION,
+    MAX_SAMPLE_BYTES,
     AnalyzerDriverBase,
-    AnalyzerDriverType,
     CaptureCompletedArgs,
     CaptureProgressArgs,
     CaptureError,
     DeviceConnectionError,
+    FirmwareOutdatedError,
 )
 from ..driver.emulated import EmulatedAnalyzerDriver
+from ..driver.software_trigger import SoftwareTriggerDriver, supports_software_trigger
 from ..driver.models import CaptureSession, TriggerType
-from ..driver.multi import MultiAnalyzerDriver
 from ..sigrok.provider import SigrokProvider
-from . import messages
+from . import devices, messages
 from .dialogs.align_dialog import AlignDialog
 from .dialogs.annotation_list import AnnotationListWindow
-from .dialogs.board_test_dialog import BoardTestDialog
-from .dialogs.capture_dialog import CaptureDialog, capture_settings_file
+from .dialogs.capture_dialog import CaptureDialog, all_capture_settings_files, capture_settings_file
 from .dialogs.common import Banner, hint
 from .dialogs.firmware_dialog import ConnectedDevice, FirmwareDialog
 from .dialogs.simulation_dialog import SimulationDialog
 from .dialogs.create_samples_dialog import CreateSamplesDialog
-from .dialogs.device_dialogs import (
-    AboutDialog,
-    DeviceInfoDialog,
-    MultiComposeDialog,
-    MultiConnectDialog,
-    NetworkConnectDialog,
-    NetworkSettingsDialog,
-)
+from .devices import pico as pico_devices
+from .dialogs.device_dialogs import AboutDialog, DeviceInfoDialog, NetworkSettingsDialog
 from .dialogs.measure_dialog import MeasureDialog
 from .dialogs.profile_dialog import ProfileEditDialog
 from .dialogs.region_dialog import RegionDialog
@@ -103,7 +91,16 @@ from .view_model import (
     SMALLEST_CHANNEL_HEIGHT,
     CaptureViewModel,
 )
+from .dialogs.bus_dialog import BusDialog
+from .dialogs.chart_dialog import ChartDialog
+from .dialogs.compare_dialog import CompareDialog
+from .panels.listing_panel import ListingPanel
+from .panels.markers_panel import MarkersPanel
+from .panels.measure_panel import MeasurePanel
+from .panels.search_panel import SearchPanel
 from .widgets.annotation_viewer import AnnotationViewer
+from .widgets.bus_viewer import BusViewer
+from .widgets.quick_capture import QuickCaptureBar
 from .widgets.channel_viewer import CHANNEL_COLUMN_WIDTH, ChannelViewer
 from .widgets.decoder_manager import DecoderManager
 from .widgets.sample_marker import SampleMarker
@@ -116,10 +113,14 @@ UPSTREAM_DOCUMENTATION_URL = "https://github.com/gusmanb/logicanalyzer/wiki"
 POWER_POLL_INTERVAL_MS = 30_000
 BOARD_WATCH_INTERVAL_MS = 2_000
 WINDOW_STATE_FILE = "window-state.json"
+#: Pixels of the name of the connected device in the toolbar (longer names are shortened)
+DEVICE_LABEL_WIDTH = 230
+#: Version of the dock layout stored in the window state (a newer layout ignores older ones)
+WINDOW_LAYOUT_VERSION = 2
 ZOOM_SLIDER_STEPS = 1000
 #: A streaming capture shows its last 1/10 s until the user zooms
 LIVE_WINDOW_DIVISOR = 10
-CAPTURE_FILE_FILTER = "Logic analyzer captures (*.lac *.lac.gz);;All files (*)"
+CAPTURE_FILE_FILTER = "Logic analyzer captures (*.lac *.lac.gz *.sr);;All files (*)"
 
 
 def long_duration(seconds: float) -> str:
@@ -149,6 +150,7 @@ class MainWindow(QMainWindow):
         #: Open annotation list windows by (decoder instance, row name).
         self._annotation_lists: dict[tuple[int, str], AnnotationListWindow] = {}
         self.driver: Optional[AnalyzerDriverBase] = None
+        self.device_backends = devices.backends()
         self.provider = SigrokProvider()
         if decoder_paths:
             self.provider.registry.search_paths = list(decoder_paths) + [
@@ -164,10 +166,14 @@ class MainWindow(QMainWindow):
         self._unaligned: Optional[tuple[CaptureSession, dict[int, np.ndarray]]] = None
         #: (session, how its boards were aligned) for the capture information.
         self._alignment_report: Optional[tuple[CaptureSession, str]] = None
+        #: (session, regions, file) the shown state analysis was made of
+        self._timing_capture: Optional[tuple] = None
 
         self.bridge = CaptureBridge(self)
         self.bridge.completed.connect(self._on_capture_completed)
-        self.bridge.progress.connect(self._on_capture_progress)
+        self.bridge.progress.connect(self._queue_capture_progress)
+        #: The newest progress event not shown yet: a slow display skips the older ones
+        self._pending_progress: Optional[CaptureProgressArgs] = None
         #: The capture started from this window until its completion was handled.
         self._running_capture: Optional[CaptureSession] = None
         #: The capture streaming in (live display): shown session and the one the driver fills.
@@ -181,6 +187,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menu()
+        self._apply_menu_icons()
 
         self.power_timer = QTimer(self)
         self.power_timer.setInterval(POWER_POLL_INTERVAL_MS)
@@ -218,9 +225,9 @@ class MainWindow(QMainWindow):
                 self.move(int(state["x"]), int(state["y"]))
             if state.get("maximized"):
                 self.showMaximized()
-            sizes = state.get("splitter")
-            if isinstance(sizes, list) and len(sizes) == 2:
-                self.splitter.setSizes([int(size) for size in sizes])
+            layout = state.get("layout")
+            if isinstance(layout, str):
+                self.restoreState(QByteArray.fromBase64(layout.encode("ascii")), WINDOW_LAYOUT_VERSION)
             if "preview" in state:
                 # The pinned state of the preview is persisted since V6_5.
                 visible = bool(state["preview"])
@@ -241,7 +248,7 @@ class MainWindow(QMainWindow):
                 "width": geometry.width(),
                 "height": geometry.height(),
                 "maximized": self.isMaximized(),
-                "splitter": self.splitter.sizes(),
+                "layout": bytes(self.saveState(WINDOW_LAYOUT_VERSION).toBase64()).decode("ascii"),
                 "preview": self.action_toggle_preview.isChecked(),
                 "channel_height": self.model.channel_height,
             },
@@ -271,22 +278,59 @@ class MainWindow(QMainWindow):
         banner_holder.setVisible(False)
         layout.addWidget(banner_holder)
 
-        self.splitter = QSplitter(Qt.Horizontal, central)
-        self.splitter.setChildrenCollapsible(False)
-        self.splitter.addWidget(self._build_capture_area())
-        self.splitter.addWidget(self._build_side_panel())
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 0)
-        self.splitter.setSizes([940, 340])
-        layout.addWidget(self.splitter, 1)
-
+        layout.addWidget(self._build_capture_area(), 1)
         self.setCentralWidget(central)
+        self.setDockNestingEnabled(True)
+
+        self.panels_dock = QDockWidget("Analysis", self)
+        self.panels_dock.setObjectName("analysis-dock")
+        self.panels_dock.setWidget(self._build_side_panel())
+        self.panels_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
+        # The tabs are the title; the dock is moved by its tab bar's empty area
+        self.panels_dock.setTitleBarWidget(QWidget(self.panels_dock))
+        self.addDockWidget(Qt.RightDockWidgetArea, self.panels_dock)
+        self.resizeDocks([self.panels_dock], [400], Qt.Horizontal)
+
+        self.listing_dock = QDockWidget("Listing", self)
+        self.listing_dock.setObjectName("listing-dock")
+        self.listing_panel = ListingPanel(self.model, self.listing_dock)
+        self.listing_dock.setWidget(self.listing_panel)
+        self.listing_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.listing_dock)
+        self.listing_dock.setVisible(False)
+
+        for button, dock in ((self.listing_tool_button, self.listing_dock), (self.panels_tool_button, self.panels_dock)):
+            button.setChecked(not dock.isHidden())
+            button.toggled.connect(dock.setVisible)
+            dock.visibilityChanged.connect(
+                lambda _visible, button=button, dock=dock: button.setChecked(not dock.isHidden())
+            )
         status = QStatusBar(self)
         self.power_label = QLabel(status)
         self.power_label.setVisible(False)
         status.addPermanentWidget(self.power_label)
         self.setStatusBar(status)
         self.statusBar().showMessage("Ready")
+
+    def _tool_button(
+        self, parent: QWidget, icon_name: str, tip: str, slot=None, checkable: bool = False
+    ) -> QPushButton:
+        """A flat icon button of the toolbar or the view bar."""
+        button = QPushButton(parent)
+        set_variant(button, "tool")
+        set_icon(button, icon_name)
+        button.setToolTip(tip)
+        button.setCheckable(checkable)
+        button.setFocusPolicy(Qt.NoFocus)
+        if slot is not None:
+            button.clicked.connect(slot)
+        return button
+
+    @staticmethod
+    def _toolbar_spacer(bar: QToolBar) -> QWidget:
+        spacer = QWidget(bar)
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        return spacer
 
     def _build_toolbar(self) -> QToolBar:
         bar = QToolBar("Main toolbar", self)
@@ -295,22 +339,27 @@ class MainWindow(QMainWindow):
         bar.setFloatable(False)
         bar.toggleViewAction().setVisible(False)
 
-        self.port_combo = QComboBox(bar)
-        self.port_combo.setMinimumWidth(260)
-        self.port_combo.setToolTip("Analyzer to connect to")
-        bar.addWidget(self.port_combo)
+        # ------------------------------------------------------------ file
+        self.open_button = self._tool_button(bar, "folder", "Open a capture (Ctrl+O)", self.open_capture)
+        bar.addWidget(self.open_button)
+        self.save_button = self._tool_button(bar, "save", "Save the capture (Ctrl+S)", self.save_capture)
+        bar.addWidget(self.save_button)
+        bar.addSeparator()
 
-        self.refresh_button = QPushButton("Refresh", bar)
-        set_icon(self.refresh_button, "refresh")
-        self.refresh_button.setToolTip("Search for connected analyzers again")
-        self.refresh_button.clicked.connect(self.refresh_ports)
-        bar.addWidget(self.refresh_button)
+        # ---------------------------------------------------------- device
+        self.port_combo = QComboBox(bar)
+        self.port_combo.setMinimumWidth(190)
+        self.port_combo.setMaximumWidth(260)
+        self.port_combo.setToolTip("Analyzer to connect to")
+        # Toolbar widgets are hidden through their actions; the choice is hidden while connected
+        self._device_choice_actions = [bar.addWidget(self.port_combo)]
+
+        self.refresh_button = self._tool_button(bar, "refresh", "Search for connected analyzers again", self.refresh_ports)
+        self._device_choice_actions.append(bar.addWidget(self.refresh_button))
 
         self.connect_button = QPushButton("Connect", bar)
         self.connect_button.clicked.connect(self.toggle_connection)
         bar.addWidget(self.connect_button)
-
-        bar.addSeparator()
 
         self.device_label = QLabel(bar)
         # Clicking the connected device opens the board information.
@@ -318,31 +367,59 @@ class MainWindow(QMainWindow):
         self.device_label.linkActivated.connect(lambda _link: self.show_device_info())
         self._set_device_label(None)
         bar.addWidget(self.device_label)
+        bar.addSeparator()
 
-        spacer = QWidget(bar)
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        bar.addWidget(spacer)
+        # --------------------------------------------------------- capture
+        self.quick_capture = QuickCaptureBar(bar)
+        self.quick_capture.settings_requested.connect(self.start_capture)
+        bar.addWidget(self.quick_capture)
+        self.settings_button = self._tool_button(
+            bar, "gear", "All capture settings: channels, trigger, acquisition (Ctrl+F5)", self.start_capture
+        )
+        bar.addWidget(self.settings_button)
 
-        self.capture_button = QPushButton("Capture...", bar)
-        self.capture_button.setToolTip("Configure and start a capture (F5)")
+        # ------------------------------------------------- start/repeat/stop, in the middle
+        bar.addWidget(self._toolbar_spacer(bar))
+        self.capture_button = QPushButton("Start", bar)
+        self.capture_button.setToolTip("Start recording with the settings of the toolbar (F5)")
         set_variant(self.capture_button, "primary")
         set_icon(self.capture_button, "record")
-        self.capture_button.clicked.connect(self.start_capture)
-        bar.addWidget(self.capture_button)
+        self.capture_button.clicked.connect(self.quick_start_capture)
 
         self.repeat_button = QPushButton("Repeat", bar)
         set_icon(self.repeat_button, "repeat")
-        self.repeat_button.setToolTip("Capture again with the settings of the last capture (Ctrl+R)")
+        self.repeat_button.setToolTip("Record again with the settings of the loaded capture (Ctrl+R)")
         self.repeat_button.clicked.connect(self.repeat_capture)
-        bar.addWidget(self.repeat_button)
 
         self.abort_button = QPushButton("Stop", bar)
-        self.abort_button.setToolTip("Abort the running capture (Shift+F5)")
+        self.abort_button.setToolTip("Stop the running capture (Shift+F5)")
         set_variant(self.abort_button, "danger")
         set_icon(self.abort_button, "stop")
         self.abort_button.clicked.connect(self.abort_capture)
-        bar.addWidget(self.abort_button)
 
+        run_group = QWidget(bar)
+        run_layout = QHBoxLayout(run_group)
+        run_layout.setContentsMargins(0, 0, 0, 0)
+        run_layout.setSpacing(6)
+        for button in (self.capture_button, self.repeat_button, self.abort_button):
+            button.setMinimumWidth(86)
+            run_layout.addWidget(button)
+        bar.addWidget(run_group)
+        bar.addWidget(self._toolbar_spacer(bar))
+
+        # ---------------------------------------------------------- panels
+        self.search_tool_button = self._tool_button(
+            bar, "search", "Search the capture (Ctrl+F)", lambda: self.show_panel(self.search_panel)
+        )
+        bar.addWidget(self.search_tool_button)
+        self.measure_tool_button = self._tool_button(
+            bar, "ruler", "Cursors and measurements (Ctrl+M)", lambda: self.show_panel(self.measure_panel)
+        )
+        bar.addWidget(self.measure_tool_button)
+        self.listing_tool_button = self._tool_button(bar, "list", "Listing below the waveform (Ctrl+2)", checkable=True)
+        bar.addWidget(self.listing_tool_button)
+        self.panels_tool_button = self._tool_button(bar, "panel", "Analysis panels (Ctrl+1)", checkable=True)
+        bar.addWidget(self.panels_tool_button)
         return bar
 
     def _build_capture_area(self) -> QWidget:
@@ -376,6 +453,11 @@ class MainWindow(QMainWindow):
         )
         ruler_layout.addWidget(self.sample_marker, 1)
         layout.addWidget(ruler_row)
+
+        # Buses and groups: with the channels, below the time axis
+        self.bus_viewer = BusViewer(self.model, container)
+        self.bus_viewer.edit_requested.connect(self.edit_bus)
+        layout.addWidget(self.bus_viewer)
 
         # Pinned channels: outside the scroll area, so they stay in view.
         self.pinned_area = QWidget(container)
@@ -413,6 +495,8 @@ class MainWindow(QMainWindow):
 
         self.scroll_area.setWidget(waveform_container)
         layout.addWidget(self.scroll_area, 1)
+
+        layout.addWidget(self._build_view_bar(container))
 
         self.previewer = SamplePreviewer(self.model, container)
         layout.addWidget(self.previewer)
@@ -492,6 +576,54 @@ class MainWindow(QMainWindow):
         outer.addStretch(3)
         return page
 
+    def _build_view_bar(self, parent: QWidget) -> QFrame:
+        """Zoom and channel height, below the waveform."""
+        bar = QFrame(parent)
+        set_role(bar, "viewbar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(8, 3, 8, 3)
+        layout.setSpacing(4)
+
+        self.fit_button = self._tool_button(bar, "fit", "Show the whole capture (Ctrl+0)", self.model.zoom_to_fit)
+        layout.addWidget(self.fit_button)
+        self.trigger_button = self._tool_button(bar, "target", "Center the view on the trigger (Ctrl+T)", self.go_to_trigger)
+        layout.addWidget(self.trigger_button)
+        layout.addSpacing(8)
+
+        layout.addWidget(self._tool_button(bar, "zoom-out", "Zoom out (-)", lambda: self.model.zoom(2.0)))
+        self.zoom_slider = QSlider(Qt.Horizontal, bar)
+        self.zoom_slider.setRange(0, ZOOM_SLIDER_STEPS)
+        self.zoom_slider.setFixedWidth(180)
+        self.zoom_slider.setToolTip("Samples shown on screen")
+        self.zoom_slider.valueChanged.connect(self._on_zoom_slider)
+        layout.addWidget(self.zoom_slider)
+        layout.addWidget(self._tool_button(bar, "zoom-in", "Zoom in (+)", lambda: self.model.zoom(0.5)))
+        self.visible_samples_label = QLabel("-", bar)
+        set_role(self.visible_samples_label, "hint")
+        layout.addWidget(self.visible_samples_label)
+        layout.addStretch(1)
+
+        rows = QLabel(bar)
+        rows.setPixmap(icon("rows").pixmap(14, 14))
+        rows.setToolTip("Height of the channels")
+        layout.addWidget(rows)
+        self.channel_height_slider = QSlider(Qt.Horizontal, bar)
+        self.channel_height_slider.setRange(SMALLEST_CHANNEL_HEIGHT, LARGEST_CHANNEL_HEIGHT)
+        self.channel_height_slider.setValue(self.model.channel_height)
+        self.channel_height_slider.setFixedWidth(120)
+        self.channel_height_slider.setToolTip(
+            "Height of the channels: lower channels fit more of them on the screen "
+            "(Alt + mouse wheel, Ctrl+Shift+Up/Down)"
+        )
+        self.channel_height_slider.valueChanged.connect(self.model.set_channel_height)
+        layout.addWidget(self.channel_height_slider)
+        self.channel_height_label = QLabel(f"{self.model.channel_height} px", bar)
+        self.channel_height_label.setMinimumWidth(self.channel_height_label.fontMetrics().horizontalAdvance("000 px"))
+        set_role(self.channel_height_label, "hint")
+        layout.addWidget(self.channel_height_label)
+        self.model.channel_height_changed.connect(self._sync_channel_height)
+        return bar
+
     def _update_pinned_area(self) -> None:
         count = len(self.model.section_channels("pinned"))
         self.pinned_area.setFixedHeight(count * self.model.channel_height)
@@ -514,76 +646,38 @@ class MainWindow(QMainWindow):
             self.connect_device()
 
     def _build_side_panel(self) -> QWidget:
-        panel = QWidget(self)
-        panel.setMinimumWidth(300)
+        self.side_tabs = QTabWidget(self)
+        self.side_tabs.setObjectName("side-tabs")
+        self.side_tabs.setDocumentMode(True)
+        self.side_tabs.setUsesScrollButtons(False)
+        self.side_tabs.setElideMode(Qt.ElideNone)
+        self.side_tabs.setMinimumWidth(340)
+
+        def page(widget: QWidget) -> QScrollArea:
+            holder = QScrollArea(self.side_tabs)
+            holder.setWidgetResizable(True)
+            holder.setFrameShape(QFrame.NoFrame)
+            inner = QWidget(holder)
+            inner_layout = QVBoxLayout(inner)
+            inner_layout.setContentsMargins(8, 8, 8, 8)
+            widget.setParent(inner)
+            inner_layout.addWidget(widget, 1)
+            holder.setWidget(inner)
+            return holder
+
+        self.decoder_manager = DecoderManager(self.model, self.provider, self.side_tabs)
+        self.side_tabs.addTab(page(self.decoder_manager), "Decoders")
+        self.measure_panel = MeasurePanel(self.model, self.side_tabs)
+        self.side_tabs.addTab(page(self.measure_panel), "Measure")
+        self.search_panel = SearchPanel(self.model, self.side_tabs)
+        self.side_tabs.addTab(page(self.search_panel), "Search")
+        self.markers_panel = MarkersPanel(self.model, self.side_tabs)
+        self.side_tabs.addTab(page(self.markers_panel), "Markers")
+
+        panel = QWidget(self.side_tabs)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-
-        self.decoder_manager = DecoderManager(self.model, self.provider, panel)
-        layout.addWidget(self.decoder_manager, 1)
-
-        zoom_box = QFrame(panel)
-        set_role(zoom_box, "card")
-        zoom_layout = QVBoxLayout(zoom_box)
-        zoom_layout.setContentsMargins(10, 8, 10, 8)
-
-        header = QHBoxLayout()
-        title = QLabel("View", zoom_box)
-        set_role(title, "heading")
-        header.addWidget(title)
-        header.addStretch(1)
-        self.fit_button = QPushButton("Fit", zoom_box)
-        set_icon(self.fit_button, "fit")
-        self.fit_button.setToolTip("Show the whole capture (Ctrl+0)")
-        self.fit_button.clicked.connect(self.model.zoom_to_fit)
-        header.addWidget(self.fit_button)
-        self.trigger_button = QPushButton("Trigger", zoom_box)
-        set_icon(self.trigger_button, "target")
-        self.trigger_button.setToolTip("Center the view on the trigger (Ctrl+T)")
-        self.trigger_button.clicked.connect(self.go_to_trigger)
-        header.addWidget(self.trigger_button)
-        zoom_layout.addLayout(header)
-
-        slider_row = QHBoxLayout()
-        self.min_samples_label = QLabel("4", zoom_box)
-        set_role(self.min_samples_label, "hint")
-        slider_row.addWidget(self.min_samples_label)
-        self.zoom_slider = QSlider(Qt.Horizontal, zoom_box)
-        self.zoom_slider.setRange(0, ZOOM_SLIDER_STEPS)
-        self.zoom_slider.setToolTip("Samples shown on screen")
-        self.zoom_slider.valueChanged.connect(self._on_zoom_slider)
-        slider_row.addWidget(self.zoom_slider, 1)
-        self.max_samples_label = QLabel("0", zoom_box)
-        set_role(self.max_samples_label, "hint")
-        slider_row.addWidget(self.max_samples_label)
-        zoom_layout.addLayout(slider_row)
-
-        self.visible_samples_label = QLabel("-", zoom_box)
-        self.visible_samples_label.setAlignment(Qt.AlignCenter)
-        set_role(self.visible_samples_label, "hint")
-        zoom_layout.addWidget(self.visible_samples_label)
-
-        height_row = QHBoxLayout()
-        height_title = QLabel("Channel height", zoom_box)
-        set_role(height_title, "hint")
-        height_row.addWidget(height_title)
-        self.channel_height_slider = QSlider(Qt.Horizontal, zoom_box)
-        self.channel_height_slider.setRange(SMALLEST_CHANNEL_HEIGHT, LARGEST_CHANNEL_HEIGHT)
-        self.channel_height_slider.setValue(self.model.channel_height)
-        self.channel_height_slider.setToolTip(
-            "Height of the channels: lower channels fit more of them on the screen "
-            "(Alt + mouse wheel, Ctrl+Shift+Up/Down)"
-        )
-        self.channel_height_slider.valueChanged.connect(self.model.set_channel_height)
-        height_row.addWidget(self.channel_height_slider, 1)
-        self.channel_height_label = QLabel(f"{self.model.channel_height} px", zoom_box)
-        self.channel_height_label.setMinimumWidth(self.channel_height_label.fontMetrics().horizontalAdvance("000 px"))
-        set_role(self.channel_height_label, "hint")
-        height_row.addWidget(self.channel_height_label)
-        zoom_layout.addLayout(height_row)
-        self.model.channel_height_changed.connect(self._sync_channel_height)
-        layout.addWidget(zoom_box)
 
         info_box = QFrame(panel)
         set_role(info_box, "card")
@@ -597,8 +691,10 @@ class MainWindow(QMainWindow):
         self.info_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         info_layout.addWidget(self.info_label)
         layout.addWidget(info_box)
+        layout.addStretch(1)
 
-        return panel
+        self.side_tabs.addTab(page(panel), "Capture")
+        return self.side_tabs
 
     def _build_menu(self) -> None:
         menu = self.menuBar()
@@ -634,6 +730,13 @@ class MainWindow(QMainWindow):
         self.action_export_vcd = QAction("Value change dump (.vcd)...", self)
         self.action_export_vcd.triggered.connect(lambda: self.export_capture("vcd"))
         export_menu.addAction(self.action_export_vcd)
+        self.action_export_sr = QAction("sigrok session for PulseView (.sr)...", self)
+        self.action_export_sr.triggered.connect(lambda: self.export_capture("sr"))
+        export_menu.addAction(self.action_export_sr)
+        export_menu.addSeparator()
+        self.action_export_annotations = QAction("Decoder output (.csv, .json)...", self)
+        self.action_export_annotations.triggered.connect(self.export_annotations)
+        export_menu.addAction(self.action_export_annotations)
 
         file_menu.addSeparator()
         action_exit = QAction("E&xit", self)
@@ -643,8 +746,14 @@ class MainWindow(QMainWindow):
 
         # --------------------------------------------------------- Capture
         capture_menu = menu.addMenu("&Capture")
-        self.action_capture = QAction("&Start capture...", self)
-        self.action_capture.setShortcut(QKeySequence("F5"))
+        self.action_quick_capture = QAction("&Start", self)
+        self.action_quick_capture.setShortcut(QKeySequence("F5"))
+        self.action_quick_capture.setStatusTip("Capture with the settings of the toolbar")
+        self.action_quick_capture.triggered.connect(self.quick_start_capture)
+        capture_menu.addAction(self.action_quick_capture)
+
+        self.action_capture = QAction("Capture &settings...", self)
+        self.action_capture.setShortcut(QKeySequence("Ctrl+F5"))
         self.action_capture.triggered.connect(self.start_capture)
         capture_menu.addAction(self.action_capture)
 
@@ -663,12 +772,12 @@ class MainWindow(QMainWindow):
             "Align the boards of a multi device capture using a reference line or the clock"
         )
         self.action_align.triggered.connect(self.align_boards)
-        capture_menu.addAction(self.action_align)
 
         capture_menu.addSeparator()
         self.action_simulation = QAction("Si&mulated capture...", self)
         self.action_simulation.triggered.connect(self.simulated_capture)
         capture_menu.addAction(self.action_simulation)
+        capture_menu.addAction(self.action_align)
 
         # ---------------------------------------------------------- Device
         device_menu = menu.addMenu("&Device")
@@ -682,10 +791,10 @@ class MainWindow(QMainWindow):
 
         device_menu.addSeparator()
         self.action_device_info = QAction("Device &information...", self)
-        self.action_device_info.triggered.connect(self.show_device_info)
+        self.action_device_info.triggered.connect(lambda: self.show_device_info())
         device_menu.addAction(self.action_device_info)
 
-        self.action_board_test = QAction("Board &self-test...", self)
+        self.action_board_test = QAction("&Self-test...", self)
         self.action_board_test.triggered.connect(self.run_board_test)
         device_menu.addAction(self.action_board_test)
 
@@ -714,7 +823,8 @@ class MainWindow(QMainWindow):
             (self.action_save_as, "save"),
             (self.action_export_csv, "export"),
             (self.action_export_vcd, "export"),
-            (self.action_capture, "record"),
+            (self.action_quick_capture, "record"),
+            (self.action_capture, "gear"),
             (self.action_repeat, "repeat"),
             (self.action_stop, "stop"),
             (self.action_simulation, "wave"),
@@ -724,6 +834,56 @@ class MainWindow(QMainWindow):
             (self.action_network_settings, "wifi"),
             (self.action_firmware, "chip"),
             (self.action_bootloader, "power"),
+        ):
+            action.setIcon(icon(name))
+
+        # --------------------------------------------------------- Analyze
+        analyze_menu = menu.addMenu("&Analyze")
+        self.action_buses = QAction("&New bus or group...", self)
+        self.action_buses.setStatusTip("Show several channels as one value, with a symbol table")
+        self.action_buses.triggered.connect(lambda: self.edit_bus(None))
+        analyze_menu.addAction(self.action_buses)
+        analyze_menu.addSeparator()
+        self.action_find = QAction("&Find...", self)
+        self.action_find.setShortcut(QKeySequence.Find)
+        self.action_find.triggered.connect(lambda: self.show_panel(self.search_panel))
+        analyze_menu.addAction(self.action_find)
+        self.action_find_next = QAction("Find &next", self)
+        self.action_find_next.setShortcut(QKeySequence("F3"))
+        self.action_find_next.triggered.connect(lambda: self.search_panel.step(1))
+        analyze_menu.addAction(self.action_find_next)
+        self.action_find_previous = QAction("Find &previous", self)
+        self.action_find_previous.setShortcut(QKeySequence("Shift+F3"))
+        self.action_find_previous.triggered.connect(lambda: self.search_panel.step(-1))
+        analyze_menu.addAction(self.action_find_previous)
+        analyze_menu.addSeparator()
+        self.action_measure = QAction("&Measurements", self)
+        self.action_measure.setShortcut(QKeySequence("Ctrl+M"))
+        self.action_measure.triggered.connect(lambda: self.show_panel(self.measure_panel))
+        analyze_menu.addAction(self.action_measure)
+        self.action_charts = QAction("&Charts and histograms...", self)
+        self.action_charts.triggered.connect(lambda: ChartDialog(self.model, self).exec())
+        analyze_menu.addAction(self.action_charts)
+        self.action_compare = QAction("C&ompare with a reference...", self)
+        self.action_compare.triggered.connect(lambda: CompareDialog(self.model, self).exec())
+        analyze_menu.addAction(self.action_compare)
+        self.action_state = QAction("&State analysis (clocked)...", self)
+        self.action_state.setStatusTip("Resample the capture on the edges of a clock channel")
+        self.action_state.triggered.connect(self.state_analysis)
+        analyze_menu.addAction(self.action_state)
+        self.action_back_to_timing = QAction("&Back to the timing capture", self)
+        self.action_back_to_timing.setStatusTip("Leave the state analysis for the capture it was made of")
+        self.action_back_to_timing.triggered.connect(self.back_to_timing)
+        analyze_menu.addAction(self.action_back_to_timing)
+        self._capture_actions = [
+            self.action_buses, self.action_find, self.action_measure, self.action_charts,
+            self.action_compare, self.action_state, self.action_export_sr, self.action_export_annotations,
+        ]
+        for action, name in (
+            (self.action_buses, "bus"), (self.action_find, "search"), (self.action_measure, "ruler"),
+            (self.action_charts, "chart"), (self.action_compare, "compare"), (self.action_state, "clock"),
+            (self.action_back_to_timing, "reset"),
+            (self.action_export_sr, "export"), (self.action_export_annotations, "export"),
         ):
             action.setIcon(icon(name))
 
@@ -811,10 +971,19 @@ class MainWindow(QMainWindow):
         self.action_toggle_preview.setChecked(True)
         self.action_toggle_preview.triggered.connect(self.previewer.setVisible)
         view_menu.addAction(self.action_toggle_preview)
+        view_menu.addSeparator()
+        panels_action = self.panels_dock.toggleViewAction()
+        panels_action.setText("&Analysis panels")
+        panels_action.setShortcut(QKeySequence("Ctrl+1"))
+        view_menu.addAction(panels_action)
+        listing_action = self.listing_dock.toggleViewAction()
+        listing_action.setText("&Listing")
+        listing_action.setShortcut(QKeySequence("Ctrl+2"))
+        view_menu.addAction(listing_action)
 
         # ------------------------------------------------------------ Help
         help_menu = menu.addMenu("&Help")
-        action_shortcuts = QAction("&Keyboard shortcuts", self)
+        action_shortcuts = QAction("&Keyboard shortcuts...", self)
         action_shortcuts.triggered.connect(self.show_shortcuts)
         help_menu.addAction(action_shortcuts)
 
@@ -828,7 +997,7 @@ class MainWindow(QMainWindow):
         action_upstream_docs.triggered.connect(lambda: webbrowser.open(UPSTREAM_DOCUMENTATION_URL))
         help_menu.addAction(action_upstream_docs)
 
-        action_decoders = QAction("Decoder search &paths", self)
+        action_decoders = QAction("Decoder search &paths...", self)
         action_decoders.triggered.connect(self.show_decoder_paths)
         help_menu.addAction(action_decoders)
 
@@ -836,6 +1005,46 @@ class MainWindow(QMainWindow):
         action_about = QAction("&About PiPiLogicAnalyzer", self)
         action_about.triggered.connect(lambda: AboutDialog(self).exec())
         help_menu.addAction(action_about)
+
+    #: Icons of the menu entries that do not set their own (by their text without "&" and "...")
+    MENU_ICONS = {
+        "Exit": "exit",
+        "Align boards": "align",
+        "Forget multi device sets": "trash",
+        "Find next": "down",
+        "Find previous": "up",
+        "Zoom in": "zoom-in",
+        "Zoom out": "zoom-out",
+        "Zoom to fit": "fit",
+        "Go to trigger": "target",
+        "Taller channels": "rows",
+        "Shorter channels": "rows",
+        "Default channel height": "reset",
+        "Navigate": "arrow-right",
+        "Show all channels": "eye",
+        "Unpin all channels": "pin",
+        "Keyboard shortcuts": "keyboard",
+        "Online documentation": "book",
+        "Online documentation of the original software (gusmanb)": "book",
+        "Decoder search paths": "folder",
+        "About PiPiLogicAnalyzer": "info",
+        "Export": "export",
+    }
+
+    def _apply_menu_icons(self) -> None:
+        def visit(menu) -> None:
+            for action in menu.actions():
+                if action.isSeparator():
+                    continue
+                name = action.text().replace("&", "").rstrip(".").strip()
+                if action.icon().isNull() and not action.isCheckable() and name in self.MENU_ICONS:
+                    action.setIcon(icon(self.MENU_ICONS[name]))
+                if action.menu() is not None and action.menu() is not self.profiles_menu:
+                    visit(action.menu())
+
+        for action in self.menuBar().actions():
+            if action.menu() is not None:
+                visit(action.menu())
 
     def _update_title(self) -> None:
         name = f"PiPiLogicAnalyzer {__version__}"
@@ -863,8 +1072,6 @@ class MainWindow(QMainWindow):
             self.position_scrollbar.setSingleStep(max(visible // 10, 1))
             self.position_scrollbar.setValue(self.model.first_sample)
 
-            self.min_samples_label.setText("4" if total else "")
-            self.max_samples_label.setText(to_thousands(max(total, 4)) if total else "")
             self.zoom_slider.setValue(self._zoom_to_slider(visible))
 
             if total:
@@ -906,36 +1113,35 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------------- devices
     def refresh_ports(self) -> None:
-        """Detected analyzers followed by the network/multi device entries; other serial ports are left out."""
+        """The devices every backend detects, then the entries that ask for a device (network, multi)."""
         self.port_combo.clear()
-        detected = {device.port_name: device for device in detector.detect()}
-        dslogics = dslogic_usb.list_devices()
-
-        if detected:
-            self.port_combo.addItem(
-                "Autodetect" + (f" ({len(detected)} analyzers)" if len(detected) > 1 else ""),
-                ("autodetect", None),
-            )
-            for port, device in detected.items():
-                serial = f", S/N {device.serial_number}" if device.serial_number else ""
-                self.port_combo.addItem(f"PiPiLogicAnalyzer on {port}{serial}", ("serial", port))
-        for device in dslogics:
-            self.port_combo.addItem(device.description, ("dslogic", device.location))
-        if not detected and not dslogics:
+        detected = []
+        for backend in self.device_backends:
+            try:
+                detected += backend.detected()
+            except Exception:  # noqa: BLE001 - one kind of device must not hide the others
+                continue
+        for entry in detected:
+            self.port_combo.addItem(entry.label, entry)
+        if not detected:
             self.port_combo.addItem("No analyzer detected", None)
 
         self.port_combo.insertSeparator(self.port_combo.count())
-        self.port_combo.addItem("Network device...", ("network", None))
-        self.port_combo.addItem("Multiple devices...", ("multi", None))
+        for backend in self.device_backends:
+            for entry in backend.manual_entries():
+                self.port_combo.addItem(entry.label, entry)
         self.port_combo.setCurrentIndex(0)
         self._check_for_new_boards()
 
-    def _port_index(self, data: tuple) -> int:
-        """Index of the device list entry carrying ``data`` (``findData`` misses Python tuples)."""
+    def _port_index(self, entry: devices.DeviceEntry) -> int:
+        """Index of the device list entry ``entry``."""
         for index in range(self.port_combo.count()):
-            if self.port_combo.itemData(index) == data:
+            if self.port_combo.itemData(index) == entry:
                 return index
         return -1
+
+    def _backend(self, entry: devices.DeviceEntry) -> Optional[devices.DeviceBackend]:
+        return next((backend for backend in self.device_backends if backend.id == entry.backend), None)
 
     def toggle_connection(self) -> None:
         if self._has_real_device():
@@ -944,8 +1150,9 @@ class MainWindow(QMainWindow):
             self.connect_device()
 
     def connect_device(self) -> None:
-        data = self.port_combo.currentData()
-        if not data:
+        entry = self.port_combo.currentData()
+        backend = self._backend(entry) if entry else None
+        if backend is None:
             messages.warning(
                 self,
                 "Connect",
@@ -955,24 +1162,20 @@ class MainWindow(QMainWindow):
             )
             return
 
-        kind, value = data
         try:
-            if kind == "serial":
-                driver: Optional[AnalyzerDriverBase] = PiPiLogicAnalyzerDriver(value)
-            elif kind == "network":
-                driver = self._connect_network()
-            elif kind == "multi":
-                driver = self._connect_multi()
-            elif kind == "dslogic":
-                driver = self._connect_dslogic(value)
-            else:
-                driver = self._connect_autodetect()
+            driver = backend.connect(entry, self)
+        except FirmwareOutdatedError as error:
+            self._offer_firmware_update(error)
+            return
         except (DeviceConnectionError, OSError, ValueError) as error:
             messages.error(self, "Connect", "The device could not be opened.", str(error))
             return
 
         if driver is None:
             return
+        if supports_software_trigger(driver):
+            # Triggers the device cannot evaluate on a stream are evaluated here
+            driver = SoftwareTriggerDriver(driver)
 
         if self.driver is not None:
             self.driver.dispose()  # the emulated driver of a loaded file
@@ -983,6 +1186,8 @@ class MainWindow(QMainWindow):
         self._set_device_label(driver.device_version or "Unknown")
         self.port_combo.setEnabled(False)
         self.refresh_button.setEnabled(False)
+        for action in self._device_choice_actions:
+            action.setVisible(False)
         self.statusBar().showMessage(f"Connected to {driver.device_version}", 5000)
 
         if driver.is_network:
@@ -990,125 +1195,14 @@ class MainWindow(QMainWindow):
             self._update_power_status()
 
         self.board_watch_timer.stop()
-        self._check_connected_firmware(driver)
+        self._set_firmware_notice(None)
+        self.quick_capture.set_driver(driver)
 
         self._update_actions()
 
-    def _connect_dslogic(self, location: str) -> Optional[AnalyzerDriverBase]:
-        info = dslogic_usb.find_device(location)
-        if info is None:
-            raise DeviceConnectionError("The DSLogic is no longer connected. Press Refresh.")
-        info = dslogic_driver.prepare(info)
-        while True:
-            try:
-                return dslogic_driver.DSLogicDriver(info)
-            except dslogic_driver.BitstreamMissingError as missing:
-                if not self._provide_dslogic_bitstream(missing):
-                    return None
-
-    def _provide_dslogic_bitstream(self, missing: "dslogic_driver.BitstreamMissingError") -> bool:
-        """Ask for the FPGA bitstream of a DSLogic; ``True`` when it may be there now."""
-        options = ["Choose DSView folder..."]
-        if dslogic_resources.downloadable(missing.name):
-            options.insert(0, "Download from DSView")
-        choice = messages.choose(
-            self,
-            "FPGA bitstream needed",
-            f"The {missing.model} needs its FPGA bitstream {missing.name}.",
-            options,
-            "The bitstreams belong to DreamSourceLab's DSView and are not part of "
-            "PiPiLogicAnalyzer. They are taken from an installed DSView (its 'res' folder), or "
-            "downloaded once from the DSView repository on GitHub "
-            f"(commit {dslogic_resources.DSVIEW_COMMIT[:7]}) into the settings directory.",
-        )
-        if choice is None:
-            return False
-        if options[choice].startswith("Download"):
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                dslogic_resources.download(missing.name)
-            except dslogic_resources.ResourceError as error:
-                messages.error(self, "Download", "The bitstream could not be downloaded.", str(error))
-                return False
-            finally:
-                QApplication.restoreOverrideCursor()
-            return True
-        folder = QFileDialog.getExistingDirectory(self, "DSView 'res' folder")
-        if not folder:
-            return False
-        if dslogic_resources.find(missing.name, [folder]) is None:
-            messages.warning(
-                self, "FPGA bitstream", f"{missing.name} is not in this folder.",
-                "Choose the 'res' folder of DSView, e.g. C:\\Program Files\\DSView\\res.",
-            )
-            return False
-        dslogic_resources.set_chosen_directory(folder)
-        return True
-
-    def _connect_network(self) -> Optional[AnalyzerDriverBase]:
-        dialog = NetworkConnectDialog(parent=self)
-        if not dialog.exec():
-            return None
-        return PiPiLogicAnalyzerDriver(f"{dialog.address}:{dialog.port}")
-
-    def _connect_multi(self) -> Optional[AnalyzerDriverBase]:
-        dialog = MultiConnectDialog([port for port in detector.list_port_infos() if port.is_analyzer], self)
-        if not dialog.exec():
-            return None
-        return MultiAnalyzerDriver(dialog.connection_strings)
-
-    def _connect_autodetect(self) -> Optional[AnalyzerDriverBase]:
-        devices = detector.detect()
-        if not devices:
-            messages.warning(
-                self,
-                "Connect",
-                "No analyzer was found.",
-                "Check the USB cable. A board without the PiPiLogicAnalyzer firmware can be "
-                "flashed with Device > Install or update firmware.",
-            )
-            return None
-        if len(devices) == 1:
-            return PiPiLogicAnalyzerDriver(devices[0].port_name)
-
-        known = self._known_device_order(devices)
-        if known is not None:
-            return MultiAnalyzerDriver(known)
-
-        choice = messages.choose(
-            self,
-            "Several analyzers found",
-            f"{len(devices)} analyzers are connected. How do you want to use them?",
-            ["Combine into a multi device set", f"Use only {devices[0].port_name}"],
-            "A multi device set captures on all boards at once; the first board is the master "
-            "and triggers the others.",
-        )
-        if choice is None:
-            return None
-        if choice == 1:
-            return PiPiLogicAnalyzerDriver(devices[0].port_name)
-
-        dialog = MultiComposeDialog(devices, self)
-        if not dialog.exec():
-            return None
-
-        ports = [device.port_name for device in dialog.ordered_devices]
-        self._store_known_device(dialog.ordered_devices)
-        return MultiAnalyzerDriver(ports)
-
-    def _known_device_order(self, devices) -> Optional[list[str]]:
-        known_devices = settings.get_settings("known-devices.json") or []
-        serials = {device.serial_number for device in devices if device.serial_number}
-        for entry in known_devices:
-            stored = entry.get("serial_numbers") or []
-            if set(stored) == serials and len(stored) == len(devices):
-                by_serial = {device.serial_number: device for device in devices}
-                return [by_serial[serial].port_name for serial in stored]
-        return None
-
     def forget_known_devices(self) -> None:
         """Drop the stored multi device sets so autodetect asks again."""
-        known_devices = settings.get_settings("known-devices.json") or []
+        known_devices = pico_devices.known_device_sets()
         if not known_devices:
             messages.info(self, "Multi device sets", "No multi device set has been registered yet.")
             return
@@ -1123,15 +1217,8 @@ class MainWindow(QMainWindow):
         ):
             return
 
-        settings.persist_settings("known-devices.json", [])
+        pico_devices.forget_known_device_sets()
         self.statusBar().showMessage("Registered multi device sets removed", 5000)
-
-    def _store_known_device(self, devices) -> None:
-        known_devices = settings.get_settings("known-devices.json") or []
-        known_devices.append(
-            {"serial_numbers": [device.serial_number for device in devices]}
-        )
-        settings.persist_settings("known-devices.json", known_devices)
 
     def disconnect_device(self) -> None:
         if self.driver is None:
@@ -1143,9 +1230,12 @@ class MainWindow(QMainWindow):
         self._set_device_label(None)
         self.port_combo.setEnabled(True)
         self.refresh_button.setEnabled(True)
+        for action in self._device_choice_actions:
+            action.setVisible(True)
         self.statusBar().showMessage("Disconnected", 5000)
         self._set_firmware_notice(None)
         self.board_watch_timer.start()
+        self.quick_capture.set_driver(None)
         self.refresh_ports()
         self._update_actions()
 
@@ -1157,18 +1247,31 @@ class MainWindow(QMainWindow):
             self.device_label.unsetCursor()
             set_role(self.device_label, "chip-neutral")
             return
+        # In the middle: the board and the firmware version at the end stay readable
+        shown = self.device_label.fontMetrics().elidedText(version, Qt.ElideMiddle, DEVICE_LABEL_WIDTH)
         self.device_label.setText(
             f"<a href='device-info' style='color: #d6f5dc; text-decoration: none;'>"
-            f"● {html.escape(version)}</a>"
+            f"● {html.escape(shown)}</a>"
         )
-        self.device_label.setToolTip("Connected. Click for board, firmware and connection details")
+        self.device_label.setToolTip(f"{version}: connected. Click for board, firmware and connection details")
         self.device_label.setCursor(Qt.PointingHandCursor)
         set_role(self.device_label, "chip-ok")
 
-    def show_device_info(self) -> None:
-        if self.driver is None:
+    def show_device_info(self, tab: str = "overview") -> None:
+        """The device information; the self-test is one of its tabs."""
+        if self.driver is None or self.driver.is_capturing:
             return
-        DeviceInfoDialog(self.driver, self).exec()
+        # The power poll would talk to the device in the middle of a self-test.
+        polling = self.power_timer.isActive()
+        self.power_timer.stop()
+        try:
+            if tab == "overview":
+                DeviceInfoDialog(self.driver, self).exec()
+            else:
+                DeviceInfoDialog(self.driver, self, initial_tab=tab).exec()
+        finally:
+            if polling:
+                self.power_timer.start()
 
     def update_network_settings(self) -> None:
         if self.driver is None:
@@ -1239,61 +1342,40 @@ class MainWindow(QMainWindow):
         self._banner_holder.setVisible(bool(text))
 
     def _has_real_device(self) -> bool:
-        return self.driver is not None and self.driver.driver_type in (
-            AnalyzerDriverType.SERIAL,
-            AnalyzerDriverType.NETWORK,
-            AnalyzerDriverType.MULTI,
-            AnalyzerDriverType.DSLOGIC,
-        )
+        return self.driver is not None and self.driver.is_hardware
 
-    def _has_pico_device(self) -> bool:
-        """A board with the PiPiLogicAnalyzer firmware (bootloader, self-test, firmware update)."""
-        return self._has_real_device() and self.driver.driver_type != AnalyzerDriverType.DSLOGIC
+    def _has_bootloader_device(self) -> bool:
+        """A device that restarts into its bootloader for a firmware update."""
+        return self._has_real_device() and self.driver.supports_bootloader
 
     def _check_for_new_boards(self) -> None:
-        """Show a notice for boards in bootloader mode or with foreign firmware."""
+        """Show a notice for devices that cannot be used yet, e.g. boards without firmware."""
         if self._has_real_device():
             return
-        try:
-            drives = firmware_images.find_boot_drives()
-            foreign = detector.detect_foreign_picos()
-        except Exception:  # noqa: BLE001 - enumeration problems must not disturb the UI
-            return
+        notice = None
+        for backend in self.device_backends:
+            try:
+                notice = backend.idle_notice()
+            except Exception:  # noqa: BLE001 - enumeration problems must not disturb the UI
+                return
+            if notice:
+                break
+        self._set_firmware_notice(notice)
 
-        if drives:
-            drive = drives[0]
-            self._set_firmware_notice(
-                f"<b>{drive.chip} board in bootloader mode</b> ({drive.name}): "
-                "install the PiPiLogicAnalyzer firmware to use it."
-            )
-        elif foreign:
-            board = foreign[0]
-            self._set_firmware_notice(
-                f"<b>Raspberry Pi board with {html.escape(board.description)}</b> on "
-                f"{html.escape(board.port_name)}: it does not run the PiPiLogicAnalyzer firmware."
-            )
-        else:
-            self._set_firmware_notice(None)
-
-    def _check_connected_firmware(self, driver: AnalyzerDriverBase) -> None:
-        if driver.driver_type not in (AnalyzerDriverType.SERIAL, AnalyzerDriverType.NETWORK):
-            self._set_firmware_notice(None)
-            return
-        try:
-            capabilities = driver.capabilities()
-        except Exception:  # noqa: BLE001 - the notice is optional
-            capabilities = frozenset()
-        if capabilities:
-            self._set_firmware_notice(None)
-        else:
-            self._set_firmware_notice(
-                "<b>Older firmware:</b> the board self-test, simulated captures on the board "
-                "and the device details need the firmware of this project.",
-                "Update firmware...",
-            )
+    def _offer_firmware_update(self, error: FirmwareOutdatedError) -> None:
+        """The board runs firmware this application does not work with: offer the update."""
+        where = f" on {error.location}" if error.location else ""
+        if messages.confirm(
+            self,
+            "Firmware update needed",
+            f"The analyzer{where} needs the firmware of this version of PiPiLogicAnalyzer.",
+            "Update firmware...",
+            f"{error} The update takes a few seconds; the capture settings and profiles are kept.",
+        ):
+            self.install_firmware()
 
     def _restart_connected_into_bootloader(self) -> bool:
-        if not self._has_pico_device() or self.driver.is_capturing:
+        if not self._has_bootloader_device() or self.driver.is_capturing:
             return False
         if not self.driver.enter_bootloader():
             return False
@@ -1302,25 +1384,24 @@ class MainWindow(QMainWindow):
 
     def _connected_devices(self) -> list[ConnectedDevice]:
         """Installed firmware of the connected analyzer, one entry per board of a multi device set."""
-        if not self._has_pico_device():
+        if not self._has_bootloader_device():
             return []
-        boards = self.driver.devices if self.driver.driver_type == AnalyzerDriverType.MULTI else [self.driver]
-        devices = []
-        for board in boards:
+        connected = []
+        for board in self.driver.boards():
             try:
                 details = board.device_details()
             except Exception:  # noqa: BLE001 - the details only complete the version line
                 details = {}
             location = getattr(board, "connection_string", None) or "?"
-            devices.append(ConnectedDevice(location, board.device_version, details))
-        return devices
+            connected.append(ConnectedDevice(location, board.device_version, details))
+        return connected
 
     def install_firmware(self) -> None:
-        connected = self.driver if self._has_pico_device() else None
+        connected = self.driver if self._has_bootloader_device() else None
         if connected is not None and connected.is_capturing:
             return
         # A board on the network cannot be flashed from here; it only shows its firmware.
-        restartable = connected is not None and connected.driver_type != AnalyzerDriverType.NETWORK
+        restartable = connected is not None and not connected.is_network
         dialog = FirmwareDialog(
             self,
             connected_devices=self._connected_devices(),
@@ -1330,33 +1411,21 @@ class MainWindow(QMainWindow):
         if not self._has_real_device():
             self.refresh_ports()
             if dialog.new_port:
-                index = self._port_index(("serial", dialog.new_port))
+                index = self._port_index(pico_devices.serial_entry(dialog.new_port))
                 if index >= 0:
                     self.port_combo.setCurrentIndex(index)
                 self.statusBar().showMessage(f"Firmware installed, the analyzer is on {dialog.new_port}")
 
     # ----------------------------------------------------- board test / simulation
     def run_board_test(self) -> None:
-        if self.driver is None or self.driver.is_capturing:
-            return
-        # The power poll would talk to the device in the middle of the test.
-        polling = self.power_timer.isActive()
-        self.power_timer.stop()
-        try:
-            BoardTestDialog(self.driver, self).exec()
-        finally:
-            if polling:
-                self.power_timer.start()
+        self.show_device_info("self-test")
 
     def simulated_capture(self) -> None:
         """Capture test signals: generated by the board if possible, else on the PC."""
         if self.driver is not None and self.driver.is_capturing:
             return
 
-        board = self.driver if self.driver is not None and self.driver.driver_type in (
-            AnalyzerDriverType.SERIAL,
-            AnalyzerDriverType.NETWORK,
-        ) else None
+        board = self.driver if self._has_real_device() and self.driver.board_count == 1 else None
         on_board = False
         if board is not None:
             try:
@@ -1365,7 +1434,7 @@ class MainWindow(QMainWindow):
                 on_board = False
 
         driver = board if on_board else EmulatedAnalyzerDriver(1)
-        dialog = SimulationDialog(driver, on_board=on_board, board_connected=board is not None, parent=self)
+        dialog = SimulationDialog(driver, on_board=on_board, parent=self)
         if not dialog.exec() or dialog.session is None:
             return
 
@@ -1400,14 +1469,105 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------------- capture
     def start_capture(self) -> None:
+        """All capture settings in the dialog, then the capture."""
         if not self._has_real_device() or self.driver.is_capturing:
             return
 
         dialog = self._capture_dialog(self.driver)
-        if not dialog.exec() or dialog.selected_settings is None:
-            return
+        accepted = dialog.exec() and dialog.selected_settings is not None
+        self.quick_capture.reload()
+        if accepted:
+            self._begin_capture(dialog.selected_settings)
 
-        self._begin_capture(dialog.selected_settings)
+    def quick_start_capture(self) -> None:
+        """Captures with the settings of the toolbar (the stored settings of the device)."""
+        if not self._has_real_device() or self.driver.is_capturing:
+            return
+        session = self.quick_capture.capture_session()
+        if session is None:
+            self.start_capture()
+            return
+        self._begin_capture(session)
+
+    def show_panel(self, panel: QWidget) -> None:
+        """Brings a tab of the analysis panels to the front."""
+        self.panels_dock.setVisible(True)
+        for index in range(self.side_tabs.count()):
+            holder = self.side_tabs.widget(index)
+            if holder.isAncestorOf(panel):
+                self.side_tabs.setCurrentIndex(index)
+                break
+
+    def edit_bus(self, bus) -> None:
+        """Defines a new bus (``bus=None``) or changes one."""
+        if self.model.session is None:
+            return
+        dialog = BusDialog(self.model.channels, bus, self)
+        if not dialog.exec():
+            return
+        buses = self.model.buses
+        if bus is None:
+            buses.append(dialog.bus)
+        else:
+            buses[next(index for index, item in enumerate(buses) if item is bus)] = dialog.bus
+        self.model.set_buses(buses)
+
+    def export_annotations(self) -> None:
+        from ..core.annotation_export import export_annotations
+
+        groups = [group for group in self.model.annotation_groups if not group.error]
+        if self.model.session is None or not groups:
+            messages.info(self, "Export decoder output", "There is no decoder output to export.", "Add a decoder first.")
+            return
+        base = os.path.splitext(os.path.basename(self.current_file or "capture"))[0]
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Export decoder output", f"{base}-decoded.csv", "CSV (*.csv);;JSON (*.json)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith((".csv", ".json")):
+            path += ".json" if "JSON" in chosen else ".csv"
+        try:
+            export_annotations(path, groups, self.model.session)
+        except (OSError, ValueError) as error:
+            messages.error(self, "Export decoder output", f"{os.path.basename(path)} could not be written.", str(error))
+            return
+        self.statusBar().showMessage(f"Exported {path}", 5000)
+
+    def back_to_timing(self) -> None:
+        """Returns from a state analysis to the capture it was made of."""
+        if self._timing_capture is None:
+            return
+        session, regions, path = self._timing_capture
+        self.current_file = path
+        self.model.set_regions(regions)
+        self.load_session(session)
+        self._update_title()
+        self.statusBar().showMessage("Back to the timing capture", 5000)
+
+    def state_analysis(self) -> None:
+        """Resamples the loaded capture on the edges of a clock channel (a new capture of states)."""
+        from .dialogs.state_dialog import StateDialog
+
+        session = self.model.session
+        if session is None:
+            return
+        dialog = StateDialog(session, self)
+        if not dialog.exec() or dialog.result_capture is None:
+            return
+        state = dialog.result_capture
+        # The states are a capture of their own; a repeated capture uses the device's timing again
+        state.session.clock_channel = None
+        # Kept until another capture is loaded, for Back to the timing capture
+        timing = (session, self.model.regions, self.current_file)
+        self.current_file = None
+        self.load_session(state.session)
+        self._timing_capture = timing
+        self._update_title()
+        self._update_actions()
+        self.statusBar().showMessage(
+            f"{to_thousands(state.state_count)} states clocked by channel {dialog.clock_channel + 1}", 8000
+        )
 
     def _capture_dialog(self, driver: AnalyzerDriverBase, accept_text: Optional[str] = None) -> CaptureDialog:
         return CaptureDialog(
@@ -1452,6 +1612,16 @@ class MainWindow(QMainWindow):
         self.driver.stop_capture()
         self.statusBar().showMessage("Capture aborted", 5000)
         self._update_actions()
+
+    def _queue_capture_progress(self, args: CaptureProgressArgs) -> None:
+        if self._pending_progress is None:
+            QTimer.singleShot(0, self._show_pending_progress)
+        self._pending_progress = args
+
+    def _show_pending_progress(self) -> None:
+        args, self._pending_progress = self._pending_progress, None
+        if args is not None:
+            self._on_capture_progress(args)
 
     def _on_capture_progress(self, args: CaptureProgressArgs) -> None:
         """Shows a streaming capture while it runs, following its end unless scrolled back."""
@@ -1498,6 +1668,7 @@ class MainWindow(QMainWindow):
     def _on_capture_completed(self, args: CaptureCompletedArgs) -> None:
         self._update_actions()
         was_live = self._live_session is not None
+        live_first = self._live_first
         self._live_session = self._live_source = self._running_capture = None
 
         if not args.success:
@@ -1518,7 +1689,7 @@ class MainWindow(QMainWindow):
         self.current_file = None
         self._update_title()
         aligned = ""
-        if self.driver is not None and self.driver.driver_type == AnalyzerDriverType.MULTI:
+        if self.driver is not None and self.driver.board_count > 1:
             # Before loading, so the display and the decoders see the corrected samples.
             per_device = self.driver.channels_per_device
             self._remember_unaligned(args.session)
@@ -1532,8 +1703,19 @@ class MainWindow(QMainWindow):
                 aligned = "; " + report
         # Before loading: the capture change decodes with the new decoders once.
         self._apply_simulation_decoders(args.session)
-        # After a live display the view stays where the user watched the samples arrive.
-        self.load_session(args.session, reset_view=not was_live)
+        # After a live display the view stays where the user watched the samples arrive, and the
+        # edge index of the live display is kept (a capture on disk is not read again).
+        dropped = args.first_sample - live_first
+        if was_live and self.model.finish_live(args.session, args.first_sample):
+            if dropped:
+                self.model.set_view(self.model.first_sample - dropped, self.model.visible_samples)
+            self._sync_view_controls()
+            self._update_info_panel()
+            self._update_actions()
+        else:
+            self.load_session(args.session, reset_view=not was_live)
+        if self.model.on_disk and self.provider.instances:
+            self.decoder_manager.status_label.setText("Recorded to disk: press Decode to decode it")
         self.statusBar().showMessage(
             f"Captured {to_thousands(args.session.total_samples)} samples "
             f"at {to_large_frequency(args.session.frequency)}{aligned}"
@@ -1580,7 +1762,7 @@ class MainWindow(QMainWindow):
         session = self.model.session
         if session is None:
             return
-        if self.driver is not None and self.driver.driver_type == AnalyzerDriverType.MULTI:
+        if self.driver is not None and self.driver.board_count > 1:
             per_device: Optional[int] = self.driver.channels_per_device
         else:
             per_device = alignment.channels_per_device_of(session)
@@ -1627,6 +1809,8 @@ class MainWindow(QMainWindow):
         messages.info(self, "Align boards", "The boards were aligned.", report.replace("; ", "\n"))
 
     def load_session(self, session: CaptureSession, reset_view: bool = True) -> None:
+        # Another capture: a state analysis shown before is no longer the way back
+        self._timing_capture = None
         self.model.set_session(session)
         if reset_view:
             total = self.model.sample_count
@@ -1677,8 +1861,13 @@ class MainWindow(QMainWindow):
     def open_capture_file(self, path: str) -> None:
         """Load a capture file, as the *Open* menu entry and the CLI do."""
         try:
-            exported = capture_io.load_capture(path)
-        except (OSError, ValueError) as error:
+            if path.lower().endswith(".sr"):
+                from ..core import sigrok_session
+
+                exported = capture_io.ExportedCapture(sigrok_session.load_session(path), [])
+            else:
+                exported = capture_io.load_capture(path)
+        except (OSError, ValueError, KeyError) as error:
             messages.error(self, "Open capture", f"{os.path.basename(path)} could not be opened.", str(error))
             return
 
@@ -1700,8 +1889,27 @@ class MainWindow(QMainWindow):
         else:
             self.save_capture_as()
 
+    def _too_large_to_copy(self, operation: str) -> bool:
+        """A capture recorded to disk that does not fit into memory: saving and exporting would
+        read all of it at once. Shows why and returns ``True`` then."""
+        session = self.model.session
+        if session is None or not self.model.on_disk:
+            return False
+        size = self.model.sample_count * len(session.capture_channels)
+        if size <= MAX_SAMPLE_BYTES:
+            return False
+        messages.warning(
+            self,
+            operation,
+            f"This capture was recorded to disk and holds {to_thousands(size)} samples, too many "
+            "to save or export at once.",
+            f"Captures of up to {to_thousands(MAX_SAMPLE_BYTES)} samples over all channels can be "
+            "saved or exported.",
+        )
+        return True
+
     def save_capture_as(self) -> None:
-        if self.model.session is None:
+        if self.model.session is None or self._too_large_to_copy("Save capture"):
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
@@ -1716,6 +1924,8 @@ class MainWindow(QMainWindow):
         self._write_capture(path)
 
     def _write_capture(self, path: str) -> None:
+        if self._too_large_to_copy("Save capture"):
+            return
         try:
             capture_io.save_capture(path, self.model.session, self.model.regions)
         except (OSError, ValueError) as error:
@@ -1728,11 +1938,20 @@ class MainWindow(QMainWindow):
 
     def export_capture(self, kind: str) -> None:
         session = self.model.session
-        if session is None:
+        # A sigrok session is written block by block, also from a capture on disk
+        if session is None or (kind != "sr" and self._too_large_to_copy("Export")):
             return
 
         base = os.path.splitext(os.path.basename(self.current_file or "capture"))[0]
-        if kind == "csv":
+        if kind == "sr":
+            from ..core import sigrok_session
+
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export as sigrok session", f"{base}.sr", "sigrok session (*.sr)"
+            )
+            exporter = sigrok_session.save_session
+            extension = ".sr"
+        elif kind == "csv":
             path, _ = QFileDialog.getSaveFileName(
                 self, "Export as CSV", f"{base}.csv", "Comma separated values (*.csv)"
             )
@@ -1834,8 +2053,7 @@ class MainWindow(QMainWindow):
         if session is not None and session.capture_channels:
             return session.clone_settings()
 
-        driver_type = self.driver.driver_type if self.driver else AnalyzerDriverType.SERIAL
-        data = settings.get_settings(capture_settings_file(driver_type))
+        data = settings.get_settings(capture_settings_file(self.driver))
         if not data:
             return None
         try:
@@ -1894,8 +2112,8 @@ class MainWindow(QMainWindow):
             data = capture_io.session_to_dict(
                 profile.capture_settings.clone_settings(), include_samples=False
             )
-            for driver_type in AnalyzerDriverType:
-                settings.persist_settings(capture_settings_file(driver_type), data)
+            for file_name in all_capture_settings_files():
+                settings.persist_settings(file_name, data)
 
         self.decoder_manager.load_configuration(profile.decoder_configuration)
         self.statusBar().showMessage(
@@ -2223,9 +2441,16 @@ class MainWindow(QMainWindow):
 
         self.capture_button.setEnabled(is_real_device and not capturing)
         self.repeat_button.setEnabled(is_real_device and has_capture and not capturing)
+        self.save_button.setEnabled(has_capture)
+        self.open_button.setEnabled(not capturing)
+        for button in (self.search_tool_button, self.measure_tool_button):
+            button.setEnabled(has_capture)
+        self.settings_button.setEnabled(is_real_device and not capturing)
+        self.quick_capture.setEnabled(not capturing)
         self.abort_button.setEnabled(capturing)
         self.action_capture.setEnabled(self.capture_button.isEnabled())
-        self.action_repeat.setEnabled(self.repeat_button.isEnabled())
+        self.action_quick_capture.setEnabled(self.capture_button.isEnabled())
+        self.action_repeat.setEnabled(is_real_device and has_capture and not capturing)
         self.action_stop.setEnabled(capturing)
 
         self.connect_button.setEnabled(not capturing)
@@ -2238,19 +2463,18 @@ class MainWindow(QMainWindow):
 
         self.action_save.setEnabled(has_capture)
         self.action_save_as.setEnabled(has_capture)
+        for action in self._capture_actions:
+            action.setEnabled(has_capture and not capturing)
+        self.action_back_to_timing.setEnabled(self._timing_capture is not None and not capturing)
         self.action_align.setEnabled(has_capture and not capturing)
         self.action_export_csv.setEnabled(has_capture)
         self.action_export_vcd.setEnabled(has_capture)
         self.action_device_info.setEnabled(is_real_device)
-        self.action_bootloader.setEnabled(self._has_pico_device() and not capturing)
-        self.action_board_test.setEnabled(self._has_real_device() and not capturing)
+        self.action_bootloader.setEnabled(self._has_bootloader_device() and not capturing)
+        self.action_board_test.setEnabled(is_real_device and self.driver.has_self_test and not capturing)
         self.action_simulation.setEnabled(not capturing)
         self.action_firmware.setEnabled(not capturing)
-        self.action_network_settings.setEnabled(
-            is_real_device
-            and self.driver.driver_type == AnalyzerDriverType.SERIAL
-            and "WIFI" in (self.driver.device_version or "")
-        )
+        self.action_network_settings.setEnabled(is_real_device and self.driver.supports_network_config)
         self.fit_button.setEnabled(has_capture)
         self.trigger_button.setEnabled(has_capture)
 

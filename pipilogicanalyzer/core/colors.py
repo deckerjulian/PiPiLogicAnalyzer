@@ -14,27 +14,35 @@ from PySide6.QtGui import QColor
 
 from ..driver.models import AnalyzerChannel
 
-BG_CHANNEL_COLORS = (QColor(36, 36, 36), QColor(28, 28, 28))
-USER_LINE_COLOR = QColor(0, 255, 255)
-TRIGGER_LINE_COLOR = QColor(255, 255, 255)
-BURST_LINE_COLOR = QColor(240, 255, 255)
-SAMPLE_LINE_COLOR = QColor(60, 60, 60)
-SAMPLE_DASH_COLOR = QColor(60, 60, 60, 60)
+#: Waveform background: two close tones, so the rows stay apart without stripes
+BG_CHANNEL_COLORS = (QColor(28, 28, 31), QColor(31, 31, 35))
+#: Line between two channel rows
+ROW_SEPARATOR_COLOR = QColor(44, 44, 49)
+#: Vertical time grid of the waveform, at the labelled ticks of the ruler and between them
+GRID_MAJOR_COLOR = QColor(58, 58, 64)
+GRID_MINOR_COLOR = QColor(40, 40, 45)
+USER_LINE_COLOR = QColor(90, 209, 230)
+TRIGGER_LINE_COLOR = QColor(240, 165, 60)
+BURST_LINE_COLOR = QColor(225, 225, 232)
+SAMPLE_LINE_COLOR = QColor(52, 52, 58)
+SAMPLE_DASH_COLOR = QColor(60, 60, 66, 60)
 TEXT_COLOR = QColor(255, 255, 255)
-SELECTION_COLOR = QColor(255, 255, 255, 128)
+SELECTION_COLOR = QColor(90, 140, 220, 70)
+#: Measurement cursors A and B, named markers (bookmarks) and the matches of a search
+CURSOR_COLORS = {"A": QColor(98, 196, 255), "B": QColor(255, 128, 196)}
+BOOKMARK_COLOR = QColor(140, 214, 120)
+SEARCH_HIT_COLOR = QColor(255, 214, 90, 150)
+SEARCH_CURRENT_COLOR = QColor(255, 214, 90)
 # Regions are drawn on top of the waveforms; keep them translucent enough to
 # read the signals through them (the original used an alpha of 128).
 DEFAULT_REGION_COLOR = QColor(255, 255, 255, 64)
 
+#: Channel colours of a new capture: 16 distinct hues of similar brightness, softer than pure
+#: RGB, which read well on the dark background and next to each other (channel n: entry n % 16).
+#: Captures keep the colours stored in their files.
 _PALETTE_HEX = (
-    "#FF7333", "#33FF57", "#3357FF", "#FF33A1", "#FFBD33", "#33FFF6", "#BD33FF", "#57FF33",
-    "#5733FF", "#33FFBD", "#FF33BD", "#FF5733", "#BDFF33", "#33FF57", "#FF33F6", "#F6FF33",
-    "#33FF73", "#FF5733", "#FF33C1", "#33FF85", "#33C1FF", "#C1FF33", "#7333FF", "#FF3385",
-    "#3385FF", "#85FF33", "#33FF99", "#9933FF", "#99FF33", "#FF3399", "#FF9C33", "#FF33E7",
-    "#E733FF", "#33E7FF", "#FF33C7", "#C733FF", "#FF338E", "#338EFF", "#8EFF33", "#FF338E",
-    "#33FF9C", "#FF9C33", "#339CFF", "#FF339C", "#9C33FF", "#FF8E33", "#33E733", "#339CFF",
-    "#9CFF33", "#FF339C", "#FF9C33", "#33FF9C", "#FF33E7", "#E7FF33", "#33FFC7", "#C7FF33",
-    "#33F6FF", "#FF5733", "#FF33F6", "#F6FF33", "#5733FF", "#33BDFF", "#BD33FF", "#33FFBD",
+    "#F2A33A", "#56B6F7", "#6CCB85", "#EF6F78", "#AD8AF0", "#48CCC0", "#F0CF58", "#E685CB",
+    "#8AAEFF", "#A2CF62", "#FF9466", "#5FC4E6", "#D8A472", "#B3A5F2", "#76D3A6", "#E3DB78",
 )
 
 PALETTE: tuple[QColor, ...] = tuple(QColor(value) for value in _PALETTE_HEX)

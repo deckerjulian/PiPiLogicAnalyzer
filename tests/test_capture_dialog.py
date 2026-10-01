@@ -22,10 +22,8 @@ class FakeDriver(EmulatedAnalyzerDriver):
         super().__init__(1)
 
     @property
-    def driver_type(self):
-        from pipilogicanalyzer.driver.base import AnalyzerDriverType
-
-        return AnalyzerDriverType.SERIAL
+    def is_hardware(self) -> bool:
+        return True
 
     @property
     def blast_frequency(self) -> int:

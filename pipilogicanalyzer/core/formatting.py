@@ -52,3 +52,33 @@ def to_inferred_frequency(duration: float) -> str:
 
 def to_thousands(value: int) -> str:
     return f"{value:,}"
+
+
+def to_bytes(count: float) -> str:
+    """A size in bytes with the largest sensible binary unit, e.g. ``1.5 GB``."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(count) < 1024:
+            return f"{count:.0f} {unit}" if unit == "B" else f"{count:.1f} {unit}"
+        count /= 1024
+    return f"{count:.1f} TB"
+
+
+_TIME_UNITS = {"": 1.0, "s": 1.0, "ms": 1e-3, "us": 1e-6, "µs": 1e-6, "ns": 1e-9, "ps": 1e-12}
+
+
+def parse_time(text: str) -> float:
+    """Seconds of a duration such as ``1.5 µs``, ``200ns``, ``10 ms`` or ``0.002`` (seconds)."""
+    value = text.strip().lower().replace(",", ".").replace(" ", "")
+    for unit in sorted(_TIME_UNITS, key=len, reverse=True):
+        if unit and value.endswith(unit):
+            number = value[: -len(unit)]
+            break
+    else:
+        unit, number = "", value
+    try:
+        seconds = float(number) * _TIME_UNITS[unit]
+    except ValueError:
+        raise ValueError(f"'{text}' is not a time such as 1.5 µs, 200 ns or 10 ms") from None
+    if seconds < 0:
+        raise ValueError("A time cannot be negative")
+    return seconds

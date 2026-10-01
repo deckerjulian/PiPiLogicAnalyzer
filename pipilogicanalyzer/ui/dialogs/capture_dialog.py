@@ -62,7 +62,8 @@ from PySide6.QtWidgets import (
 
 from ...core import colors, settings
 from ...core.capture_io import session_from_dict, session_to_dict
-from ...core.formatting import to_large_frequency, to_small_time, to_thousands
+from ...core.formatting import to_bytes, to_large_frequency, to_small_time, to_thousands
+from ...core.sample_store import disk_sample_bytes
 from ...core.profiles import (
     PROFILE_FILE_FILTER,
     Profile,
@@ -76,7 +77,10 @@ from ...driver.base import (
     CAPABILITY_CONTINUOUS_STREAM,
     CAPABILITY_IMMEDIATE_TRIGGER,
     CAPABILITY_STREAM_IMMEDIATE_ONLY,
+    CAPABILITY_STATE_MODE,
     CAPABILITY_THRESHOLD,
+    CAPABILITY_TRIGGER_CONDITIONS,
+    CAPABILITY_TRIGGER_SEQUENCE,
     MAX_MEASURED_LOOP_COUNT,
     MIN_MEASURED_POST_SAMPLES,
     AnalyzerDriverBase,
@@ -84,13 +88,12 @@ from ...driver.base import (
     CaptureLimits,
     pattern_fits,
 )
-from ...driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from ...driver.models import AnalyzerChannel, CaptureSession, ConditionKind, EdgeKind, TriggerType
 from .. import messages
 from ..theme import BORDER, set_role
 from ..icons import set_icon
 from .common import InlineMessage, button_box, dialog_layout, hint
 
-MAX_TRIGGER_CHANNELS = 24
 #: Labels of the acquisition modes of devices that have several
 ACQUISITION_LABELS = {
     ACQUISITION_BUFFER: "Buffer (device memory)",
@@ -99,10 +102,69 @@ ACQUISITION_LABELS = {
 CHANNELS_PER_ROW = 8
 
 
-def capture_settings_file(driver_type: AnalyzerDriverType) -> str:
-    """Settings file holding the last capture settings of a driver type."""
-    return f"capture-settings-{driver_type.value.lower()}.json"
+#: Kinds of devices whose last capture settings a loaded profile replaces, besides those stored already
+BUILT_IN_DRIVER_IDS = tuple(driver_type.value.lower() for driver_type in AnalyzerDriverType)
 
+
+#: Stages of a trigger sequence the application evaluates on a stream
+SOFTWARE_SEQUENCE_STAGES = 8
+
+
+def hardware_sequence_limits(capabilities: frozenset[str]) -> Optional[tuple[int, tuple[ConditionKind, ...]]]:
+    """Stages and condition kinds of the device's own trigger sequences (``None``: it has none)."""
+    stages = 0
+    kinds: tuple[ConditionKind, ...] = tuple(ConditionKind)
+    for item in capabilities:
+        if item == CAPABILITY_TRIGGER_SEQUENCE:
+            stages = stages or 4
+        elif item.startswith(CAPABILITY_TRIGGER_SEQUENCE + "="):
+            try:
+                stages = int(item.partition("=")[2].split(",")[0])
+            except ValueError:
+                stages = 4
+        elif item.startswith(CAPABILITY_TRIGGER_CONDITIONS):
+            names = item[len(CAPABILITY_TRIGGER_CONDITIONS):].replace(",", "/").split("/")
+            kinds = tuple(kind for kind in ConditionKind if kind.value in names)
+    return (stages, kinds) if stages > 0 else None
+
+
+def capture_settings_file(driver: Optional[AnalyzerDriverBase]) -> str:
+    """Settings file holding the last capture settings of a kind of device (a Pico board without one)."""
+    return f"capture-settings-{driver.driver_id if driver is not None else 'serial'}.json"
+
+
+def all_capture_settings_files() -> list[str]:
+    """The capture settings files of every kind of device, stored or not."""
+    names = {f"capture-settings-{driver_id}.json" for driver_id in BUILT_IN_DRIVER_IDS}
+    try:
+        names.update(
+            name for name in os.listdir(settings.settings_directory())
+            if name.startswith("capture-settings-") and name.endswith(".json")
+        )
+    except OSError:
+        pass
+    return sorted(names)
+
+
+
+class LargeSpinBox(QDoubleSpinBox):
+    """A whole number spin box beyond the 32 bits of QSpinBox (exact up to 2^53).
+
+    A stream recorded to disk can keep tens of billions of samples.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setDecimals(0)
+
+    def value(self) -> int:  # noqa: D401 - Qt override
+        return int(round(super().value()))
+
+    def minimum(self) -> int:  # noqa: D401 - Qt override
+        return int(super().minimum())
+
+    def maximum(self) -> int:  # noqa: D401 - Qt override
+        return int(super().maximum())
 
 class ChannelSelector(QWidget):
     """Checkbox + colour + name of one capture channel."""
@@ -200,7 +262,7 @@ class CaptureDialog(QDialog):
         #: Store the accepted settings as the next defaults (not when editing a profile).
         self.persist = persist
         self.selected_settings: Optional[CaptureSession] = None
-        self.settings_file = capture_settings_file(driver.driver_type)
+        self.settings_file = capture_settings_file(driver)
         self.profiles = profiles if profiles is not None else ProfileStore()
         #: Decoders stored alongside profiles saved from this dialog.
         self.decoder_configuration = decoder_configuration
@@ -209,6 +271,8 @@ class CaptureDialog(QDialog):
         except Exception:  # noqa: BLE001 - optional functions only
             self.capabilities = frozenset()
         self.limits: CaptureLimits = driver.get_limits([0])
+        #: settings are being restored: keep their values instead of the defaults of the controls
+        self._loading_session = False
 
         self.setWindowTitle("Capture settings")
         self.resize(1000, 720)
@@ -223,7 +287,7 @@ class CaptureDialog(QDialog):
         layout.addWidget(self.validation_label)
 
         if accept_text is None:
-            accept_text = "Continue" if driver.driver_type == AnalyzerDriverType.EMULATED else "Start capture"
+            accept_text = "Start capture" if driver.is_hardware else "Continue"
         buttons = button_box(self, accept_text, icon="record" if accept_text == "Start capture" else "arrow-right")
         self.profiles_button = buttons.addButton("Profiles", QDialogButtonBox.ResetRole)
         self.profiles_button.setToolTip("Save, export, import or apply capture profiles")
@@ -282,12 +346,18 @@ class CaptureDialog(QDialog):
 
         self.post_label = QLabel("Post-trigger samples:", group)
         grid.addWidget(self.post_label, 1, 4)
-        self.post_samples_box = QSpinBox(group)
+        self.post_samples_box = LargeSpinBox(group)
         self.post_samples_box.setGroupSeparatorShown(True)
         self.post_samples_box.setRange(0, 1_000_000)
         self.post_samples_box.setValue(1024)
         self.post_samples_box.setMinimumWidth(120)
         grid.addWidget(self.post_samples_box, 1, 5)
+
+        self.max_samples_button = QToolButton(group)
+        self.max_samples_button.setText("Max")
+        self.max_samples_button.setToolTip("The longest capture with these channels and this mode")
+        self.max_samples_button.clicked.connect(self.use_max_samples)
+        grid.addWidget(self.max_samples_button, 1, 6)
 
         self.summary_label = hint("", group, word_wrap=False)
         grid.addWidget(self.summary_label, 1, 0, 1, 3)
@@ -328,9 +398,18 @@ class CaptureDialog(QDialog):
             "Stream until Stop is pressed, keeping only the latest samples in memory:\n"
             "the sample count sets how many are kept."
         )
-        self.continuous_box.toggled.connect(lambda _checked: self._update_limits())
+        self.continuous_box.toggled.connect(self._on_continuous_toggled)
         grid.addWidget(self.continuous_box, 2, 2)
         self.continuous_box.setVisible(False)
+
+        self.disk_box = QCheckBox("Record to disk", group)
+        self.disk_box.setToolTip(
+            "Keep the stream in memory-mapped files on the disk instead of in memory:\n"
+            "much longer captures, limited by the free disk space. Decoders then run on request."
+        )
+        self.disk_box.toggled.connect(self._on_disk_toggled)
+        grid.addWidget(self.disk_box, 2, 3)
+        self.disk_box.setVisible(False)
 
         self.threshold_label = QLabel("Threshold:", group)
         grid.addWidget(self.threshold_label, 2, 4)
@@ -346,12 +425,67 @@ class CaptureDialog(QDialog):
         self.threshold_label.setVisible(has_threshold)
         self.threshold_box.setVisible(has_threshold)
 
+        # State mode: the samples are taken on the edges of an input instead of the internal clock
+        self.clock_box = QCheckBox("External clock:", group)
+        self.clock_box.setToolTip(
+            "State mode: take a sample on every edge of a clock input instead of at the sample rate"
+        )
+        self.clock_box.toggled.connect(self._update_clock_mode)
+        grid.addWidget(self.clock_box, 3, 0)
+        self.clock_channel_box = QComboBox(group)
+        for number in range(self.driver.channel_count):
+            self.clock_channel_box.addItem(f"Channel {number + 1}", number)
+        grid.addWidget(self.clock_channel_box, 3, 1)
+        self.clock_edge_box = QComboBox(group)
+        self.clock_edge_box.addItem("Rising ↑", EdgeKind.RISING)
+        self.clock_edge_box.addItem("Falling ↓", EdgeKind.FALLING)
+        grid.addWidget(self.clock_edge_box, 3, 2)
+        has_state_mode = CAPABILITY_STATE_MODE in self.capabilities
+        for widget in (self.clock_box, self.clock_channel_box, self.clock_edge_box):
+            widget.setVisible(has_state_mode)
+        self.clock_channel_box.setEnabled(False)
+        self.clock_edge_box.setEnabled(False)
+
         grid.setColumnStretch(3, 1)
         return group
+
+    def _update_clock_mode(self, checked: bool) -> None:
+        self.clock_channel_box.setEnabled(checked)
+        self.clock_edge_box.setEnabled(checked)
+        self.frequency_box.setEnabled(not checked)
+        self.rate_box.setEnabled(not checked)
 
     def _acquisition_mode_default(self) -> Optional[str]:
         modes = self.driver.acquisition_modes()
         return modes[0] if modes else None
+
+    def _on_continuous_toggled(self, checked: bool) -> None:
+        self._update_limits()
+        # An endless stream keeps as many of its latest samples as fit, unless the user says less.
+        if checked and not self._loading_session:
+            self.use_max_samples()
+
+    def use_max_samples(self) -> None:
+        """Sets the samples after the trigger to the most that fit with the samples before it."""
+        loops = self.burst_count_box.value() - 1 if self.burst_box.isChecked() else 0
+        # Without a trigger the samples before it are not captured (see build_session)
+        pre = 0 if self.immediate_radio.isChecked() else self.pre_samples_box.value()
+        room = (self.limits.max_total_samples - pre) // (loops + 1)
+        self.post_samples_box.setValue(max(min(room, self.post_samples_box.maximum()), self.post_samples_box.minimum()))
+
+    def _on_disk_toggled(self, checked: bool) -> None:
+        was_at_maximum = self.post_samples_box.value() >= self.post_samples_box.maximum()
+        self._update_limits()
+        # On disk a capture that filled the memory may grow to what the disk holds
+        if checked and was_at_maximum and not self._loading_session:
+            self.use_max_samples()
+
+    def to_disk(self) -> bool:
+        """The stream is recorded into memory-mapped files."""
+        return hasattr(self, "disk_box") and self.disk_box.isChecked() and self._stream_selected()
+
+    def _stream_selected(self) -> bool:
+        return self.acquisition_mode() == ACQUISITION_STREAM and ACQUISITION_STREAM in self.driver.acquisition_modes()
 
     def continuous(self) -> bool:
         """An endless stream is selected."""
@@ -525,7 +659,7 @@ class CaptureDialog(QDialog):
         pattern_layout.addWidget(QLabel("First channel:", self.pattern_panel), 0, 0)
         self.pattern_base_box = QSpinBox(self.pattern_panel)
         self.pattern_base_box.setRange(1, max(self.driver.channel_count, 1))
-        if self.driver.driver_type != AnalyzerDriverType.EMULATED:
+        if self.driver.is_hardware:
             self.pattern_base_box.setToolTip(
                 f"A pattern covers consecutive trigger inputs, usable channels: {self._pattern_groups_text()}"
             )
@@ -552,18 +686,54 @@ class CaptureDialog(QDialog):
         self.immediate_radio.setVisible(CAPABILITY_IMMEDIATE_TRIGGER in self.capabilities)
         layout.addWidget(self.immediate_radio)
 
+        self.hardware_sequence = hardware_sequence_limits(self.capabilities)
+        self.can_stream = ACQUISITION_STREAM in self.driver.acquisition_modes()
+        self.sequence_radio = QRadioButton(
+            "Sequence: stages of patterns, edges, pulse widths and gaps", group
+        )
+        self.sequence_radio.toggled.connect(self._update_trigger_mode)
+        layout.addWidget(self.sequence_radio)
+        from ..widgets.sequence_editor import SequenceEditor
+
+        # On a stream the application evaluates any sequence; the device only its own kinds
+        hardware_stages, hardware_kinds = self.hardware_sequence or (0, ())
+        self.sequence_editor = SequenceEditor(
+            [(number, f"Channel {number + 1}") for number in range(self.driver.channel_count)],
+            max(hardware_stages, SOFTWARE_SEQUENCE_STAGES if self.can_stream else 0) or 1,
+            tuple(ConditionKind) if self.can_stream else hardware_kinds,
+            group,
+        )
+        self.sequence_editor.setContentsMargins(22, 0, 0, 0)
+        layout.addWidget(self.sequence_editor)
+        has_sequences = self.driver.is_hardware and (self.hardware_sequence is not None or self.can_stream)
+        self.sequence_radio.setVisible(has_sequences)
+        self.sequence_editor.setVisible(False)
+
+        self.software_box = QCheckBox(
+            "Evaluate the trigger in the application (on a stream, at the stream rates)", group
+        )
+        self.software_box.setToolTip(
+            "The device streams without a trigger and the application looks for the trigger in the\n"
+            "samples; it keeps the samples before and after it. Works with every trigger, also when\n"
+            "the device itself has none in stream mode."
+        )
+        self.software_box.toggled.connect(self._on_software_toggled)
+        self.software_box.setVisible(self.driver.is_hardware and self.can_stream)
+        layout.addWidget(self.software_box)
+
         self.trigger_button_group = QButtonGroup(group)
         self.trigger_button_group.addButton(self.edge_radio)
         self.trigger_button_group.addButton(self.pattern_radio)
         self.trigger_button_group.addButton(self.immediate_radio)
+        self.trigger_button_group.addButton(self.sequence_radio)
 
         self._update_trigger_mode()
         return group
 
     # ------------------------------------------------------------- behaviour
     def _apply_driver_mode(self) -> None:
-        driver_type = self.driver.driver_type
-        if driver_type == AnalyzerDriverType.MULTI:
+        multi = self.driver.board_count > 1
+        if multi:
             # The board of the trigger channel starts the others through the trigger line, once.
             self.burst_box.setEnabled(False)
             self.burst_box.setToolTip("Burst mode is not available for a multi device set")
@@ -575,12 +745,13 @@ class CaptureDialog(QDialog):
             self.pattern_radio.setToolTip(
                 "The board of the first pattern channel compares the pattern and starts the other boards"
             )
-        elif driver_type == AnalyzerDriverType.EMULATED:
+        elif not self.driver.is_hardware:
             self.trigger_group.setVisible(False)
         if self.driver.blast_frequency <= 0:
             self.blast_box.setEnabled(False)
-            self.blast_box.setToolTip("This device does not support blast mode")
-            if driver_type == AnalyzerDriverType.DSLOGIC:
+            if multi:
+                self.blast_box.setToolTip("Blast mode is not available for a multi device set")
+            else:
                 self.blast_box.setVisible(False)
         if self.driver.max_loop_count <= 0:
             for widget in (self.burst_box, self.burst_count_box, self.measure_box):
@@ -590,17 +761,15 @@ class CaptureDialog(QDialog):
         box = self.trigger_channel_box
         box.clear()
         channels = self.driver.edge_trigger_channels()
-        multi = self.driver.driver_type == AnalyzerDriverType.MULTI
+        multi = self.driver.board_count > 1
         if multi:
             per_device = self.driver.channels_per_device
             for index in channels:
                 box.addItem(f"Channel {index + 1} (board {index // per_device + 1})", index)
         else:
-            # The single board firmware has 24 edge trigger inputs; other devices use every channel.
-            pico = self.driver.driver_type in (AnalyzerDriverType.SERIAL, AnalyzerDriverType.NETWORK)
-            for index in channels[:MAX_TRIGGER_CHANNELS] if pico else channels:
+            for index in channels:
                 box.addItem(f"Channel {index + 1}", index)
-        if self.driver.driver_type != AnalyzerDriverType.EMULATED and self.driver.has_external_trigger():
+        if self.driver.is_hardware and self.driver.has_external_trigger():
             box.addItem(
                 "External trigger (every board)" if multi else "External trigger",
                 self.driver.channel_count,
@@ -614,10 +783,7 @@ class CaptureDialog(QDialog):
 
     def _trigger_board_captures(self, session: CaptureSession) -> bool:
         """In a multi device set the board evaluating the trigger has to capture a channel."""
-        if (
-            self.driver.driver_type != AnalyzerDriverType.MULTI
-            or session.trigger_channel >= self.driver.channel_count
-        ):
+        if self.driver.board_count == 1 or session.trigger_channel >= self.driver.channel_count:
             return True
         per_device = self.driver.channels_per_device
         board = session.trigger_channel // per_device
@@ -650,7 +816,13 @@ class CaptureDialog(QDialog):
 
     def _update_limits(self) -> None:
         channels = self.enabled_channels() or [0]
-        self.limits = self.driver.get_limits(channels, self.acquisition_mode())
+        self.limits = self.driver.get_limits(
+            channels, self.acquisition_mode(), to_disk=self.to_disk(), continuous=self.continuous()
+        )
+        if hasattr(self, "software_box") and self.software_trigger():
+            from ...driver.software_trigger import software_trigger_limits
+
+            self.limits = software_trigger_limits(self.limits)
         self._refresh_rates()
         if not self.fixed_rates and not self.blast_box.isChecked():
             # A stream is limited by its link (the Pico: USB full speed)
@@ -669,6 +841,8 @@ class CaptureDialog(QDialog):
             f"Samples captured after the trigger (per burst)\n"
             f"Min: {to_thousands(self.limits.min_post_samples)}  Max: {to_thousands(self.limits.max_post_samples)}"
         )
+        if hasattr(self, "disk_box"):
+            self.disk_box.setVisible(self._stream_selected())
         if hasattr(self, "continuous_box"):
             self.continuous_box.setVisible(
                 CAPABILITY_CONTINUOUS_STREAM in self.capabilities
@@ -694,15 +868,19 @@ class CaptureDialog(QDialog):
         maximum = self.limits.max_total_samples
         duration = to_small_time(total / max(self.frequency_box.value(), 1))
         if self.continuous():
-            self.summary_label.setText(
+            text = (
                 f"Runs until stopped, keeps the last {to_thousands(total)} samples ({duration}), "
                 f"at most {to_thousands(maximum)}"
             )
         else:
-            self.summary_label.setText(
+            text = (
                 f"{to_thousands(total)} samples in total ({duration}), "
                 f"at most {to_thousands(maximum)} with these channels"
             )
+        if self.to_disk():
+            channels = max(len(self.enabled_channels()), 1)
+            text += f"; on disk: {to_bytes(total * channels * (2 if self.continuous() else 1))} of {to_bytes(disk_sample_bytes())} free"
+        self.summary_label.setText(text)
         set_role(self.summary_label, "error" if total > maximum else "hint")
 
     def _update_jitter(self) -> None:
@@ -728,6 +906,7 @@ class CaptureDialog(QDialog):
         only_immediate = (
             self.acquisition_mode() == ACQUISITION_STREAM
             and CAPABILITY_STREAM_IMMEDIATE_ONLY in self.capabilities
+            and not (hasattr(self, "software_box") and self.software_box.isChecked())
         )
         self.immediate_radio.setVisible(only_immediate or CAPABILITY_IMMEDIATE_TRIGGER in self.capabilities)
         self.edge_radio.setEnabled(not only_immediate)
@@ -737,11 +916,35 @@ class CaptureDialog(QDialog):
         elif self.immediate_radio.isChecked() and self.immediate_radio.isHidden():
             self.edge_radio.setChecked(True)
 
+    def _on_software_toggled(self, checked: bool) -> None:
+        if checked:
+            position = self.acquisition_box.findData(ACQUISITION_STREAM)
+            if position >= 0:
+                self.acquisition_box.setCurrentIndex(position)
+        self._apply_stream_trigger()
+        self._update_trigger_mode()
+        self._update_limits()
+
+    def software_trigger(self) -> bool:
+        """The application evaluates the trigger (only devices that stream)."""
+        return self.can_stream and self.driver.is_hardware and self.software_box.isChecked()
+
+    def _fits_hardware(self, sequence) -> bool:
+        if self.hardware_sequence is None:
+            return False
+        stages, kinds = self.hardware_sequence
+        return len(sequence.stages) <= stages and all(stage.condition.kind in kinds for stage in sequence.stages)
+
     def _update_trigger_mode(self) -> None:
         edge = self.edge_radio.isChecked()
         immediate = getattr(self, "immediate_radio", None) is not None and self.immediate_radio.isChecked()
+        sequence = getattr(self, "sequence_radio", None) is not None and self.sequence_radio.isChecked()
         self.edge_panel.setEnabled(edge)
-        self.pattern_panel.setEnabled(not edge and not immediate)
+        self.pattern_panel.setEnabled(not edge and not immediate and not sequence)
+        if hasattr(self, "sequence_editor"):
+            self.sequence_editor.setVisible(sequence)
+            if sequence and self.hardware_sequence is None and not self.software_box.isChecked():
+                self.software_box.setChecked(True)
         # Without a trigger every sample follows the start.
         self.pre_samples_box.setEnabled(not immediate and not self.blast_box.isChecked())
         if not edge and self.blast_box.isChecked():
@@ -801,6 +1004,7 @@ class CaptureDialog(QDialog):
         self.pattern_edit.clear()
         self.fast_trigger_box.setChecked(False)
         self.continuous_box.setChecked(False)
+        self.disk_box.setChecked(False)
         self.pattern_base_box.setValue(1)
         self.edge_radio.setChecked(True)
         if self.acquisition_box.count():
@@ -930,6 +1134,13 @@ class CaptureDialog(QDialog):
 
     def apply_session(self, session: CaptureSession) -> None:
         """Show the settings of ``session``: channels, timing and trigger."""
+        self._loading_session = True
+        try:
+            self._apply_session(session)
+        finally:
+            self._loading_session = False
+
+    def _apply_session(self, session: CaptureSession) -> None:
         self.reset_settings()
 
         for channel in session.capture_channels:
@@ -946,6 +1157,13 @@ class CaptureDialog(QDialog):
         if session.threshold_voltage is not None:
             self.threshold_box.setValue(session.threshold_voltage)
         self.continuous_box.setChecked(session.continuous)
+        self.disk_box.setChecked(session.to_disk)
+        if not self.software_box.isHidden():
+            self.software_box.setChecked(session.software_trigger and self.can_stream)
+        if session.clock_channel is not None and CAPABILITY_STATE_MODE in self.capabilities:
+            self.clock_box.setChecked(True)
+            self.clock_channel_box.setCurrentIndex(max(self.clock_channel_box.findData(session.clock_channel), 0))
+            self.clock_edge_box.setCurrentIndex(max(self.clock_edge_box.findData(session.clock_edge), 0))
 
         if session.trigger_type == TriggerType.BLAST and self.blast_box.isEnabled():
             self.blast_box.setChecked(True)
@@ -961,16 +1179,19 @@ class CaptureDialog(QDialog):
             self.post_samples_box.setValue(session.post_trigger_samples)
 
         self._update_channel_count()
-        driver_type = self.driver.driver_type
-        if driver_type == AnalyzerDriverType.EMULATED or session.trigger_type == TriggerType.SIMULATION:
+        if not self.driver.is_hardware or session.trigger_type == TriggerType.SIMULATION:
             return  # no trigger settings (simulated captures are generated, not triggered)
 
-        if session.trigger_type == TriggerType.IMMEDIATE:
+        if session.trigger_type == TriggerType.SEQUENCE:
+            if not self.sequence_radio.isHidden():
+                self.sequence_editor.set_sequence(session.trigger_sequence)
+                self.sequence_radio.setChecked(True)
+        elif session.trigger_type == TriggerType.IMMEDIATE:
             if self.immediate_radio.isVisible() or CAPABILITY_IMMEDIATE_TRIGGER in self.capabilities:
                 self.immediate_radio.setChecked(True)
         elif session.trigger_type in (TriggerType.EDGE, TriggerType.BLAST):
-            if driver_type == AnalyzerDriverType.MULTI and session.trigger_type == TriggerType.BLAST:
-                return  # a multi device set has no blast mode
+            if session.trigger_type == TriggerType.BLAST and self.driver.blast_frequency <= 0:
+                return  # e.g. a multi device set has no blast mode
             self.edge_radio.setChecked(True)
             position = self.trigger_channel_box.findData(session.trigger_channel)
             self.trigger_channel_box.setCurrentIndex(max(position, 0))
@@ -1028,6 +1249,7 @@ class CaptureDialog(QDialog):
         session.post_trigger_samples = self.post_samples_box.value()
         session.acquisition_mode = self.acquisition_mode() or ACQUISITION_BUFFER
         session.continuous = self.continuous()
+        session.to_disk = self.to_disk()
         if CAPABILITY_THRESHOLD in self.capabilities:
             session.threshold_voltage = round(self.threshold_box.value(), 2)
         immediate = self.immediate_radio.isChecked()
@@ -1057,7 +1279,9 @@ class CaptureDialog(QDialog):
                 return None
 
         channel_numbers = [c.channel_number for c in channels]
-        maximum = self.driver.get_limits(channel_numbers, self.acquisition_mode()).max_total_samples
+        maximum = self.driver.get_limits(
+            channel_numbers, self.acquisition_mode(), to_disk=session.to_disk, continuous=session.continuous
+        ).max_total_samples
         if session.pre_trigger_samples + session.post_trigger_samples * (loops + 1) > maximum:
             self._reject_settings(
                 f"The capture is too long: at most {to_thousands(maximum)} samples fit into the "
@@ -1076,10 +1300,44 @@ class CaptureDialog(QDialog):
             )
             return None
 
-        if self.driver.driver_type == AnalyzerDriverType.EMULATED:
+        if not self.driver.is_hardware:
             session.trigger_type = TriggerType.EDGE
             return session
 
+        session.software_trigger = self.software_trigger()
+        if session.software_trigger and session.acquisition_mode != ACQUISITION_STREAM:
+            self._reject_settings(
+                "A trigger evaluated by the application needs the stream acquisition.", self.acquisition_box
+            )
+            return None
+        if self.clock_box.isVisible() and self.clock_box.isChecked():
+            session.clock_channel = self.clock_channel_box.currentData()
+            session.clock_edge = self.clock_edge_box.currentData()
+
+        if self.sequence_radio.isChecked():
+            try:
+                sequence = self.sequence_editor.sequence()
+            except ValueError as error:
+                self._reject_settings(str(error), self.sequence_editor)
+                return None
+            limits = getattr(self.driver, "trigger_sequence_limits", lambda: None)()
+            if not session.software_trigger and limits and session.clock_channel is None and session.frequency > limits[2]:
+                self._reject_settings(
+                    f"The device evaluates trigger sequences up to {to_large_frequency(limits[2])}: lower the "
+                    "rate, or tick 'Evaluate the trigger in the application' to look for it in a stream.",
+                    self.frequency_box,
+                )
+                return None
+            if not session.software_trigger and not self._fits_hardware(sequence):
+                self._reject_settings(
+                    "The device cannot evaluate this sequence itself: tick 'Evaluate the trigger in the "
+                    "application', or use fewer stages and the conditions it supports.",
+                    self.software_box if self.can_stream else self.sequence_editor,
+                )
+                return None
+            session.trigger_type = TriggerType.SEQUENCE
+            session.trigger_sequence = sequence
+            return session
         if immediate:
             session.trigger_type = TriggerType.IMMEDIATE
         elif edge_mode:
@@ -1108,7 +1366,9 @@ class CaptureDialog(QDialog):
                     self.pattern_edit,
                 )
                 return None
-            if not pattern_fits(self.driver.pattern_trigger_groups(), base_channel, len(pattern)):
+            if not session.software_trigger and not pattern_fits(
+                self.driver.pattern_trigger_groups(), base_channel, len(pattern)
+            ):
                 self._reject_settings(
                     f"The pattern does not fit: channels {base_channel + 1} to "
                     f"{base_channel + len(pattern)} are not consecutive trigger inputs of one board. "

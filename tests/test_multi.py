@@ -8,15 +8,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from pipilogicanalyzer.driver import multi
+from pipilogicanalyzer.driver.pico import multi
 from pipilogicanalyzer.driver.base import (
     CAPABILITY_EDGE_TRIGGER_OUT,
-    COMPLEX_TRIGGER_DELAY,
     DEFAULT_PATTERN_GROUPS,
     CaptureError,
     CaptureLimits,
-    parse_pattern_groups,
 )
+from pipilogicanalyzer.driver.pico.protocol import COMPLEX_TRIGGER_DELAY, parse_pattern_groups
 from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 
 #: Capabilities of the firmware of this project on a Pico board.

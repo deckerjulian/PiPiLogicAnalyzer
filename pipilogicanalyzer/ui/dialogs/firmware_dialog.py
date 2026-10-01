@@ -32,8 +32,8 @@ from PySide6.QtWidgets import (
 
 from ...core import firmware
 from ...core.formatting import to_thousands
-from ...driver import detector
-from ...driver.analyzer import PiPiLogicAnalyzerDriver
+from ...driver.pico import detector
+from ...driver.pico.analyzer import PiPiLogicAnalyzerDriver
 from .. import messages
 from ..icons import set_icon
 from ..theme import set_role, set_variant
@@ -66,7 +66,7 @@ class ConnectedDevice:
 
 def query_analyzer(port: str) -> tuple[Optional[str], dict]:
     """Identification and device details of an analyzer that is not connected."""
-    driver = PiPiLogicAnalyzerDriver(port, connect_timeout=QUERY_TIMEOUT_S)
+    driver = PiPiLogicAnalyzerDriver(port, connect_timeout=QUERY_TIMEOUT_S, require_current_firmware=False)
     try:
         return driver.device_version, driver.device_details()
     finally:

@@ -28,11 +28,8 @@ from __future__ import annotations
 import threading
 from typing import Optional, Sequence, Union
 
-from .analyzer import PiPiLogicAnalyzerDriver
-from .base import (
-    COMPLEX_TRIGGER_DELAY,
-    EDGE_OUT_TRIGGER_DELAY,
-    FAST_TRIGGER_DELAY,
+from .analyzer import SELF_TEST_DESCRIPTION, PiPiLogicAnalyzerDriver
+from ..base import (
     AnalyzerDriverBase,
     AnalyzerDriverType,
     CaptureCompletedArgs,
@@ -43,15 +40,22 @@ from .base import (
     CAPABILITY_SELF_TEST,
     CaptureMode,
     DeviceConnectionError,
+    DeviceSection,
+    FirmwareOutdatedError,
     SelfTestResult,
     UnsupportedFeatureError,
-    parse_version,
     pattern_fits,
     capture_mode_for_bits,
     pattern_max_bits,
+)
+from .protocol import (
+    COMPLEX_TRIGGER_DELAY,
+    EDGE_OUT_TRIGGER_DELAY,
+    FAST_TRIGGER_DELAY,
+    parse_version,
     trigger_delay_samples,
 )
-from .models import AnalyzerChannel, CaptureSession, TriggerType
+from ..models import AnalyzerChannel, CaptureSession, TriggerType
 
 
 class MultiAnalyzerDriver(AnalyzerDriverBase):
@@ -74,17 +78,13 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
         except Exception as error:
             for device in self._devices:
                 device.dispose()
+            if isinstance(error, FirmwareOutdatedError):
+                raise
             raise DeviceConnectionError(f"Error connecting to the devices: {error}") from error
 
         master_version = None
         for index, device in enumerate(self._devices):
             version = parse_version(device.device_version)
-            if not version.is_valid:
-                self.dispose()
-                raise DeviceConnectionError(
-                    f"Invalid device version ({device.device_version}) found on device "
-                    f"{connection_strings[index]}"
-                )
             if master_version is None:
                 master_version = version
             elif (master_version.major, master_version.minor) != (version.major, version.minor):
@@ -138,6 +138,32 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
     def driver_type(self) -> AnalyzerDriverType:
         return AnalyzerDriverType.MULTI
 
+    def boards(self) -> list[AnalyzerDriverBase]:
+        return list(self._devices)
+
+    @property
+    def supports_bootloader(self) -> bool:
+        return True
+
+    @property
+    def has_self_test(self) -> bool:
+        return True
+
+    @property
+    def self_test_description(self) -> str:
+        return SELF_TEST_DESCRIPTION
+
+    def describe(self) -> list[DeviceSection]:
+        sections: list[DeviceSection] = [
+            (
+                "Multi device analyzer",
+                [("Devices", str(len(self._devices))), ("Identification", self.device_version or "-")],
+            )
+        ]
+        for number, device in enumerate(self._devices, start=1):
+            sections += [(f"Device {number}: {title}", rows) for title, rows in device.describe()]
+        return sections
+
     @property
     def is_network(self) -> bool:
         return False
@@ -162,7 +188,9 @@ class MultiAnalyzerDriver(AnalyzerDriverBase):
             [bit for device, group in zip(self._devices, split) for bit in device.sample_bits(group)]
         )
 
-    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
+    def get_limits(
+        self, channels: Sequence[int], acquisition_mode: Optional[str] = None, **_stream_options
+    ) -> CaptureLimits:
         split = self._split_channels_per_device(channels)
         limits = [device.get_limits(group) for device, group in zip(self._devices, split)]
         return CaptureLimits(

@@ -105,9 +105,13 @@ pico_generate_pio_header(${PROJECT_NAME}
 pico_set_program_name(PiPiLogicAnalyzer "PiPiLogicAnalyzer")
 # PiPiLogicAnalyzer 7, based on gusmanb's LogicAnalyzer 6.5. Hosts check "V<major>_<minor>": the
 # original 6.5 software accepts every version from V6_5 on and uses the same capture request.
-pico_set_program_version(PiPiLogicAnalyzer "7.1.1")
+pico_set_program_version(PiPiLogicAnalyzer "7.2.0")
 pico_set_program_url(PiPiLogicAnalyzer "https://github.com/deckerjulian/PiPiLogicAnalyzer")
-add_compile_definitions(FIRMWARE_VERSION="V7_1")
+add_compile_definitions(FIRMWARE_VERSION="V7_2")
+# Protocol between this firmware and the application (commands, requests, responses). The
+# application only works with exactly this protocol: raise it with every change of the protocol,
+# together with FIRMWARE_PROTOCOL in pipilogicanalyzer/driver/pico/protocol.py.
+add_compile_definitions(FIRMWARE_PROTOCOL=1)
 
 pico_enable_stdio_uart(PiPiLogicAnalyzer 0)
 pico_enable_stdio_usb(PiPiLogicAnalyzer 1)

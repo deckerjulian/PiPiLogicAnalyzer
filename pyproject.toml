@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pipilogicanalyzer"
-version = "7.1.1"
+version = "7.2.0"
 description = "Software and firmware for the RP2040/RP2350 logic analyzer, based on gusmanb's LogicAnalyzer"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dev = ["pytest>=7.4", "pytest-qt>=4.2", "ruff>=0.5"]
 
 [project.scripts]
 pipilogicanalyzer = "pipilogicanalyzer.app:main"
+pipilogicanalyzer-cli = "pipilogicanalyzer.cli:main"
 
 [project.gui-scripts]
 pipilogicanalyzer-gui = "pipilogicanalyzer.app:main"

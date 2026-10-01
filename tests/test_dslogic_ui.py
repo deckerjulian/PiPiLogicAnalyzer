@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -112,22 +113,23 @@ def test_edge_trigger_on_channel_32(pro32):
 
 
 def test_main_window_lists_and_connects_a_dslogic(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as module
+    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
     from pipilogicanalyzer.ui.main_window import MainWindow
 
     board = info(0x002A, super_speed=True)
     monkeypatch.setattr(usb, "list_devices", lambda: [board])
-    monkeypatch.setattr(module.firmware_images, "find_boot_drives", lambda: [])
+    monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
     device = FakeDSLogic(board)
     monkeypatch.setattr(
-        module.dslogic_driver, "DSLogicDriver",
+        dslogic_devices.dslogic_driver, "DSLogicDriver",
         lambda found: open_driver(device) if found is board else None,
     )
     window = MainWindow()
     try:
         window.refresh_ports()
         combo = window.port_combo
-        index = window._port_index(("dslogic", board.location))
+        index = window._port_index(dslogic_devices.usb_entry(board.location))
         assert index >= 0 and "U3Pro16" in combo.itemText(index)
         combo.setCurrentIndex(index)
         window.connect_device()
@@ -143,11 +145,13 @@ def test_main_window_lists_and_connects_a_dslogic(application, monkeypatch):
 
 def test_missing_bitstream_offers_the_download(application, monkeypatch):
     from pipilogicanalyzer.ui import main_window as module
+    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
     from pipilogicanalyzer.ui.main_window import MainWindow
 
     board = info(0x0020)
     monkeypatch.setattr(usb, "list_devices", lambda: [board])
-    monkeypatch.setattr(module.firmware_images, "find_boot_drives", lambda: [])
+    monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
     attempts = []
 
     def driver_factory(found):
@@ -157,13 +161,13 @@ def test_missing_bitstream_offers_the_download(application, monkeypatch):
         return open_driver(FakeDSLogic(found))
 
     downloads = []
-    monkeypatch.setattr(module.dslogic_driver, "DSLogicDriver", driver_factory)
-    monkeypatch.setattr(module.dslogic_resources, "download", lambda name: downloads.append(name))
+    monkeypatch.setattr(dslogic_devices.dslogic_driver, "DSLogicDriver", driver_factory)
+    monkeypatch.setattr(dslogic_devices.dslogic_resources, "download", lambda name: downloads.append(name))
     monkeypatch.setattr(module.messages, "choose", lambda *args, **kwargs: 0)
     window = MainWindow()
     try:
         window.refresh_ports()
-        window.port_combo.setCurrentIndex(window._port_index(("dslogic", board.location)))
+        window.port_combo.setCurrentIndex(window._port_index(dslogic_devices.usb_entry(board.location)))
         window.connect_device()
         assert downloads == ["DSLogicPlus.bin"]
         assert len(attempts) == 2 and window.driver is not None
@@ -176,24 +180,32 @@ def test_main_window_shows_a_stream_while_it_runs(application, monkeypatch):
     import numpy as np
 
     from pipilogicanalyzer.driver.dslogic import driver as driver_module
-    from pipilogicanalyzer.ui import main_window as module
+    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
     from pipilogicanalyzer.ui.main_window import MainWindow
     from test_dslogic_driver import session, stream_data
 
     monkeypatch.setattr(driver_module, "PROGRESS_INTERVAL", 0)
     board = info(0x0020)
     monkeypatch.setattr(usb, "list_devices", lambda: [board])
-    monkeypatch.setattr(module.firmware_images, "find_boot_drives", lambda: [])
+    monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
     device = FakeDSLogic(board)
-    monkeypatch.setattr(module.dslogic_driver, "DSLogicDriver", lambda found: open_driver(device))
+    monkeypatch.setattr(dslogic_devices.dslogic_driver, "DSLogicDriver", lambda found: open_driver(device))
     samples = 64 * 4096
     signals, chunks = stream_data(samples)
     device.bulk_in = [b"\x55\x55\x55\x55" + bytes(508)] + chunks
+    read = device.bulk_read
+
+    def paced_read(endpoint, length, timeout_ms):
+        time.sleep(0.005)  # a stream takes its time; a fast one shows only its end
+        return read(endpoint, length, timeout_ms)
+
+    device.bulk_read = paced_read
 
     window = MainWindow()
     try:
         window.refresh_ports()
-        window.port_combo.setCurrentIndex(window._port_index(("dslogic", board.location)))
+        window.port_combo.setCurrentIndex(window._port_index(dslogic_devices.usb_entry(board.location)))
         window.connect_device()
         seen = []
         window.model.view_changed.connect(
@@ -204,11 +216,12 @@ def test_main_window_shows_a_stream_while_it_runs(application, monkeypatch):
         capture = session([0, 1], frequency=1_000_000, pre=0, post=samples,
                           acquisition_mode=ACQUISITION_STREAM, trigger_type=TriggerType.IMMEDIATE)
         window._begin_capture(capture)
-        for _ in range(500):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
             application.processEvents()
             if not window.driver.is_capturing and window.model.session is capture:
                 break
-            device.started.wait(0.01)
+            time.sleep(0.002)
         assert window.model.session is capture and not window.model.is_live
         assert len(seen) > 3 and all(live for live, _count, _end in seen)
         # the view follows the end of the growing capture
@@ -251,16 +264,17 @@ def test_main_window_shows_an_endless_stream_in_a_moving_window(application, mon
 
     from pipilogicanalyzer.core.analysis import ChannelTransitions
     from pipilogicanalyzer.driver.dslogic import driver as driver_module
-    from pipilogicanalyzer.ui import main_window as module
+    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
+    from pipilogicanalyzer.ui.devices import pico as pico_devices
     from pipilogicanalyzer.ui.main_window import MainWindow
     from test_dslogic_driver import session, stream_data
 
     monkeypatch.setattr(driver_module, "PROGRESS_INTERVAL", 0)
     board = info(0x0020)
     monkeypatch.setattr(usb, "list_devices", lambda: [board])
-    monkeypatch.setattr(module.firmware_images, "find_boot_drives", lambda: [])
+    monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
     device = FakeDSLogic(board)
-    monkeypatch.setattr(module.dslogic_driver, "DSLogicDriver", lambda found: open_driver(device))
+    monkeypatch.setattr(dslogic_devices.dslogic_driver, "DSLogicDriver", lambda found: open_driver(device))
     streamed, keep = 64 * 4096, 64 * 500
     signals, chunks = stream_data(streamed)
     device.bulk_in = [b"\x55\x55\x55\x55" + bytes(508)] + chunks
@@ -268,7 +282,7 @@ def test_main_window_shows_an_endless_stream_in_a_moving_window(application, mon
     window = MainWindow()
     try:
         window.refresh_ports()
-        window.port_combo.setCurrentIndex(window._port_index(("dslogic", board.location)))
+        window.port_combo.setCurrentIndex(window._port_index(dslogic_devices.usb_entry(board.location)))
         window.connect_device()
         capture = session([0, 1], frequency=1_000_000, pre=0, post=keep, acquisition_mode=ACQUISITION_STREAM,
                           trigger_type=TriggerType.IMMEDIATE, continuous=True)
@@ -297,3 +311,46 @@ def test_main_window_shows_an_endless_stream_in_a_moving_window(application, mon
         assert np.array_equal(capture.capture_channels[0].samples, signals[0][-keep:])
     finally:
         window.close()
+
+
+def test_until_stopped_keeps_as_many_samples_as_fit(application):
+    driver = open_driver(FakeDSLogic(info(0x002D)))
+    dialog = CaptureDialog(driver)
+    try:
+        select(dialog, range(3))
+        dialog.acquisition_box.setCurrentIndex(dialog.acquisition_box.findData(ACQUISITION_STREAM))
+        dialog.edge_radio.setChecked(True)
+        dialog.pre_samples_box.setValue(512)
+        dialog.post_samples_box.setValue(30_000)
+        dialog.continuous_box.setChecked(True)
+        maximum = driver.get_limits(range(3), ACQUISITION_STREAM).max_total_samples
+        assert dialog.post_samples_box.value() == maximum - 512  # room for the samples before the trigger
+        dialog._accept()
+        assert dialog.selected_settings is not None
+        assert driver.capture_setup(dialog.selected_settings) is not None
+
+        # a kept count the user chose comes back as it was
+        dialog.post_samples_box.setValue(1_000_000)
+        dialog._accept()
+        again = CaptureDialog(driver)
+        try:
+            assert again.continuous_box.isChecked() and again.post_samples_box.value() == 1_000_000
+        finally:
+            again.close()
+    finally:
+        dialog.close()
+
+
+def test_the_max_button_fills_the_buffer(application):
+    driver = open_driver(FakeDSLogic(info(0x002D)))
+    dialog = CaptureDialog(driver)
+    try:
+        select(dialog, range(16))
+        dialog._update_limits()
+        dialog.edge_radio.setChecked(True)
+        dialog.pre_samples_box.setValue(1000)
+        dialog.max_samples_button.click()
+        limits = driver.get_limits(range(16), dialog.acquisition_mode())
+        assert dialog.pre_samples_box.value() + dialog.post_samples_box.value() == limits.max_total_samples
+    finally:
+        dialog.close()

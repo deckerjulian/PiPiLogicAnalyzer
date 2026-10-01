@@ -21,9 +21,12 @@ Differences with the original implementation:
   block forever waiting for data that was never sent;
 * errors are reported to the completion handler with a message instead of being
   swallowed;
-* the request layout follows the firmware version, so V6_0 devices (24 channels,
-  8 bit loop count) keep working next to V6_5 devices (32 channels, up to 65534
-  bursts) -- the V6_5 original only talks to V6_5 firmware.
+* only boards with the firmware of this application are opened (``PROTOCOL:<n>`` of the
+  identification, see ``protocol.FIRMWARE_PROTOCOL``); others have to be updated first;
+* trigger sequences (``TriggerType.SEQUENCE``) and the state mode
+  (``CaptureSession.clock_channel``) of this project's firmware: ``CMD_TRIGGER_SEQUENCE``
+  configures them, a capture request with trigger type 7 starts the capture. Both are only
+  offered when the firmware reports ``TRIGGER_SEQUENCE`` / ``STATE_MODE``.
 
 Driver activity is logged through :mod:`logging` (``pipilogicanalyzer.driver``),
 the counterpart of the ``DEBUG_MODE`` log added in V6_5.
@@ -39,20 +42,15 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from . import protocol
-from .base import (
+from . import info, protocol
+from ..base import (
     ACQUISITION_BUFFER,
     ACQUISITION_STREAM,
     CAPABILITY_CONTINUOUS_STREAM,
     CAPABILITY_STREAM,
     CAPABILITY_STREAM_IMMEDIATE_ONLY,
-    MAX_SAMPLE_BYTES,
     CaptureLimits,
     CaptureProgressArgs,
-    COMPLEX_TRIGGER_DELAY,
-    DEFAULT_PATTERN_GROUPS,
-    EDGE_OUT_TRIGGER_DELAY,
-    FAST_TRIGGER_DELAY,
     MAX_MEASURED_LOOP_COUNT,
     MIN_MEASURED_POST_SAMPLES,
     AnalyzerDriverBase,
@@ -64,24 +62,58 @@ from .base import (
     CAPABILITY_EDGE_TRIGGER_OUT,
     CAPABILITY_SELF_TEST,
     CAPABILITY_SIMULATION,
+    CAPABILITY_STATE_MODE,
+    CAPABILITY_TRIGGER_SEQUENCE,
     CaptureMode,
     DeviceConnectionError,
+    DeviceSection,
+    FirmwareOutdatedError,
     SelfTestResult,
     UnsupportedFeatureError,
-    parse_pattern_groups,
-    parse_self_test_line,
-    parse_version,
     pattern_fits,
     pattern_max_bits,
+    DISK_FULL_ERROR,
+    DiskWatch,
+    stream_sample_bytes,
+)
+from .protocol import (
+    COMPLEX_TRIGGER_DELAY,
+    EDGE_OUT_TRIGGER_DELAY,
+    FAST_TRIGGER_DELAY,
+    SEQUENCE_EDGES,
+    SEQUENCE_KINDS,
+    SEQUENCE_MAX_SAMPLES,
+    SEQUENCE_NO_LIMIT,
+    SequenceRequest,
+    SequenceStage,
+    ns_to_samples,
+    parse_pattern_groups,
+    parse_self_test_line,
+    parse_state_max_clock,
+    parse_trigger_sequence,
+    parse_version,
     trigger_delay_samples,
 )
-from ..core.sample_store import RingStore, SampleStore
-from ..core.simulation import SimulationPattern
-from .models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType
+from ...core.sample_store import DiskAllocator, MemoryAllocator, RingStore, SampleStore
+from ...core.simulation import SimulationPattern
+from ..models import (
+    AnalyzerChannel,
+    BurstInfo,
+    CaptureSession,
+    ConditionKind,
+    EdgeKind,
+    TriggerCondition,
+    TriggerSequence,
+    TriggerStage,
+    TriggerType,
+)
 from .transport import NetworkTransport, SerialTransport, Transport, TransportError
 
 _ADDRESS_PORT_RE = re.compile(r"^(\d+\.\d+\.\d+\.\d+):(\d+)$")
 _CHANNELS_RE = re.compile(r"^CHANNELS:(\d+)$")
+_PROTOCOL_RE = re.compile(r"^PROTOCOL:(\d+)$")
+#: Seconds to wait for the protocol line, which older firmware does not send
+PROTOCOL_TIMEOUT_S = 1.5
 _BUFFER_RE = re.compile(r"^BUFFER:(\d+)$")
 _FREQ_RE = re.compile(r"^FREQ:(\d+)$")
 _BLAST_RE = re.compile(r"^BLASTFREQ:(\d+)$")
@@ -99,6 +131,22 @@ STREAM_STALL_TIMEOUT = 3.0
 STREAM_STOP_TIMEOUT = 3.0
 #: Seconds between two progress events of a stream (live display)
 STREAM_PROGRESS_INTERVAL = 0.1
+
+#: The firmware ends a trigger sequence capture without samples when its evaluation fell behind
+SEQUENCE_OVERFLOW_ERROR = (
+    "The trigger sequence could not be evaluated as fast as the samples arrived, so the capture "
+    "was stopped without samples. Lower the sample rate or use channels that change less often."
+)
+#: Trigger types of a state mode capture (all evaluated as a trigger sequence by the firmware)
+STATE_MODE_TRIGGERS = (
+    TriggerType.IMMEDIATE,
+    TriggerType.EDGE,
+    TriggerType.COMPLEX,
+    TriggerType.FAST,
+    TriggerType.SEQUENCE,
+)
+#: Conditions of a state mode sequence: the samples have no time base
+STATE_MODE_CONDITIONS = frozenset({ConditionKind.PATTERN.value, ConditionKind.EDGE.value})
 
 #: Systick period used when the device reports no blast frequency.  The systick
 #: runs at the CPU clock, which is the blast frequency (200MHz -> 5ns on RP2040).
@@ -118,10 +166,28 @@ def unpack_channel_samples(raw_samples: np.ndarray, channel_index: int) -> np.nd
 INTERCEPTOR_SAMPLE_BITS = tuple(range(4, 28)) + (0, 1, 2, 3)
 
 
+#: Edge trigger inputs of the single board firmware
+EDGE_TRIGGER_INPUTS = 24
+
+SELF_TEST_DESCRIPTION = (
+    "The test checks the capture buffer, the trigger link and every channel input "
+    "using only the internal pull resistors, and records the pull pattern through the "
+    "normal and the blast capture path. Boards with input buffers or level shifters "
+    "report their channels as driven; that is expected there."
+)
+
+
 class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
     """Talks to one device over USB CDC or over TCP."""
 
-    def __init__(self, connection_string: str, connect_timeout: float = 10.0) -> None:
+    def __init__(
+        self, connection_string: str, connect_timeout: float = 10.0, require_current_firmware: bool = True
+    ) -> None:
+        """Opens the board; raises ``FirmwareOutdatedError`` unless it runs the current firmware.
+
+        ``require_current_firmware=False`` opens a board with any firmware, only to read its
+        identification or to restart it into the bootloader for an update.
+        """
         super().__init__()
         if not connection_string:
             raise ValueError("A connection string is required")
@@ -137,7 +203,10 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         self._blast_frequency = 0
         self._buffer_size = 0
         self._is_network = False
-        self._request_layout = protocol.LAYOUT_V6_0
+        self._request_layout = protocol.REQUEST_LAYOUT
+        #: ``PROTOCOL:<n>`` of the identification (``None``: older firmware without it)
+        self.protocol_version: Optional[int] = None
+        self._require_current_firmware = require_current_firmware
         self._capabilities: Optional[frozenset[str]] = None
         self._streaming = False
         self.connection_string = connection_string
@@ -167,18 +236,27 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
 
         self._version = self._transport.read_line(timeout=10.0)
         log.debug("Device version: %s", self._version)
-        version = parse_version(self._version)
-        if not version.is_valid:
-            raise DeviceConnectionError(
-                f"Invalid device version {self._version}, minimum supported version: "
-                f"V6_0"
-            )
-        self._request_layout = protocol.layout_for_version(version.major, version.minor)
+        if not parse_version(self._version).major:
+            raise DeviceConnectionError(f"Invalid device identification {self._version!r}")
 
         self._max_frequency = self._read_int_response(_FREQ_RE, "frequency")
         self._blast_frequency = self._read_int_response(_BLAST_RE, "blast frequency")
         self._buffer_size = self._read_int_response(_BUFFER_RE, "buffer size")
         self._channel_count = self._read_int_response(_CHANNELS_RE, "channel count")
+        # Older firmware ends the identification with the channels
+        try:
+            match = _PROTOCOL_RE.match(self._transport.read_line(timeout=PROTOCOL_TIMEOUT_S) or "")
+        except TransportError:
+            match = None
+        self.protocol_version = int(match.group(1)) if match else None
+        if self._require_current_firmware and self.protocol_version != protocol.FIRMWARE_PROTOCOL:
+            raise FirmwareOutdatedError(
+                f"The board runs {self._version}, which this version of PiPiLogicAnalyzer does not "
+                "work with. Install the firmware that comes with the application "
+                "(Device > Install or update firmware).",
+                self._version or "",
+                self.connection_string,
+            )
         log.debug(
             "Device initialized: freq=%d blast=%d buffer=%d channels=%d layout=%d bytes",
             self._max_frequency,
@@ -244,6 +322,30 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
     def driver_type(self) -> AnalyzerDriverType:
         return AnalyzerDriverType.NETWORK if self._is_network else AnalyzerDriverType.SERIAL
 
+    @property
+    def supports_bootloader(self) -> bool:
+        return True
+
+    @property
+    def supports_network_config(self) -> bool:
+        return not self._is_network and "WIFI" in (self._version or "")
+
+    def edge_trigger_channels(self) -> list[int]:
+        """The firmware of a single board has 24 edge trigger inputs."""
+        return list(range(min(self.channel_count, EDGE_TRIGGER_INPUTS)))
+
+    @property
+    def has_self_test(self) -> bool:
+        return True
+
+    @property
+    def self_test_description(self) -> str:
+        return SELF_TEST_DESCRIPTION
+
+    def describe(self) -> list[DeviceSection]:
+        return info.describe_board(self)
+
+
     # ---------------------------------------------------------------- capture
     def start_capture(
         self,
@@ -258,7 +360,11 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
             if not session.capture_channels:
                 return CaptureError.BAD_PARAMS
             if session.acquisition_mode == ACQUISITION_STREAM:
+                if session.clock_channel is not None:
+                    return CaptureError.UNSUPPORTED  # the stream samples at its rate only
                 return self._start_stream(session, completed_handler, internal_test)
+            if session.trigger_type == TriggerType.SEQUENCE or session.clock_channel is not None:
+                return self._start_sequence(session, completed_handler)
 
             if (
                 session.trigger_type == TriggerType.SIMULATION
@@ -313,6 +419,10 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         try:
             length_bytes = self._transport.read_exactly(4)
             length = int(np.frombuffer(length_bytes, dtype="<u4")[0])
+            if length == 0:
+                # Only a trigger sequence capture ends without samples: its evaluation fell behind
+                self._read_timestamps()
+                raise RuntimeError(SEQUENCE_OVERFLOW_ERROR)
 
             payload = self._transport.read_exactly(length * mode.bytes_per_sample)
             dtype = {1: "<u1", 2: "<u2", 4: "<u4"}[mode.bytes_per_sample]
@@ -340,6 +450,228 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 completed_handler,
             )
 
+    # ------------------------------------------------- trigger sequence / state
+    def trigger_sequence_limits(self) -> Optional[tuple[int, frozenset[str], int]]:
+        """Stages, condition kinds (``ConditionKind`` values) and highest sample rate of the
+        firmware's trigger sequences; ``None`` if the firmware has none."""
+        limits = parse_trigger_sequence(self.capabilities())
+        if limits is None:
+            return None
+        stages, kinds, rate = limits
+        return stages, kinds, min(rate, self.max_frequency) if rate else self.max_frequency
+
+    def supports_state_mode(self) -> bool:
+        """Samples on the edges of a clock channel (``CaptureSession.clock_channel``)."""
+        return CAPABILITY_STATE_MODE in self.capabilities()
+
+    @property
+    def state_max_clock(self) -> int:
+        """Highest clock of the state mode in Hz; 0 without state mode or when not reported."""
+        if not self.supports_state_mode():
+            return 0
+        return parse_state_max_clock(self.capabilities()) or 0
+
+    def state_clock_channels(self) -> list[int]:
+        """Channels usable as the clock of the state mode: every channel input (not the external
+        trigger input)."""
+        return list(range(self.channel_count)) if self.supports_state_mode() else []
+
+    def _sequence_stages(
+        self, session: CaptureSession, state_mode: bool
+    ) -> tuple[CaptureError, list[SequenceStage], list[int]]:
+        """Stages of the capture in samples and the channels they look at.
+
+        In state mode the edge and pattern triggers become a sequence of one stage and the
+        immediate trigger one without stages.
+        """
+        trigger = session.trigger_type
+        if state_mode:
+            if trigger not in STATE_MODE_TRIGGERS:
+                return CaptureError.BAD_PARAMS, [], []
+            if trigger == TriggerType.IMMEDIATE:
+                return CaptureError.NONE, [], []
+            if trigger == TriggerType.EDGE:
+                sequence = TriggerSequence([TriggerStage(TriggerCondition(
+                    kind=ConditionKind.EDGE,
+                    channel=session.trigger_channel,
+                    edge=EdgeKind.FALLING if session.trigger_inverted else EdgeKind.RISING,
+                ))])
+            elif trigger in (TriggerType.COMPLEX, TriggerType.FAST):
+                bits = session.trigger_bit_count
+                if not 1 <= bits <= 32:
+                    return CaptureError.BAD_PARAMS, [], []
+                mask = ((1 << bits) - 1) << session.trigger_channel
+                value = (session.trigger_pattern & ((1 << bits) - 1)) << session.trigger_channel
+                sequence = TriggerSequence([TriggerStage(TriggerCondition(
+                    kind=ConditionKind.PATTERN, mask=mask, value=value
+                ))])
+            else:
+                sequence = session.trigger_sequence or TriggerSequence()
+        else:
+            sequence = session.trigger_sequence or TriggerSequence()
+
+        limits = self.trigger_sequence_limits()
+        if limits is None:
+            # State mode without sequences in the firmware: immediate captures only
+            return (CaptureError.UNSUPPORTED if sequence.stages else CaptureError.NONE), [], []
+        max_stages, kinds, _rate = limits
+        if state_mode:
+            kinds = kinds & STATE_MODE_CONDITIONS
+        if not sequence.stages and not state_mode:
+            return CaptureError.BAD_PARAMS, [], []
+        if len(sequence.stages) > max_stages:
+            return CaptureError.BAD_PARAMS, [], []
+
+        frequency = session.frequency
+        stages: list[SequenceStage] = []
+        used: list[int] = []
+
+        def samples(nanoseconds: Optional[int], round_up: bool) -> Optional[int]:
+            if nanoseconds is None:
+                return None
+            if nanoseconds < 0:
+                raise ValueError("negative time")
+            value = ns_to_samples(nanoseconds, frequency, round_up)
+            if value > SEQUENCE_MAX_SAMPLES:
+                raise ValueError("time too long")
+            return value
+
+        for index, stage in enumerate(sequence.stages):
+            condition = stage.condition
+            kind = ConditionKind(condition.kind).value
+            if kind not in kinds:
+                if state_mode and kind in SEQUENCE_KINDS:
+                    return CaptureError.BAD_PARAMS, [], []  # pulse/gap need a time base
+                return CaptureError.UNSUPPORTED, [], []
+            if not 1 <= stage.count <= SEQUENCE_MAX_SAMPLES:
+                return CaptureError.BAD_PARAMS, [], []
+            if index and stage.within_ns is not None and state_mode:
+                return CaptureError.BAD_PARAMS, [], []
+            entry = SequenceStage(kind=SEQUENCE_KINDS[kind], count=stage.count)
+            try:
+                if index and stage.within_ns is not None:
+                    entry.within_samples = samples(stage.within_ns, True)
+                if kind == ConditionKind.PATTERN.value:
+                    if condition.mask < 0 or condition.mask >> self.channel_count:
+                        return CaptureError.BAD_PARAMS, [], []
+                    entry.mask = condition.mask
+                    entry.value = condition.value & condition.mask
+                    used.extend(bit for bit in range(self.channel_count) if condition.mask >> bit & 1)
+                else:
+                    if not 0 <= condition.channel < self.channel_count:
+                        return CaptureError.BAD_PARAMS, [], []
+                    entry.channel = condition.channel
+                    entry.edge = SEQUENCE_EDGES[EdgeKind(condition.edge).value]
+                    used.append(condition.channel)
+                if kind == ConditionKind.PULSE.value:
+                    # +-1 sample: the limits err on the side of accepting a pulse
+                    minimum = samples(condition.min_ns, False)
+                    maximum = samples(condition.max_ns, True)
+                    entry.min_samples = minimum or 0
+                    entry.max_samples = SEQUENCE_NO_LIMIT if maximum is None else maximum
+                    if maximum is not None and maximum < entry.min_samples:
+                        return CaptureError.BAD_PARAMS, [], []
+                elif kind == ConditionKind.GAP.value:
+                    if not condition.min_ns:
+                        return CaptureError.BAD_PARAMS, [], []
+                    entry.min_samples = max(samples(condition.min_ns, True) or 0, 1)
+            except ValueError:
+                return CaptureError.BAD_PARAMS, [], []
+            stages.append(entry)
+        return CaptureError.NONE, stages, used
+
+    def _start_sequence(
+        self, session: CaptureSession, completed_handler: Optional[CaptureCompletedHandler]
+    ) -> CaptureError:
+        state_mode = session.clock_channel is not None
+        if state_mode and not self.supports_state_mode():
+            return CaptureError.UNSUPPORTED
+        if session.trigger_type == TriggerType.SEQUENCE and self.trigger_sequence_limits() is None:
+            return CaptureError.UNSUPPORTED
+
+        error, stages, trigger_channels = self._sequence_stages(session, state_mode)
+        if error != CaptureError.NONE:
+            log.debug("Sequence capture rejected: %s", error.value)
+            return error
+
+        channels = session.channel_numbers
+        if min(channels) < 0 or max(channels) >= self.channel_count:
+            return CaptureError.BAD_PARAMS
+        if state_mode and (
+            not 0 <= session.clock_channel < self.channel_count
+            or EdgeKind(session.clock_edge) == EdgeKind.ANY  # one edge of the clock only
+        ):
+            return CaptureError.BAD_PARAMS
+
+        # The firmware evaluates the stages on the samples: their channels must be part of them
+        mode = self.get_capture_mode(list(channels) + trigger_channels)
+        limits = self.get_limits(list(channels) + trigger_channels)
+        if not (
+            session.loop_count == 0
+            and limits.min_pre_samples <= session.pre_trigger_samples <= limits.max_pre_samples
+            and limits.min_post_samples <= session.post_trigger_samples <= limits.max_post_samples
+            and session.pre_trigger_samples + session.post_trigger_samples <= limits.max_total_samples
+        ):
+            log.debug("Sequence capture rejected: invalid sample counts")
+            return CaptureError.BAD_PARAMS
+        if not state_mode:
+            limit = self.trigger_sequence_limits()
+            max_rate = limit[2] if limit else self.max_frequency
+            if not self.min_frequency <= session.frequency <= max_rate:
+                log.debug("Sequence capture rejected: %d Hz, at most %d Hz", session.frequency, max_rate)
+                return CaptureError.BAD_PARAMS
+
+        sequence = SequenceRequest(
+            stages=stages,
+            state_mode=state_mode,
+            clock_channel=session.clock_channel if state_mode else 0,
+            clock_falling=state_mode and EdgeKind(session.clock_edge) == EdgeKind.FALLING,
+        )
+        request = protocol.CaptureRequest(
+            trigger_type=protocol.SEQUENCE_TRIGGER_TYPE,
+            channels=channels,
+            channel_count=len(channels),
+            # Ignored by the firmware in state mode
+            frequency=max(session.frequency, 0),
+            pre_samples=session.pre_trigger_samples,
+            post_samples=session.post_trigger_samples,
+            capture_mode=int(mode),
+        )
+
+        try:
+            self._transport.reset_input()
+            self._transport.write(protocol.command_packet(protocol.CMD_TRIGGER_SEQUENCE, sequence.pack()))
+            answer = self._transport.read_line(timeout=10.0)
+            if answer != "SEQUENCE_OK":
+                log.debug("Error configuring the trigger sequence, device response: %r", answer)
+                return CaptureError.HARDWARE_ERROR
+            self._transport.write(
+                protocol.command_packet(protocol.CMD_START_CAPTURE, request.pack(self._request_layout))
+            )
+            result = self._transport.read_line(timeout=10.0)
+        except (TransportError, OSError) as error:
+            log.debug("Error starting the sequence capture: %s", error)
+            return CaptureError.HARDWARE_ERROR
+
+        if result != "CAPTURE_STARTED":
+            log.debug("Error starting the sequence capture, device response: %r", result)
+            return CaptureError.HARDWARE_ERROR
+        log.debug(
+            "%s capture started (%d stages, mode %s)",
+            "State" if state_mode else "Sequence", len(stages), mode.name,
+        )
+
+        self._capturing = True
+        self._abort.clear()
+        self._capture_thread = threading.Thread(
+            target=self._read_capture,
+            args=(session, mode, completed_handler),
+            name="pipilogicanalyzer-capture",
+            daemon=True,
+        )
+        self._capture_thread.start()
+        return CaptureError.NONE
+
     # ----------------------------------------------------------------- stream
     @property
     def stream_bandwidth(self) -> int:
@@ -365,10 +697,17 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         mode = self.get_capture_mode(channels or [0])
         return min(self.stream_bandwidth // mode.bytes_per_sample, self.max_frequency)
 
-    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
+    def get_limits(
+        self,
+        channels: Sequence[int],
+        acquisition_mode: Optional[str] = None,
+        *,
+        to_disk: bool = False,
+        continuous: bool = False,
+    ) -> CaptureLimits:
         if acquisition_mode != ACQUISITION_STREAM:
             return super().get_limits(channels, acquisition_mode)
-        total = MAX_SAMPLE_BYTES // max(len(list(channels)), 1)
+        total = max(stream_sample_bytes(to_disk, continuous) // max(len(list(channels)), 1), 1)
         return CaptureLimits(min_pre_samples=0, max_pre_samples=0, min_post_samples=1, max_post_samples=total)
 
     def _start_stream(
@@ -378,7 +717,9 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         internal_test: bool = False,
     ) -> CaptureError:
         channels = session.channel_numbers
-        limits = self.get_limits(channels, ACQUISITION_STREAM)
+        limits = self.get_limits(
+            channels, ACQUISITION_STREAM, to_disk=session.to_disk, continuous=session.continuous
+        )
         if not (
             self.stream_bandwidth
             and session.trigger_type == TriggerType.IMMEDIATE
@@ -438,7 +779,11 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         numbers = session.channel_numbers
         dtype = {1: "<u1", 2: "<u2", 4: "<u4"}[mode.bytes_per_sample]
         wanted = session.post_trigger_samples
-        store: SampleStore = RingStore(numbers, wanted) if session.continuous else SampleStore(numbers, wanted)
+        allocator = DiskAllocator() if session.to_disk else MemoryAllocator()
+        if session.continuous:
+            store: SampleStore = RingStore(numbers, wanted, allocator)
+        else:
+            store = SampleStore(numbers, wanted, allocator)
 
         def append(data: bytes) -> None:
             raw = np.frombuffer(data, dtype=dtype)
@@ -447,8 +792,9 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         # A chunk is only used once the next header shows the stream did not overflow meanwhile.
         held: Optional[bytes] = None
         stop_sent = False
-        overflow = False
+        overflow = disk_full = False
         reported = time.monotonic()
+        watch = DiskWatch() if session.to_disk else None
         try:
             while True:
                 size = int.from_bytes(self._transport.read_exactly(4, timeout=STREAM_STALL_TIMEOUT), "little")
@@ -462,6 +808,9 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 if not session.continuous and not stop_sent and store.total + len(held) // mode.bytes_per_sample >= wanted:
                     self._transport.write(bytes([protocol.CMD_ABORT_CAPTURE]))
                     stop_sent = True
+                if watch is not None and watch.low.is_set() and not stop_sent:
+                    self._transport.write(bytes([protocol.CMD_ABORT_CAPTURE]))
+                    stop_sent = disk_full = True
                 if store.total and time.monotonic() - reported >= STREAM_PROGRESS_INTERVAL:
                     reported = time.monotonic()
                     views, first = store.window()
@@ -470,6 +819,8 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 append(held)
         except Exception as error:  # noqa: BLE001 - reported to the UI
             self._capturing = self._streaming = False
+            if watch is not None:
+                watch.stop()
             if self._abort.is_set():
                 return
             log.debug("Error reading the stream: %s", error)
@@ -478,7 +829,9 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
             )
             return
 
-        samples, _first = store.result()
+        if watch is not None:
+            watch.stop()
+        samples, first = store.result()
         count = min((len(values) for values in samples.values()), default=0)
         for channel in session.capture_channels:
             channel.samples = samples[channel.channel_number][:count]
@@ -488,14 +841,15 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         session.bursts = None
         self._capturing = self._streaming = False
         log.debug("Stream complete: %d samples%s", count, ", overflow" if overflow else "")
-        error = None
+        error = DISK_FULL_ERROR if disk_full else None
         if overflow:
             error = (
                 "The USB connection could not keep up with the stream, so it stopped early. "
                 "Lower the rate or capture fewer channels."
             )
         self._raise_capture_completed(
-            CaptureCompletedArgs(success=count > 0, session=session, error=error), completed_handler
+            CaptureCompletedArgs(success=count > 0, session=session, error=error, first_sample=first),
+            completed_handler,
         )
 
     def _read_timestamps(self) -> np.ndarray:
@@ -732,11 +1086,8 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
 
     # ------------------------------------------------------------ board test
     def capabilities(self) -> frozenset[str]:
-        """Optional functions of the firmware, queried once and cached.
-
-        Firmware without the extension (the original 6.5 or older) answers
-        ``ERR_UNKNOWN_MSG``, which yields an empty set.
-        """
+        """Functions of the board, queried once and cached (they depend on the board and on
+        the connection, e.g. streams only over USB)."""
         if self._capabilities is not None:
             return self._capabilities
         if self._capturing:
@@ -757,6 +1108,9 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
                 item == CAPABILITY_STREAM or item.startswith(CAPABILITY_STREAM + "=") for item in items
             ):
                 items |= {CAPABILITY_CONTINUOUS_STREAM, CAPABILITY_STREAM_IMMEDIATE_ONLY}
+            # "TRIGGER_SEQUENCE=<stages>": also the plain name, so `in capabilities()` finds it
+            if any(item.startswith(CAPABILITY_TRIGGER_SEQUENCE + "=") for item in items):
+                items.add(CAPABILITY_TRIGGER_SEQUENCE)
             self._capabilities = frozenset(items)
         else:
             self._capabilities = frozenset()
@@ -764,10 +1118,10 @@ class PiPiLogicAnalyzerDriver(AnalyzerDriverBase):
         return self._capabilities
 
     def pattern_trigger_groups(self) -> tuple[tuple[int, int], ...]:
-        """Channel groups reported by the firmware; channels 1 to 16 for firmware without the report."""
+        """Channel groups reported by the firmware; none on boards without pattern triggers."""
         groups = parse_pattern_groups(self.capabilities())
         if groups is None:
-            return DEFAULT_PATTERN_GROUPS
+            return ()
         return tuple(
             (first, min(count, self.channel_count - first))
             for first, count in groups

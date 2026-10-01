@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication
 
 from . import __version__, qt_plugins
 from .core import settings
+from .core.sample_store import clean_disk_directory
 from .ui.icons import app_icon
 from .ui.main_window import MainWindow
 from .ui.theme import STYLESHEET, apply_palette
@@ -114,6 +115,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     application.setStyleSheet(STYLESHEET)
 
     application.setWindowIcon(app_icon())
+
+    # Stream files an earlier run could not delete while they were mapped (Windows)
+    clean_disk_directory()
 
     window = MainWindow(decoder_paths=tuple(arguments.decoders))
     if arguments.smoke_test:

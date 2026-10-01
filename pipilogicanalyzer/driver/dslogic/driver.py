@@ -27,8 +27,11 @@ from ..base import (
     CAPABILITY_PATTERN_GROUPS,
     CAPABILITY_SELF_TEST,
     CAPABILITY_THRESHOLD,
+    DISK_FULL_ERROR,
     MAX_SAMPLE_BYTES,
     AnalyzerDeviceInfo,
+    DiskWatch,
+    stream_sample_bytes,
     AnalyzerDriverBase,
     AnalyzerDriverType,
     CaptureCompletedArgs,
@@ -37,9 +40,10 @@ from ..base import (
     CaptureProgressArgs,
     CaptureLimits,
     DeviceConnectionError,
+    DeviceSection,
     SelfTestResult,
 )
-from ...core.sample_store import RingStore, SampleStore
+from ...core.sample_store import DiskAllocator, MemoryAllocator, RingStore, SampleStore
 from ..models import CaptureSession, TriggerType
 from . import protocol, resources, self_test
 from . import usb as usb_access
@@ -400,12 +404,20 @@ class DSLogicDriver(AnalyzerDriverBase):
             self.profile, self.info.super_speed, list(channels) or [0], _acquisition(acquisition_mode)
         )
 
-    def get_limits(self, channels: Sequence[int], acquisition_mode: Optional[str] = None) -> CaptureLimits:
+    def get_limits(
+        self,
+        channels: Sequence[int],
+        acquisition_mode: Optional[str] = None,
+        *,
+        to_disk: bool = False,
+        continuous: bool = False,
+    ) -> CaptureLimits:
         count = max(len(list(channels)), 1)
         depth = protocol.channel_depth(self.profile, count)
         memory = (MAX_SAMPLE_BYTES // count) & ~(protocol.SAMPLES_ALIGN - 1)
         if _acquisition(acquisition_mode) == AcquisitionMode.STREAM:
-            total = memory
+            total = (stream_sample_bytes(to_disk, continuous) // count) & ~(protocol.SAMPLES_ALIGN - 1)
+            total = max(min(total, protocol.STREAM_MAX_SAMPLES), protocol.SAMPLES_ALIGN)
             max_pre = depth * protocol.MAX_TRIGGER_PERCENT_STREAM // 100
         else:
             total = min(depth, memory)
@@ -443,11 +455,34 @@ class DSLogicDriver(AnalyzerDriverBase):
             details["SERIAL"] = self.info.serial_number
         return details
 
-    def enter_bootloader(self) -> bool:
-        return False
-
     def run_self_test(self) -> list[SelfTestResult]:
         return self_test.run_self_test(self)
+
+    @property
+    def has_self_test(self) -> bool:
+        return True
+
+    @property
+    def self_test_description(self) -> str:
+        return self_test.DESCRIPTION
+
+    def describe(self) -> list[DeviceSection]:
+        details = self.device_details()
+        rows = [
+            ("Model", details["MODEL"]),
+            ("Manufacturer", "DreamSourceLab"),
+            ("Firmware version", details["FIRMWARE"]),
+            ("FPGA version", details["FPGA"]),
+            ("Sample memory", details["MEMORY"]),
+        ]
+        connection = [
+            ("Type", "USB (DSLogic)"),
+            ("USB speed", details["USB"]),
+            ("USB location (bus:address)", details["LOCATION"]),
+        ]
+        if details.get("SERIAL"):
+            connection.append(("Serial number", details["SERIAL"]))
+        return [("Device", rows), ("Connection", connection)]
 
     # ------------------------------------------------------------- capture
     def trigger_spec(self, session: CaptureSession) -> Optional[TriggerSpec]:
@@ -484,7 +519,9 @@ class DSLogicDriver(AnalyzerDriverBase):
 
         pre = 0 if session.trigger_type == TriggerType.IMMEDIATE else session.pre_trigger_samples
         total = pre + session.post_trigger_samples
-        limits = self.get_limits(channels, session.acquisition_mode)
+        limits = self.get_limits(
+            channels, session.acquisition_mode, to_disk=session.to_disk, continuous=session.continuous
+        )
         if not (
             0 <= pre <= limits.max_pre_samples
             and session.post_trigger_samples >= 1
@@ -508,6 +545,7 @@ class DSLogicDriver(AnalyzerDriverBase):
             mode=mode,
             trigger=trigger,
             keep_samples=keep,
+            to_disk=session.to_disk and mode == AcquisitionMode.STREAM,
         )
 
     def start_capture(
@@ -612,10 +650,11 @@ class DSLogicDriver(AnalyzerDriverBase):
 
             expected = protocol.captured_bytes(setup, header)
             row = 8 * setup.channel_count  # 64 samples of every channel
+            allocator = DiskAllocator() if setup.to_disk else MemoryAllocator()
             if setup.keep_samples:
-                store: SampleStore = RingStore(setup.channels, setup.keep_samples)
+                store: SampleStore = RingStore(setup.channels, setup.keep_samples, allocator)
             else:
-                store = SampleStore(setup.channels, expected // row * protocol.ATOMIC_SAMPLES)
+                store = SampleStore(setup.channels, expected // row * protocol.ATOMIC_SAMPLES, allocator)
             # This thread only reads, so a read is always waiting for the device; unpacking in
             # between would slow a stream at the limit of USB 2 down to about 90 %.
             chunks: "queue.Queue[Optional[bytes]]" = queue.Queue()
@@ -628,7 +667,9 @@ class DSLogicDriver(AnalyzerDriverBase):
             )
             unpacker.start()
             received = 0
-            stopped = False
+            stopped = disk_full = False
+            # A full disk stops the stream like the user does, keeping what arrived
+            watch = DiskWatch(on_low=self._abort.set) if setup.to_disk else None
             chunk = protocol.transfer_size(setup)
             try:
                 while received < expected and not failures:
@@ -636,11 +677,14 @@ class DSLogicDriver(AnalyzerDriverBase):
                     data = self._read_some(min(chunk, remaining), STREAM_STALL_TIMEOUT if stream else None)
                     if data is None:
                         stopped = True
+                        disk_full = watch is not None and watch.low.is_set()
                         break
                     take = min(len(data), expected - received)
                     chunks.put(data if take == len(data) else data[:take])
                     received += take
             finally:
+                if watch is not None:
+                    watch.stop()
                 chunks.put(None)
                 unpacker.join()
             if failures:
@@ -653,7 +697,15 @@ class DSLogicDriver(AnalyzerDriverBase):
             self._store_samples(session, setup, header, samples, first)
             self._capturing = False
             log.debug("Capture complete: %d bytes, trigger at %d", received, header.real_pos)
-            self._raise_capture_completed(CaptureCompletedArgs(success=True, session=session), completed_handler)
+            self._raise_capture_completed(
+                CaptureCompletedArgs(
+                    success=True,
+                    session=session,
+                    error=DISK_FULL_ERROR if disk_full else None,
+                    first_sample=first,
+                ),
+                completed_handler,
+            )
         except Exception as error:  # noqa: BLE001 - reported to the UI
             if self._abort.is_set():
                 return self._finish_aborted()

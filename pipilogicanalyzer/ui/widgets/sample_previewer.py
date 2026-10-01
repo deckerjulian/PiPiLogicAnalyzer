@@ -27,10 +27,12 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ...core import colors
+from ..theme import ACCENT
 from ..view_model import CaptureViewModel
 
 PREVIEW_HEIGHT = 120
 MAX_PREVIEW_CHANNELS = 32
+OVERVIEW_BACKGROUND = (26, 26, 29)
 
 
 class SamplePreviewer(QWidget):
@@ -49,6 +51,7 @@ class SamplePreviewer(QWidget):
         self._dirty = True
 
         model.capture_changed.connect(self.invalidate)
+        model.samples_appended.connect(self.invalidate)
         model.channels_changed.connect(self.invalidate)
         model.view_changed.connect(self.update)
         model.regions_changed.connect(self.update)
@@ -75,58 +78,42 @@ class SamplePreviewer(QWidget):
             return
 
         buffer = np.zeros((height, width, 3), dtype=np.uint8)
-        buffer[:, :] = (34, 34, 34)
+        buffer[:, :] = OVERVIEW_BACKGROUND
 
         channel_height = height / len(channels)
-        boundaries = np.linspace(0, sample_count, width + 1).astype(np.int64)
-        boundaries[-1] = sample_count
-        starts = boundaries[:-1]
-        counts = np.maximum(np.diff(boundaries), 0)
-        reduce_positions = np.minimum(starts, sample_count - 1)
+        # From the edge index, not the samples: a column costs two searches, whatever it covers
+        # (a capture recorded to disk is never read at once)
+        boundaries = np.linspace(0, sample_count, width + 1)
 
         for index, channel in enumerate(channels):
-            samples = channel.samples
-            if samples is None or samples.size == 0:
+            transitions = self.model.transitions_for(channel)
+            if transitions is None or transitions.sample_count == 0:
                 continue
 
-            sums = np.add.reduceat(samples.astype(np.int64), reduce_positions)
-            # Columns with no samples inherit the value of the previous column.
-            sums = np.where(counts > 0, sums, 0)
-            effective = np.maximum(counts, 1)
-            any_high = sums > 0
-            any_low = sums < effective
-
-            # Columns that cover no sample at all (more pixels than samples).
-            empty = counts <= 0
-            if empty.any():
-                nearest = np.minimum(starts, sample_count - 1)
-                values = samples[nearest] != 0
-                any_high = np.where(empty, values, any_high)
-                any_low = np.where(empty, ~values, any_low)
+            level, edges_before = transitions.levels_and_edges(boundaries)
+            # A column with an edge is drawn as busy, so a fast signal reads as a continuous
+            # trace; the others at their level.
+            busy = np.diff(edges_before) > 0
+            only_high = (level != 0) & ~busy
+            only_low = (level == 0) & ~busy
 
             color = colors.get_channel_color(channel)
-            rgb = np.array([color.red(), color.green(), color.blue()], dtype=np.uint8)
-            dim = (rgb * 0.6).astype(np.uint8)
+            rgb = np.array([color.red(), color.green(), color.blue()], dtype=np.float64)
+            background = np.array(OVERVIEW_BACKGROUND, dtype=np.float64)
+            # Activity as a faint band, levels as thin lines (a low one dimmer): a summary, not
+            # a second waveform
+            dim = (background + (rgb - background) * 0.35).astype(np.uint8)
+            low_rgb = (background + (rgb - background) * 0.45).astype(np.uint8)
+            rgb = (background + (rgb - background) * 0.85).astype(np.uint8)
 
             top = int(index * channel_height + channel_height * 0.2)
             bottom = int(index * channel_height + channel_height * 0.8)
             bottom = max(bottom, top + 1)
 
-            busy = any_high & any_low
-            # Also fill the columns where the level changed from the previous
-            # one, so a fast signal reads as a continuous trace instead of a
-            # dashed line.
-            pure_level = any_high & ~any_low
-            changed = np.zeros_like(busy)
-            changed[1:] = pure_level[1:] != pure_level[:-1]
-            busy = busy | changed
-
             if busy.any():
                 buffer[top:bottom, busy] = dim
-            only_high = any_high & ~busy
-            only_low = any_low & ~busy
             buffer[top, only_high] = rgb
-            buffer[bottom - 1, only_low] = rgb
+            buffer[bottom - 1, only_low] = low_rgb
 
         self._image_buffer = buffer
         self._image = QImage(buffer.data, width, height, 3 * width, QImage.Format_RGB888)
@@ -135,7 +122,7 @@ class SamplePreviewer(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         painter = QPainter(self)
         bounds = QRectF(0, 0, self.width(), self.height())
-        painter.fillRect(bounds, QColor(34, 34, 34))
+        painter.fillRect(bounds, QColor(*OVERVIEW_BACKGROUND))
 
         if self._dirty:
             self._build_image()
@@ -167,9 +154,12 @@ class SamplePreviewer(QWidget):
             max(self.model.visible_samples * ratio, 2.0),
             bounds.height(),
         )
-        painter.fillRect(view, QColor(255, 255, 255, 40))
-        painter.setPen(QPen(QColor(255, 255, 255, 160), 1))
-        painter.drawRect(view)
+        # What lies outside of the waveform view is dimmed; the view is outlined in the accent
+        shade = QColor(0, 0, 0, 110)
+        painter.fillRect(QRectF(0, 0, view.left(), bounds.height()), shade)
+        painter.fillRect(QRectF(view.right(), 0, bounds.width() - view.right(), bounds.height()), shade)
+        painter.setPen(QPen(QColor(ACCENT), 1))
+        painter.drawRect(view.adjusted(0.5, 0.5, -0.5, -0.5))
 
     # ------------------------------------------------------------ interaction
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming

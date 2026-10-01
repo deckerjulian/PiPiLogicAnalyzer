@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from pipilogicanalyzer.driver import protocol
+from pipilogicanalyzer.driver.pico import protocol
 
 
 def test_frame_escapes_reserved_bytes():
@@ -21,8 +21,8 @@ def test_command_packet_prefixes_the_command():
 
 
 def test_capture_request_matches_the_firmware_struct():
-    # CAPTURE_REQUEST is 48 bytes with natural alignment on the RP2040.
-    assert protocol.CAPTURE_REQUEST_SIZE == 48
+    # CAPTURE_REQUEST is 56 bytes with natural alignment on the RP2040 (32 channels).
+    assert protocol.CAPTURE_REQUEST_SIZE == 56
 
     request = protocol.CaptureRequest(
         trigger_type=1,
@@ -39,20 +39,21 @@ def test_capture_request_matches_the_firmware_struct():
         capture_mode=2,
     )
     raw = request.pack()
-    assert len(raw) == 48
+    assert len(raw) == 56
 
     assert raw[0:3] == bytes([1, 2, 3])
     assert struct.unpack_from("<H", raw, 4)[0] == 0x1234
     assert raw[6:10] == bytes([0, 1, 2, 3])
-    assert raw[30] == 4
-    assert struct.unpack_from("<III", raw, 32) == (100_000_000, 512, 1024)
-    assert raw[44:47] == bytes([5, 1, 2])
+    assert raw[38] == 4
+    assert struct.unpack_from("<III", raw, 40) == (100_000_000, 512, 1024)
+    assert struct.unpack_from("<H", raw, 52)[0] == 5
+    assert raw[54:56] == bytes([1, 2])
 
 
 def test_capture_request_truncates_extra_channels():
     request = protocol.CaptureRequest(channels=list(range(40)), channel_count=40)
     raw = request.pack()
-    assert raw[6:30] == bytes(range(24))
+    assert raw[6:38] == bytes(range(32))
 
 
 def test_net_config_layout():

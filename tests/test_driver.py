@@ -9,17 +9,18 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver import protocol
-from pipilogicanalyzer.driver.analyzer import PiPiLogicAnalyzerDriver, unpack_channel_samples
+from pipilogicanalyzer.driver.pico import protocol
+from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver, unpack_channel_samples
 from pipilogicanalyzer.driver.base import (
+    FirmwareOutdatedError,
     AnalyzerDriverType,
     CaptureError,
     CaptureMode,
-    parse_version,
 )
+from pipilogicanalyzer.driver.pico.protocol import parse_version
 from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
 from pipilogicanalyzer.driver.models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType
-from pipilogicanalyzer.driver.transport import Transport, TransportError
+from pipilogicanalyzer.driver.pico.transport import Transport, TransportError
 
 
 class FakeTransport(Transport):
@@ -36,6 +37,7 @@ class FakeTransport(Transport):
             "BLASTFREQ:200000000",
             f"BUFFER:{buffer_size}",
             f"CHANNELS:{channels}",
+            f"PROTOCOL:{protocol.FIRMWARE_PROTOCOL}",
         ]
         self._data = bytearray()
 
@@ -95,7 +97,7 @@ class FakeTransport(Transport):
 def driver(monkeypatch):
     transport = FakeTransport()
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
     instance = PiPiLogicAnalyzerDriver("/dev/fake")
     instance.test_transport = transport  # type: ignore[attr-defined]
@@ -109,12 +111,39 @@ def make_session(channels: int = 4, pre: int = 4, post: int = 12) -> CaptureSess
 
 
 # ------------------------------------------------------------------- identity
-def test_version_validation():
-    assert parse_version("LOGIC_ANALYZER_V6_0").is_valid
-    assert parse_version("LOGIC_ANALYZER_V6_2").is_valid
-    assert parse_version("LOGIC_ANALYZER_V7_1").is_valid
-    assert not parse_version("LOGIC_ANALYZER_V5_9").is_valid
-    assert not parse_version("garbage").is_valid
+def test_version_parsing():
+    version = parse_version("PIPI_LOGIC_ANALYZER_PICO_V7_1")
+    assert (version.major, version.minor) == (7, 1)
+    assert parse_version("garbage").major == 0
+
+
+def open_with(monkeypatch, transport: FakeTransport, **options) -> PiPiLogicAnalyzerDriver:
+    monkeypatch.setattr(
+        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
+    )
+    return PiPiLogicAnalyzerDriver("/dev/fake", **options)
+
+
+@pytest.mark.parametrize("protocol_line", [None, "PROTOCOL:0", f"PROTOCOL:{protocol.FIRMWARE_PROTOCOL + 1}"])
+def test_only_the_current_firmware_is_opened(monkeypatch, protocol_line):
+    transport = FakeTransport()
+    transport._responses.pop()
+    if protocol_line:
+        transport._responses.append(protocol_line)
+    with pytest.raises(FirmwareOutdatedError) as raised:
+        open_with(monkeypatch, transport)
+    assert raised.value.location == "/dev/fake" and "Install the firmware" in str(raised.value)
+    assert transport.closed
+
+    # Opened anyway to read the identification or to restart it for the update
+    transport = FakeTransport()
+    transport._responses.pop()
+    board = open_with(monkeypatch, transport, require_current_firmware=False)
+    assert board.protocol_version is None and board.device_version == "LOGIC_ANALYZER_V6_0"
+
+
+def test_the_current_firmware_reports_its_protocol(driver):
+    assert driver.protocol_version == protocol.FIRMWARE_PROTOCOL
 
 
 def test_driver_reads_the_device_identity(driver):
@@ -168,6 +197,7 @@ def test_blast_requires_the_blast_frequency_and_no_pre_samples(driver):
 
 
 def test_pattern_trigger_bit_count_is_bounded(driver):
+    driver.test_transport.queue_response("CAPS:SELFTEST,PATTERN_GROUPS=0-20/21-23")
     session = make_session()
     session.trigger_type = TriggerType.FAST
     session.trigger_channel = 0
@@ -184,10 +214,11 @@ def test_pattern_trigger_follows_the_reported_groups(driver):
     session.trigger_channel = 16
     session.trigger_bit_count = 4
 
-    # Firmware without the report: channels 1 to 16
-    assert driver.pattern_trigger_groups() == ((0, 16),)
+    # A board without pattern triggers reports no groups
+    assert driver.pattern_trigger_groups() == ()
     assert not driver.validate_settings(session, session.total_samples)
 
+    driver._capabilities = None
     driver.test_transport.queue_response("CAPS:SELFTEST,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23")
     assert driver.pattern_trigger_groups() == ((0, 21), (21, 3))
     assert driver.validate_settings(session, session.total_samples)  # channels 17 to 20

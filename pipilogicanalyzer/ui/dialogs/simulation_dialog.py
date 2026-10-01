@@ -38,7 +38,6 @@ class SimulationDialog(QDialog):
         self,
         driver: AnalyzerDriverBase,
         on_board: bool,
-        board_connected: bool,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -55,14 +54,10 @@ class SimulationDialog(QDialog):
                 "which tests the firmware, the USB/WiFi link and the application. No signals need "
                 "to be connected."
             )
-        elif board_connected:
-            kind, source = "warning", (
-                "<b>Computed on this computer.</b> The firmware of the connected board cannot "
-                "simulate; flash the firmware of this project to test the board as well."
-            )
         else:
             kind, source = "info", (
-                "<b>Computed on this computer.</b> No board is connected."
+                "<b>Computed on this computer.</b> Connect a PiPiLogicAnalyzer board to let it "
+                "generate the signals itself."
             )
         self.source_banner = Banner(kind, self)
         self.source_banner.set_message(source)
