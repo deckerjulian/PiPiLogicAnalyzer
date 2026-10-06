@@ -384,6 +384,8 @@ jobs:
         run: python -m PyInstaller packaging/openscilab.spec --noconfirm --distpath dist --workpath build/pyinstaller
 
       - name: Start the packaged application
+        # (a packaged application that fails can wait for a click on an error message for ever)
+        timeout-minutes: 5
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
