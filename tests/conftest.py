@@ -53,6 +53,18 @@ def no_unanswered_message_boxes(monkeypatch):
     monkeypatch.setattr(messages, "_exec", unexpected)
 
 
+@pytest.fixture(autouse=True)
+def empty_clipboard():
+    """Data a test left on the clipboard crashes Qt when the application ends on the offscreen
+    platform (the run ends with a segmentation fault after every test passed): emptied after each test."""
+    yield
+    from PySide6.QtWidgets import QApplication
+
+    application = QApplication.instance()
+    if application is not None:
+        application.clipboard().clear()
+
+
 @pytest.fixture
 def decoder_registry():
     from openscilab.sigrok.engine import DecoderRegistry

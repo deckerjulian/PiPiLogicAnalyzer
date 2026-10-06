@@ -18,7 +18,7 @@ import html
 import os
 from typing import Any, Optional
 
-from PySide6.QtCore import QMimeData, Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QFontDatabase, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QApplication,
@@ -69,8 +69,6 @@ def device_addresses(hub=None) -> list[tuple[str, str]]:
     return result
 
 VIEWS = ("Graph", "YAML", "Python")
-#: nodes on the clipboard (their YAML)
-FLOW_MIME = "application/x-openscilab-flow"
 FLOW_FILE_FILTER = "Flows (*.flow.yaml);;Python flows (*.py);;All files (*)"
 
 
@@ -1007,11 +1005,8 @@ class FlowDocument(DocumentWidget):
         part = self.selection_as_flow()
         if part is None:
             return False
-        mime = QMimeData()
-        text = yaml_io.dumps(part)
-        mime.setText(text)
-        mime.setData(FLOW_MIME, text.encode("utf-8"))
-        QApplication.clipboard().setMimeData(mime)
+        # the nodes as the YAML of a flow, plain text: pasted here, or into a *.flow.yaml
+        QApplication.clipboard().setText(yaml_io.dumps(part))
         return True
 
     def cut_selection(self) -> bool:
@@ -1023,10 +1018,7 @@ class FlowDocument(DocumentWidget):
     def paste(self, text: Optional[str] = None, offset: tuple[float, float] = (40.0, 40.0)) -> list[str]:
         """Nodes from the clipboard (or ``text``): new names where taken, moved by ``offset``, selected."""
         if text is None:
-            mime = QApplication.clipboard().mimeData()
-            if mime is None:
-                return []
-            text = bytes(mime.data(FLOW_MIME)).decode("utf-8") if mime.hasFormat(FLOW_MIME) else mime.text()
+            text = QApplication.clipboard().text()
         try:
             part = yaml_io.loads(text)
         except FlowError:
@@ -1055,10 +1047,7 @@ class FlowDocument(DocumentWidget):
 
     def paste_at(self, position) -> list[str]:
         """Paste so the first pasted node is at ``position`` (scene)."""
-        mime = QApplication.clipboard().mimeData()
-        if mime is None:
-            return []
-        text = bytes(mime.data(FLOW_MIME)).decode("utf-8") if mime.hasFormat(FLOW_MIME) else mime.text()
+        text = QApplication.clipboard().text()
         try:
             part = yaml_io.loads(text)
         except FlowError:

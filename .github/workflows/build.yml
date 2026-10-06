@@ -62,6 +62,7 @@ jobs:
       - name: Run the tests
         env:
           QT_QPA_PLATFORM: offscreen
+          PYTHONFAULTHANDLER: "1"  # a crash (also when Python exits) shows where it happened
         run: python -m pytest -q
 
   plan:
