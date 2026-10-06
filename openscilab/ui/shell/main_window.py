@@ -1843,7 +1843,9 @@ class ShellWindow(QMainWindow):
         #: one button for every kind of document: they are what openSciLab is made of
         self.new_tools = {
             "flow": tool("Flow", "nodes", f"A new flow ({new})", action=self.action_new_flow),
-            "panel": tool("Panel", "panel", "A new panel", action=self.action_new_panel),
+            "panel": tool("Panel", "panel", "A new panel: the front of an instrument for a flow - switches, sliders "
+                          "and buttons that operate it, numbers, LEDs and charts that show its values",
+                          action=self.action_new_panel),
             "data_view": tool("Data view", "channels", "A new data view: capture, or open a capture",
                               action=self.action_new_data_view),
             "waveform": tool("Waveform", "wave", "A new waveform for a generator", action=self.action_new_waveform),

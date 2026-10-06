@@ -126,7 +126,8 @@ _SHAPES = {
         "<path d='M6 10h1M10 10h1M14 10h1M18 10h1M7 14h10'/>"
     ),
     "book": "<path d='M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z'/><path d='M20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z'/>",
-    "panel": "<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M15 4v16'/>",
+    # a panel: the front of an instrument - a dial in a frame
+    "panel": "<rect x='2' y='3' width='20' height='18' rx='2'/><path d='M6 15a6 6 0 0 1 12 0'/><path d='M12 15l3-3'/>",
     "rows": "<path d='M4 6h16M4 12h16M4 18h16'/><path d='M2 9v6M22 9v6'/>",
     "channels": "<path d='M3 7h4v-3h4v6h4v-3h6M3 17h6v-3h4v6h8'/>",
     # Shell (openSciLab): activity bar, document area, console

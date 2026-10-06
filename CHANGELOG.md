@@ -23,6 +23,8 @@ again from 0.1.
   none is selected (before, it did nothing without a selection).
 - Loading a profile from a device card opens no data view: its decoders go to the device's data
   view when one is open, else to the next one.
+- A panel has an icon of its own - a dial in a frame, the front of an instrument - and the *Panel*
+  button says what a panel is.
 
 ### Devices
 
