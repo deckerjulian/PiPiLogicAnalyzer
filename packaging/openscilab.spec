@@ -15,7 +15,7 @@ import os
 import sys
 import tomllib
 
-from PyInstaller.utils.hooks import collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))
 ICONS = os.path.join(ROOT, "build", "icons")
@@ -59,7 +59,10 @@ a = Analysis(
     pathex=[ROOT],
     # The libusb library of libusb-package for the DSLogic driver (loaded through ctypes).
     binaries=collect_dynamic_libs("libusb_package"),
-    hiddenimports=DECODER_MODULES + ["libusb_package", "usb.backend.libusb1"],
+    # every module of openSciLab: node modules, drivers and device processes are partly imported by
+    # name at run time (importlib), which the analysis does not see
+    hiddenimports=DECODER_MODULES + collect_submodules("openscilab") + collect_submodules("openscilab_device")
+    + ["libusb_package", "usb.backend.libusb1"],
     excludes=["tkinter"],
 )
 
