@@ -49,7 +49,9 @@ static void build(void)
         table[gpio].channel = channel;
 
         //The state mode waits for the clock with WAIT PIN, relative to the first sampled GPIO
-        if(gpio >= INPUT_PIN_BASE && gpio - INPUT_PIN_BASE < 32)
+        //(as int: with INPUT_PIN_BASE 0 an unsigned comparison would always be true)
+        int offset = (int)gpio - (int)INPUT_PIN_BASE;
+        if(offset >= 0 && offset < 32)
             table[gpio].caps |= PIN_CAN_CLOCK;
     }
 

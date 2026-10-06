@@ -283,6 +283,9 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # (the default asks for the package "tools", which current command line tools no longer have)
+          packages: platform-tools
 
       - name: JVM tests
         working-directory: firmware/bridge-android

@@ -14,6 +14,7 @@
 
 #include "app.h"
 #include "arch/native/fake_hal.h"
+#include "board.h"
 #include "hal.h"
 #include "protocol.h"
 
@@ -116,7 +117,7 @@ void test_hello_answers_key_value_text() {
     Got got = request(CMD_HELLO);
     ok(got);
     TEST_ASSERT_EQUAL_STRING(
-        "board=native;version=8.1.0;protocol=1;rate=1000000;clock=16000000;buffer=600;adc_bits=10;"
+        "board=native;version=" FIRMWARE_VERSION ";protocol=1;rate=1000000;clock=16000000;buffer=600;adc_bits=10;"
         "dac_bits=12;vref_mv=5000",
         got.text().c_str());
 }
