@@ -40,6 +40,13 @@ The details follow.
 
 ### Application
 
+- `openscilab run <name>` in a project folder runs the project's flow of that name, as the
+  command line documentation says; `openscilab --debug-driver` also logs the drivers that run in a
+  device process of their own.
+- Only the simulated boards with the openSciLab Arduino firmware are offered with the Arduino
+  protocol (the simulated DAQ no longer shows up among them); messages and help texts name the
+  current menus.
+
 - **Every node checked, every node in an example.** A review of all node types and simulators
   found and fixed these; a test now fails when a node type has no example and when an example's
   flow has any warning (a misspelt parameter was silently ignored before):
