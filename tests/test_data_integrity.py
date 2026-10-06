@@ -36,14 +36,16 @@ def loaded(make_dataview):
 
 # ----------------------------------------------------------------- files
 def test_a_failed_write_keeps_the_file(tmp_path):
-    path = tmp_path / "data.txt"
+    folder = tmp_path / "files"  # (a folder of its own: tmp_path also holds the test's settings)
+    folder.mkdir()
+    path = folder / "data.txt"
     files.atomic_write(str(path), "first")
     with pytest.raises(RuntimeError):
         with files.atomic_open(str(path)) as handle:
             handle.write("half of the sec")
             raise RuntimeError("disk full")
     assert path.read_text() == "first"
-    assert os.listdir(tmp_path) == ["data.txt"]  # no temporary file left
+    assert os.listdir(folder) == ["data.txt"]  # no temporary file left
     files.atomic_write(str(path), b"\x00\x01")
     assert path.read_bytes() == b"\x00\x01"
 

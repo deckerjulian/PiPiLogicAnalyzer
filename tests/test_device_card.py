@@ -123,7 +123,8 @@ def test_actions_are_markers_in_a_running_capture(shell, card, make_dataview, as
     instrument = card.instrument
     window = make_dataview()
     window.use_instrument(instrument)
-    session = CaptureSession(frequency=10_000, pre_trigger_samples=0, post_trigger_samples=3000,
+    # two seconds: long enough to be seen running also on a slow machine
+    session = CaptureSession(frequency=10_000, pre_trigger_samples=0, post_trigger_samples=20_000,
                              trigger_type=TriggerType.IMMEDIATE, acquisition_mode="stream")
     session.capture_channels = [AnalyzerChannel(channel_number=1, channel_name="D3")]
     window._begin_capture(session)
