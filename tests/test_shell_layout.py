@@ -8,6 +8,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtWidgets import QApplication, QTabBar, QToolButton
 
 
@@ -118,3 +119,34 @@ def test_a_message_has_no_empty_space_beside_its_icon(shell):
     text = box.findChild(QLabel, "qt_msgbox_label")
     assert icon.width() < 100 and text.width() >= messages.MESSAGE_WIDTH
     box.close()
+
+
+def _mouse(kind, widget, position, buttons):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    button = Qt.LeftButton if kind != QEvent.MouseMove else Qt.NoButton
+    return QMouseEvent(kind, QPointF(position), widget.mapToGlobal(QPointF(position)), button, buttons, Qt.NoModifier)
+
+
+def test_a_tab_dragged_off_its_bar_or_double_clicked_gets_a_window_of_its_own(shell):
+    first, second = shell.new_flow(), shell.new_flow()
+    group = shell.area.group_of(first)
+    bar = group.tabBar()
+    settle()
+    # dragged down, out of the bar: a window of its own
+    start = bar.tabRect(group.indexOf(second)).center()
+    bar.mousePressEvent(_mouse(QEvent.MouseButtonPress, bar, start, Qt.LeftButton))
+    bar.mouseMoveEvent(_mouse(QEvent.MouseMove, bar, start + QPoint(0, 10), Qt.LeftButton))
+    assert not shell.area.is_detached(second)  # (a small move stays in the bar)
+    bar.mouseMoveEvent(_mouse(QEvent.MouseMove, bar, start + QPoint(0, 120), Qt.LeftButton))
+    settle()
+    assert shell.area.is_detached(second) and group.indexOf(second) < 0
+    # double-clicked
+    point = bar.tabRect(group.indexOf(first)).center()
+    bar.mouseDoubleClickEvent(_mouse(QEvent.MouseButtonDblClick, bar, point, Qt.LeftButton))
+    settle()
+    assert shell.area.is_detached(first)
+    shell.area.attach(first)
+    shell.area.attach(second)
+    assert not shell.area.is_detached(first) and not shell.area.is_detached(second)

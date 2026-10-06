@@ -10,6 +10,12 @@ again from 0.1.
 
 ## [Unreleased]
 
+### Application
+
+- **A tab into a window of its own**: drag it off the tab bar or double-click it (as well as
+  *Open in a new window* on its right click); closing the window puts it back.
+- The close button of a tab sits inside the tab, centred on its title.
+
 ## [0.1.0b1] - 2026-10-06
 
 The first release of **openSciLab**, the open measurement and control lab that PiPiLogicAnalyzer

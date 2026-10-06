@@ -8,14 +8,16 @@
 
 Documents are tabs in *groups* (like the editor groups of VS Code): a group is a tab widget, the
 groups sit side by side or one above the other in splitters. A document can move to another
-group or into a window of its own (*detach*, e.g. a scope on the second screen) and back.
+group or into a window of its own (*detach*, e.g. a scope on the second screen: drag its tab out of
+the bar, double-click it, or *Open in a new window* of its menu) and back (close that window).
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -35,9 +37,50 @@ from PySide6.QtWidgets import (
 from ..icons import icon
 from ..theme import TEXT_MUTED, _repolish
 
-
 #: space left of the close button of a tab (px)
 CLOSE_MARGIN = 4
+#: how far a tab is dragged off its bar (up or down, px) before it goes into a window of its own
+TEAR_OFF = 40
+
+
+class DocumentTabBar(QTabBar):
+    """The tab bar of a group: a tab dragged off the bar (or double-clicked) asks for a window of its
+    own (``torn_off`` with its index)."""
+
+    torn_off = Signal(int)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._pressed: Optional[int] = None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._pressed = self.tabAt(event.position().toPoint()) if event.button() == Qt.LeftButton else None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        index = self._pressed
+        if index is not None and index >= 0 and event.buttons() & Qt.LeftButton:
+            y = event.position().y()
+            if y < -TEAR_OFF or y > self.height() + TEAR_OFF:
+                self._pressed = None
+                # the bar ends its own move of the tab first, the tab leaves afterwards
+                index = self.currentIndex() if self.isMovable() else index
+                super().mouseReleaseEvent(event)
+                QTimer.singleShot(0, lambda index=index: self.torn_off.emit(index))
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._pressed = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        index = self.tabAt(event.position().toPoint())
+        if event.button() == Qt.LeftButton and index >= 0:
+            self.torn_off.emit(index)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 class DocumentGroup(QTabWidget):
@@ -47,6 +90,9 @@ class DocumentGroup(QTabWidget):
         super().__init__()
         self.area = area
         self.setObjectName("document-group")
+        bar = DocumentTabBar(self)
+        self.setTabBar(bar)
+        bar.torn_off.connect(self._tear_off)
         self.setDocumentMode(True)
         # the close button of every tab on its left (made in tabInserted; Qt would put it right)
         self.setTabsClosable(False)
@@ -93,6 +139,14 @@ class DocumentGroup(QTabWidget):
             if bar.tabButton(index, QTabBar.LeftSide) is holder:
                 self.tabCloseRequested.emit(index)
                 return
+
+    def _tear_off(self, index: int) -> None:
+        """The tab ``index`` into a window of its own, where the pointer is."""
+        document = self.widget(index)
+        if document is None:
+            return
+        window = self.area.detach(document)
+        window.move(QCursor.pos() - QPoint(60, 12))
 
     def _tab_menu(self, position) -> None:
         index = self.tabBar().tabAt(position)
