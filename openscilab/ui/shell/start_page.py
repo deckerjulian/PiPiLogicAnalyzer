@@ -5,8 +5,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 """Start page: what to do first (a simulator, a device, a new flow, a file), every project of the
-library to start from - tiles by category, the first ones the plain starting points - and the
-recent files and projects."""
+library to start from - tiles by category: the user's own templates first, then the plain starting
+points - and the recent files and projects."""
 
 from __future__ import annotations
 
@@ -80,6 +80,8 @@ class Tile(QFrame):
     Enter) opens it as a new project."""
 
     activated = Signal(str)
+    #: delete this template of the user (its key)
+    delete_requested = Signal(str)
 
     def __init__(self, example, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -141,6 +143,16 @@ class Tile(QFrame):
             self.click()
             return
         super().keyPressEvent(event)
+
+    def context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        menu.addAction(icon("file-plus"), "New project from it", self.click)
+        if self.example.user:  # (a template of the user)
+            menu.addAction(icon("trash"), "Delete template...", lambda: self.delete_requested.emit(self.key))
+        return menu
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self.context_menu().exec(event.globalPos())
 
 
 class Section(QWidget):
@@ -208,15 +220,13 @@ class StartPage(DocumentWidget):
     simulator_requested = Signal(str)
     #: choose a device to connect
     connect_requested = Signal()
+    #: delete a template of the user (its key)
+    template_delete_requested = Signal(str)
     new_flow_requested = Signal()
     open_project_requested = Signal()
 
     def __init__(self, catalog: Optional[list] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        if catalog is None:
-            from ...lab import examples
-
-            catalog = examples.catalog()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(32, 22, 32, 18)
         outer.setSpacing(12)
@@ -281,27 +291,7 @@ class StartPage(DocumentWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        content = QWidget(self.scroll)
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 8, 0)
-        content_layout.setSpacing(6)
-        self.sections = [Section(category, content) for category in catalog]
-        self.tiles: dict[str, Tile] = {}
-        for section in self.sections:
-            content_layout.addWidget(section)
-            for tile in section.tiles:
-                tile.activated.connect(self.example_requested.emit)
-                self.tiles[tile.key] = tile
-        self.no_match = QLabel("Nothing matches the search.", content)
-        set_role(self.no_match, "hint")
-        self.no_match.setVisible(False)
-        content_layout.addWidget(self.no_match)
-        if not catalog:
-            missing = QLabel("The example library was not found (examples/library).", content)
-            set_role(missing, "hint")
-            content_layout.addWidget(missing)
-        content_layout.addStretch(1)
-        self.scroll.setWidget(content)
+        self.load_library(catalog)
         body.addWidget(self.scroll, 1)
 
         # ------------------------------------------------------------ recent
@@ -334,6 +324,39 @@ class StartPage(DocumentWidget):
         self.reflow()
 
     # ------------------------------------------------------------ library
+    def load_library(self, catalog: Optional[list] = None) -> None:
+        """The tiles of ``catalog`` (default: the user's templates and the library), again after a
+        template was saved or deleted."""
+        if catalog is None:
+            from ...lab import examples
+
+            catalog = examples.catalog()
+        content = QWidget(self.scroll)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 8, 0)
+        content_layout.setSpacing(6)
+        self.sections = [Section(category, content) for category in catalog]
+        self.tiles: dict[str, Tile] = {}
+        for section in self.sections:
+            content_layout.addWidget(section)
+            for tile in section.tiles:
+                tile.activated.connect(self.example_requested.emit)
+                tile.delete_requested.connect(self.template_delete_requested.emit)
+                self.tiles[tile.key] = tile
+        self.no_match = QLabel("Nothing matches the search.", content)
+        set_role(self.no_match, "hint")
+        self.no_match.setVisible(False)
+        content_layout.addWidget(self.no_match)
+        if not catalog:
+            missing = QLabel("The example library was not found (examples/library).", content)
+            set_role(missing, "hint")
+            content_layout.addWidget(missing)
+        content_layout.addStretch(1)
+        self.scroll.setWidget(content)  # (the tiles before go with their widget)
+        if self.filter_edit.text():
+            self.apply_filter(self.filter_edit.text())
+        self.reflow(force=True)
+
     def reflow(self, force: bool = False) -> None:
         width = self.scroll.viewport().width() - 8
         for section in self.sections:

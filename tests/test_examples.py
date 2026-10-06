@@ -73,8 +73,9 @@ def open_texts(folder: str) -> str:
 def test_the_examples_menu_lists_the_categories(shell):
     menu = shell.examples_menu
     titles = [action.text() for action in menu.actions()]
-    assert titles[:5] == ["All templates (start page)", "", "Start a project", "Basics", "Digital I/O"]
-    basics = menu.actions()[3].menu()
+    assert titles[:6] == ["Save project as &template...", "All templates (start page)", "", "Start a project",
+                          "Basics", "Digital I/O"]
+    basics = menu.actions()[4].menu()
     assert [action.text() for action in basics.actions()][:2] == ["First capture", "Edge trigger"]
     assert basics.actions()[0].toolTip().startswith("Captures the 8 bit counter")
     assert len(shell.example_actions) == len(EXAMPLES)

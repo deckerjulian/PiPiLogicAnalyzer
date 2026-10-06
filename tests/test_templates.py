@@ -131,3 +131,62 @@ def test_a_project_opens_as_a_temporary_project_and_is_saved_later(shell, tmp_pa
     assert document.path == os.path.join(kept, "panels", "daq.panel.yaml")  # the panel moved along
     assert not shell.is_temporary(document) and flow_document.project.root == kept
     assert shell.data_folder(flow_document) == os.path.join(kept, "data")
+
+
+# ------------------------------------------------------------ the user's own
+def test_a_project_is_kept_as_a_template_of_the_user(tmp_path):
+    root = templates.copy_project(examples.find("00-start/01-empty-lab").path, str(tmp_path / "bench"))
+    with open(os.path.join(root, "data", "capture.lac"), "w") as handle:
+        handle.write("results")
+    flow = os.path.join(root, "flows", "main.flow.yaml")
+    template = examples.save_template(root, "Sensor  bench", "For the sensors\nof the lab", [flow, "/elsewhere/x"])
+    assert template.key == "my-templates/sensor-bench" and template.user and template.name == "sensor-bench"
+    first = examples.catalog()[0]
+    assert first.key == examples.USER_CATEGORY and first.title == "My templates"
+    assert [example.title for example in first.examples] == ["Sensor bench"]
+    assert examples.catalog()[1].key == "00-start"
+    saved = Project.open(template.path)
+    assert saved.name == "Sensor bench" and saved.extra["description"] == "For the sensors of the lab"
+    assert saved.extra["open"] == ["flows/main.flow.yaml"] and saved.devices == {"sim": "sim:free"}
+    assert os.listdir(os.path.join(template.path, "data")) == []  # (no results of runs)
+    assert examples.save_template(root, "Sensor bench").key == "my-templates/sensor-bench-2"
+    examples.delete_template(template.key)
+    assert [example.key for example in examples.catalog()[0].examples] == ["my-templates/sensor-bench-2"]
+    for key in ("00-start/01-empty-lab", "my-templates/../settings", "my-templates/"):
+        try:
+            examples.delete_template(key)
+        except ValueError:
+            continue
+        raise AssertionError(f"{key} was deleted")
+
+
+def test_the_shell_saves_a_project_as_a_template_and_lists_it_first(shell, monkeypatch):
+    from openscilab.ui import messages
+    from openscilab.ui.dialogs.template_dialog import TemplateDialog
+
+    document = shell.open_example("00-start/01-empty-lab")
+    document._edit("rename", lambda flow: setattr(flow, "description", "Mine"))
+
+    def named(dialog):
+        assert dialog.title == "Empty lab"  # (the project's name to start from)
+        dialog.title_edit.setText("My bench")
+        dialog._accept()
+        return dialog.result()
+
+    monkeypatch.setattr(TemplateDialog, "exec", named)
+    monkeypatch.setattr(messages, "confirm", lambda *args, **kwargs: True)  # (save the changed flow first)
+    key = shell.save_as_template()
+    assert key == "my-templates/my-bench" and not document.dirty
+    menus = [action.menu().title() for action in shell.examples_menu.actions() if action.menu()]
+    assert menus[:2] == ["My templates", "Start a project"]
+    page = shell.show_start_page()
+    assert page.sections[0].category.title == "My templates" and key in page.tiles
+    assert [action.text() for action in page.tiles[key].context_menu().actions()][-1] == "Delete template..."
+    assert len(page.tiles["00-start/01-empty-lab"].context_menu().actions()) == 1  # (the library's stay)
+
+    opened = shell.open_example(key)  # a new project from it, with the flow as it was saved
+    assert opened.document_kind == "flow" and opened.flow.description == "Mine" and shell.is_temporary(opened)
+
+    page.tiles[key].context_menu().actions()[-1].trigger()  # Delete template...
+    assert key not in page.tiles and page.sections[0].category.title == "Start a project"
+    assert "My templates" not in [action.menu().title() for action in shell.examples_menu.actions() if action.menu()]

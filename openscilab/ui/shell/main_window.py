@@ -691,6 +691,9 @@ class ShellWindow(QMainWindow):
         self.project_menu.addAction(self.action_save_as)
         self.action_save_project = self._action("Save &project as...", lambda: self.save_project_as(), icon_name="folder")
         self.project_menu.addAction(self.action_save_project)
+        self.action_save_template = self._action("Save project as &template...", self.save_as_template,
+                                                 icon_name="bookmark")
+        self.project_menu.addAction(self.action_save_template)
         self.action_close = self._action("&Close document", self.close_active, QKeySequence("Ctrl+W"), "close")
         self.project_menu.addAction(self.action_close)
         self._document_section = self.project_menu.addSeparator()
@@ -1079,6 +1082,7 @@ class ShellWindow(QMainWindow):
         page.connect_requested.connect(self.connect_dialog)
         page.new_flow_requested.connect(self.new_flow)
         page.open_project_requested.connect(self.open_project_dialog)
+        page.template_delete_requested.connect(self.delete_template)
         page.destroyed.connect(lambda: setattr(self, "start_page", None))
         self.start_page = page
         self.add_document(page)
@@ -1103,6 +1107,7 @@ class ShellWindow(QMainWindow):
 
         self.examples_menu.clear()
         self.example_actions: dict[str, QAction] = {}
+        self.examples_menu.addAction(self.action_save_template)
         catalog = examples.catalog()
         if not catalog:
             self.examples_menu.addAction("No templates found").setEnabled(False)
@@ -1119,7 +1124,75 @@ class ShellWindow(QMainWindow):
                 action.setStatusTip(example.description)
                 action.triggered.connect(lambda _checked=False, key=example.key: self.open_example(key))
                 self.example_actions[example.key] = action
+            if category.key == examples.USER_CATEGORY:  # (the user's own: they can be deleted)
+                submenu.addSeparator()
+                delete_menu = submenu.addMenu(icon("trash"), "Delete")
+                for example in category.examples:
+                    delete_menu.addAction(example.title).triggered.connect(
+                        lambda _checked=False, key=example.key: self.delete_template(key))
         self.examples_menu.setToolTipsVisible(True)
+
+    def save_as_template(self) -> Optional[str]:
+        """*Save project as template…*: the project of the active document becomes a template of the
+        user (``lab/examples.save_template``), listed first under *Templates*; returns its key."""
+        from ...lab import examples
+        from ...lab.project import Project
+        from ..dialogs.template_dialog import TemplateDialog
+
+        title = "Save project as template"
+        root = self.project_root_of(self.active_document())
+        if root is None:
+            messages.info(self, title, "The active document is not part of a project.",
+                          "Open a project, or start one from a template, and save it as a template of your own.")
+            return None
+        documents = [document for document in self.area.documents() if self.project_root_of(document) == root]
+        changed = [document for document in documents if document.dirty and document.path]
+        if changed and not messages.confirm(
+                self, title, f"{len(changed)} document(s) of the project have changes that are not saved.",
+                "Save and continue", "A template is made of the files of the project: the changes are saved first."):
+            return None
+        if not all(document.save() for document in changed):
+            return None
+        try:
+            project = Project.open(root)
+        except (OSError, ValueError) as error:
+            messages.error(self, title, f"{root} could not be read.", str(error))
+            return None
+        dialog = TemplateDialog(project.name, str(project.extra.get("description") or ""), self)
+        if not dialog.exec():
+            return None
+        try:
+            template = examples.save_template(root, dialog.title, dialog.description,
+                                              [document.path for document in documents if document.path])
+        except (OSError, ValueError) as error:
+            messages.error(self, title, "The template could not be saved.", str(error))
+            return None
+        self._templates_changed()
+        self.statusBar().showMessage(f'Template "{template.title}" saved: Templates → My templates', 8000)
+        return template.key
+
+    def delete_template(self, key: str) -> bool:
+        """Delete a template of the user (after asking)."""
+        from ...lab import examples
+
+        example = examples.find(key)
+        if example is None or not example.user:
+            return False
+        if not messages.confirm(self, "Delete template", f'Delete the template "{example.title}"?', "Delete",
+                                "Projects made from it stay as they are. This cannot be undone.", destructive=True):
+            return False
+        try:
+            examples.delete_template(key)
+        except (OSError, ValueError) as error:
+            messages.error(self, "Delete template", "The template could not be deleted.", str(error))
+            return False
+        self._templates_changed()
+        return True
+
+    def _templates_changed(self) -> None:
+        self._build_examples_menu()
+        if self.start_page is not None:
+            self.start_page.load_library()
 
     def open_example(self, key: str, folder: Optional[str] = None) -> Optional[QWidget]:
         """Open the example ``key`` (``<category>/<example>``) as a copy: a temporary project
@@ -1130,7 +1203,7 @@ class ShellWindow(QMainWindow):
         if example is None:
             messages.warning(self, "Templates", f"The template '{key}' is not available.")
             return None
-        return self._open_project_copy(example.path, key.split("/")[-1].split("-", 1)[-1], folder, example.title)
+        return self._open_project_copy(example.path, example.name, folder, example.title)
 
     def _open_project_copy(self, source: str, name: str, folder: Optional[str], what: str) -> Optional[QWidget]:
         """Copy the project ``source`` (of the library) and open its files and views."""

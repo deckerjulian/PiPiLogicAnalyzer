@@ -25,6 +25,12 @@ again from 0.1.
   view when one is open, else to the next one.
 - A panel has an icon of its own - a dial in a frame, the front of an instrument - and the *Panel*
   button says what a panel is.
+- **Templates of your own**: *Project → Save project as template…* (also at the top of the
+  *Templates* menu) keeps the project as a template - its flows, panels, nodes, waveforms and
+  devices, without the captures and results of its `data` folder, with a name and a description.
+  Your templates come first, as *My templates*, on the start page and in the *Templates* menu;
+  delete one with a right click on its tile or *Templates → My templates → Delete*. They are kept
+  in `templates/` of the settings directory.
 
 ### Devices
 
