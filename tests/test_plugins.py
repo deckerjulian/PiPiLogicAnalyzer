@@ -1,4 +1,4 @@
-"""Plugins (openscilab/plugins.py, driver/kinds.py): a device that is not built in, added from the
+"""Plugins (openscilab/plugins/, driver/kinds.py): a device that is not built in, added from the
 plugins folder, works like a built-in one - in the device list, flows, the command line, the Python
 API and a device process. A plugin that fails is reported, the others load; an address of a kind
 nobody knows says so."""
@@ -45,7 +45,9 @@ def folder():
 
 
 def test_a_plugin_of_the_plugins_folder_adds_a_kind_of_device(folder):
-    assert [plugin.name for plugin in plugins.load()] == ["counter_device"] and not plugins.problems()
+    found = plugins.load()
+    assert [plugin.name for plugin in found if not plugin.builtin] == ["counter_device"] and not plugins.problems()
+    assert [plugin.name for plugin in found if plugin.builtin] == list(plugins.BUILT_IN)
     counter = kinds.find("counter")
     assert counter is not None and counter.title == "Counter" and not counter.process
     assert any(info.id == "counter:8" and info.label == "Counter (8 channels)" for info in discovery.list_devices())
@@ -133,8 +135,52 @@ def test_kinds_are_checked_and_an_unknown_kind_says_so():
         kinds.register("my device", print)
     with pytest.raises(DeviceConnectionError, match="Unknown kind of device 'nokind'"):
         discovery.open_device("nokind:/dev/ttyUSB0")
-    assert not kinds.looks_like_kind("COM5") and not kinds.looks_like_kind("192.168.1.5:4045")
-    assert not kinds.looks_like_kind("C:\\device") and kinds.looks_like_kind("mydevice:/dev/ttyUSB0")
+    assert kinds.split("COM5") == ("pico", "COM5") and kinds.split("192.168.1.5:4045") == ("pico", "192.168.1.5:4045")
+    assert kinds.split("C:\\device") == ("pico", "C:\\device")
+    assert kinds.split("mydevice:/dev/ttyUSB0") == ("mydevice", "/dev/ttyUSB0")
+    assert kinds.split("dslogic") == ("dslogic", "")
+
+
+def test_the_devices_of_openscilab_are_plugins_as_well():
+    from openscilab.lab.engine.devices import open_instrument, simulation_profile_for
+
+    pico = kinds.find("pico")
+    assert pico.builtin and pico.module == "openscilab.plugins.pico" and pico.process and pico.simulation == "pico"
+    assert [kind.kind for kind in kinds.registered() if kind.builtin] == [
+        "pico", "pico-net", "pico-multi", "arduino", "arduino-sim", "dslogic", "rigol", "rigol-sim", "sim", "emulated",
+        "remote", "remote-sim"]
+    assert simulation_profile_for("COM5") == "pico" and simulation_profile_for("arduino:COM3") == "uno"
+    assert simulation_profile_for("rigol:192.168.1.20") == "dho924s"
+    with pytest.raises(DeviceConnectionError, match="no capture driver"):
+        discovery.open_device("remote:pi")
+    with pytest.raises(ValueError, match="has no simulator"):
+        open_instrument("remote:pi", simulate=True)
+    with pytest.raises(DeviceConnectionError, match="serial port"):
+        discovery.open_device("arduino:")
+
+
+def test_a_kind_opens_instruments_with_what_its_opener_takes(folder):
+    from openscilab.driver.simulated import open_simulated
+    from openscilab.lab.engine.devices import open_instrument
+
+    opened = []
+
+    def open_box(rest, seed=1):
+        opened.append((rest, seed))
+        return open_simulated("free", seed=seed)
+
+    kinds.register("box", instrument=open_box, simulation=None)
+    try:
+        open_instrument("box:7", seed=3, fast=True).close()  # (fast: not taken)
+        assert opened == [("7", 3)]
+        with pytest.raises(DeviceConnectionError, match="no capture driver"):
+            discovery.open_device("box:7")
+    finally:
+        kinds.unregister("box")
+    with pytest.raises(ValueError, match="needs a function"):
+        kinds.register("box")
+    # an option the opener does not take is left out
+    assert discovery.open_device("counter:4", download_bitstream=True).channel_count == 4
 
 
 def test_installed_packages_add_plugins(folder, monkeypatch):
@@ -171,7 +217,8 @@ def test_the_device_list_shows_the_devices_of_a_plugin(folder, shell, monkeypatc
 def test_a_plugin_brings_a_backend_of_its_own_in_setup_ui(folder, monkeypatch):
     from openscilab.ui import devices
 
-    monkeypatch.setattr(devices, "_added", [])
+    devices.backends()  # (openSciLab's own register theirs)
+    monkeypatch.setattr(devices, "_added", list(devices._added))
     with open(os.path.join(folder, "counter_ui.py"), "w") as handle:
         handle.write(
             "from openscilab.ui.devices import DeviceBackend, DeviceEntry, register_backend\n"
@@ -181,8 +228,10 @@ def test_a_plugin_brings_a_backend_of_its_own_in_setup_ui(folder, monkeypatch):
             "        return [DeviceEntry(self.id, 'ask', None, 'Counter with channels...')]\n"
             "def setup_ui():\n"
             "    register_backend(CounterBackend())\n")
+    plugins.reset()  # (loaded with openSciLab's own above)
+    before = list(devices._added)
     plugins.load()
-    assert not devices._added  # (the command line and device processes stay without Qt)
+    assert devices._added == before  # (the command line and device processes stay without Qt)
     plugins.load(ui=True)
     ids = [backend.id for backend in devices.backends()]
     assert ids.count("counter") == 1  # its own backend replaces the generic one
@@ -199,5 +248,5 @@ def test_help_plugins_shows_what_is_loaded(folder, shell, monkeypatch):
     monkeypatch.setattr(messages, "info", lambda parent, title, text, details=None: shown.append((text, details)))
     shell.show_plugins()
     text, details = shown[0]
-    assert text == "1 plugins are loaded, 1 could not be."
+    assert text == f"{len(plugins.BUILT_IN) + 1} plugins are loaded, 1 could not be."
     assert "counter: Counter" in details and "no hardware library" in details and folder in details

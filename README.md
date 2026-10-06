@@ -134,6 +134,7 @@ openscilab/
 ├── core/        signals, analysis, files, timing, firmware handling (no Qt)
 ├── driver/      devices: pico/, arduino/, dslogic/, rigoldho/, remote/, simulated/, process/ (devices in a process of their own)
 ├── lab/         flows: model, engine, nodes/, projects, panels, reports, examples (no Qt)
+├── plugins/     plugin loader; the plugins of openSciLab's own devices (registered like any other)
 ├── sigrok/      sigrokdecode compatible runtime for the protocol decoders
 ├── sdl/         Signal Description Language
 ├── ui/          Qt interface: shell, documents (data view, flow, panel, device card ...), widgets

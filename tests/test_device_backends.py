@@ -80,7 +80,8 @@ def application():
 
 @pytest.fixture
 def minimal_backend(monkeypatch):
-    monkeypatch.setattr(devices, "_added", [])
+    devices.backends()  # (the built-in plugins register theirs)
+    monkeypatch.setattr(devices, "_added", list(devices._added))
     backend = MinimalBackend()
     devices.register_backend(backend)
     return backend
@@ -157,7 +158,8 @@ def no_picos(monkeypatch):
     monkeypatch.setattr(pico_devices.detector, "detect", lambda: [])
     monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
     monkeypatch.setattr(pico_devices.detector, "detect_foreign_picos", lambda: [])
-    monkeypatch.setattr(devices, "_added", [])
+    devices.backends()
+    monkeypatch.setattr(devices, "_added", list(devices._added))
     devices.register_backend(MinimalBackend())
     devices.register_backend(SecondBackend())
 

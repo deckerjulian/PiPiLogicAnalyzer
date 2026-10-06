@@ -282,11 +282,14 @@ def command_plugins(args) -> int:
     found = plugins.load()
     for plugin in found:
         print(f"{plugin.name}\t{'error: ' + plugin.error if plugin.error else 'loaded'}\t{plugin.source}")
-    if not found:
-        print("No plugins (folders: " + ", ".join(plugins.directories()) + f"; entry points: {plugins.GROUP}).")
+    if all(plugin.builtin for plugin in found):
+        print("No plugins of your own (folders: " + ", ".join(plugins.directories())
+              + f"; entry points: {plugins.GROUP}).")
     for kind in kinds.registered():
         process = ", device process" if kind.process else ""
-        print(f"{kind.kind}:\t{kind.title}{process}, simulated by sim:{kind.simulation}")
+        simulated = ("a simulator" if kind.simulator else
+                     f"simulated by sim:{kind.simulation}" if kind.simulation else "no simulator")
+        print(f"{kind.kind}:\t{kind.title}{process}, {simulated}")
     return 1 if plugins.problems() else 0
 
 

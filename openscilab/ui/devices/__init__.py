@@ -119,14 +119,14 @@ _added: list[DeviceBackend] = []
 
 
 def register_backend(backend: DeviceBackend) -> None:
-    """Adds the backend of a device that is not built in (a plugin's ``setup_ui()``, see
-    :mod:`openscilab.plugins`); windows created afterwards list it."""
+    """Adds the backend of a kind of device (a plugin's ``setup_ui()``, see :mod:`openscilab.plugins`);
+    windows created afterwards list it."""
     _added.append(backend)
 
 
 class KindBackend(DeviceBackend):
-    """The devices of a kind a plugin registered (``driver/kinds``): what its ``detect`` finds, opened
-    by their address. A plugin with a backend of its own for the kind replaces it."""
+    """The devices of a kind without a backend of its own (``driver/kinds``): what its ``detect``
+    finds, opened by their address. A plugin with a backend of its own for the kind replaces it."""
 
     def __init__(self, kind) -> None:
         self.kind = kind
@@ -143,16 +143,12 @@ class KindBackend(DeviceBackend):
 
 
 def backends() -> list[DeviceBackend]:
-    """Every backend, in the order of the device list."""
+    """Every backend, in the order of the device list: those the plugins registered (openSciLab's own
+    first), then one for each kind that finds its devices and has none of its own."""
+    from ... import plugins
     from ...driver import kinds
-    from .arduino import ArduinoBackend
-    from .dslogic import DSLogicBackend
-    from .pico import PicoBackend
-    from .remote import RemoteBackend, RemoteSimulatorBackend
-    from .rigoldho import RigolBackend
-    from .simulated import SimulatedBackend
 
+    plugins.load(ui=True)
     own = {backend.id for backend in _added}
-    return [PicoBackend(), ArduinoBackend(), DSLogicBackend(), RigolBackend(), RemoteBackend(), SimulatedBackend(),
-            RemoteSimulatorBackend(), *_added,
-            *[KindBackend(kind) for kind in kinds.registered() if kind.kind not in own]]
+    return [*_added, *[KindBackend(kind) for kind in kinds.registered()
+                       if kind.detect is not None and kind.kind not in own]]

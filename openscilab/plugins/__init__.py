@@ -4,10 +4,11 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Plugins: Python code that adds devices without changing openSciLab (``docs/drivers.md``).
+"""Plugins: Python code that adds devices (``docs/drivers.md``).
 
 A plugin is
 
+* one of the modules of this package: the devices that come with openSciLab (:data:`BUILT_IN`),
 * a ``.py`` file or a package folder in the ``plugins`` folder of the settings directory, or in a
   folder of the environment variable ``OPENSCILAB_PLUGINS`` (separated by ``:`` or ``;``), or
 * an installed Python package with an entry point in the group ``openscilab.plugins`` (naming a
@@ -18,9 +19,9 @@ A plugin that brings user interface of its own (a device backend that asks for a
 :func:`openscilab.ui.devices.register_backend`) does that in a function ``setup_ui()``, which only
 the application calls: the command line and the device processes stay without Qt.
 
-The plugins load once, when the application starts or when an address of an unknown kind is opened
-(command line, scripts, device processes). A plugin that fails is reported (:func:`problems`), the
-others load. Qt free.
+Those of openSciLab load first, when a kind of device is looked up; the others once, when the
+application starts or when an address of a kind not known yet is opened (command line, scripts,
+device processes). A plugin that fails is reported (:func:`problems`), the others load. Qt free.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ FOLDER = "plugins"
 ENVIRONMENT = "OPENSCILAB_PLUGINS"
 #: the modules of plugin files are named so (pickled objects of a plugin find their class by it)
 PREFIX = "openscilab_plugin_"
+#: the plugins that come with openSciLab (modules of this package), in the order of the device list
+BUILT_IN = ("pico", "arduino", "dslogic", "rigol", "simulation", "remote")
 
 
 @dataclass
@@ -55,16 +58,19 @@ class Plugin:
     error: str = ""
     details: str = ""
     ui_ready: bool = False
+    #: one of openSciLab's own (:data:`BUILT_IN`)
+    builtin: bool = False
 
 
 _plugins: list[Plugin] = []
 _loaded = False
 _loading = False
+_built_in = False
 
 
 def directories() -> list[str]:
     """The folders plugins are loaded from, the settings directory's last."""
-    from .core import settings
+    from ..core import settings
 
     folders = [path for path in os.environ.get(ENVIRONMENT, "").split(os.pathsep) if path.strip()]
     folders.append(os.path.join(settings.settings_directory(), FOLDER))
@@ -76,9 +82,26 @@ def directories() -> list[str]:
     return seen
 
 
+def load_built_in() -> None:
+    """Load the plugins of openSciLab (once): its own kinds of devices."""
+    global _built_in
+    if _built_in:
+        return
+    _built_in = True  # (before: what they register asks for them)
+    for name in BUILT_IN:
+        plugin = Plugin(name, "built in", builtin=True)
+        _plugins.append(plugin)
+        try:
+            plugin.module = importlib.import_module(f"{__name__}.{name}")
+        except Exception as error:  # noqa: BLE001 - reported, the other plugins load
+            _failed(plugin, error)
+
+
 def load(ui: bool = False) -> list[Plugin]:
-    """Load the plugins (once); ``ui``: also call their ``setup_ui()`` (the application, with Qt)."""
+    """Load the plugins (once), openSciLab's own first; ``ui``: also call their ``setup_ui()`` (the
+    application, with Qt)."""
     global _loaded, _loading
+    load_built_in()
     if not _loaded and not _loading:
         _loading = True  # (a plugin that opens a device while it loads finds the kinds so far)
         try:
@@ -111,17 +134,17 @@ def problems() -> list[Plugin]:
 
 
 def reset() -> None:
-    """Forget the plugins and the kinds they registered (tests)."""
+    """Forget the plugins of the user and the kinds they registered (tests); openSciLab's own stay."""
     global _loaded
-    from .driver import kinds
+    from ..driver import kinds
 
     for plugin in _plugins:
-        if plugin.module is not None:
+        if plugin.module is not None and not plugin.builtin:
             for entry in list(kinds._kinds.values()):
                 if entry.module == plugin.module.__name__:
                     kinds.unregister(entry.kind)
             sys.modules.pop(plugin.module.__name__, None)
-    _plugins.clear()
+    _plugins[:] = [plugin for plugin in _plugins if plugin.builtin]
     _loaded = False
 
 

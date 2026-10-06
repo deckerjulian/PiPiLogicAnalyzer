@@ -202,8 +202,8 @@ class Host:
             from ...core.instrument import Instrument
             from ..discovery import open_device
 
-            self.instrument = Instrument.from_driver(open_device(address, bool(options["download_bitstream"])),
-                                                     uri=address)
+            self.instrument = Instrument.from_driver(
+                open_device(address, download_bitstream=bool(options["download_bitstream"])), uri=address)
         else:
             from ...lab.engine.devices import open_instrument
 

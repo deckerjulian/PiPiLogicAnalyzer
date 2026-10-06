@@ -2,18 +2,21 @@
 
 The application works with any logic analyzer that has a driver. It never asks which kind of
 device is connected: a driver describes what its device can do, and the main window and the
-dialogs show what that allows. A device is added in one of two ways:
+dialogs show what that allows. Every kind of device comes from a **plugin** ([Plugins](#plugins)):
+a **driver** (a subclass of `AnalyzerDriverBase`, `driver/base.py`, free of Qt) and one line that
+registers its **kind** of address (`mydevice:...`); the device list, flows, the command line, the
+Python API and device processes open it by that address. The devices of openSciLab come the same
+way, from the plugins it brings along. A device is added in one of two ways:
 
-* **As a plugin** ([Plugins](#plugins)): a Python file or package outside openSciLab with the
-  **driver** (a subclass of `AnalyzerDriverBase`, `driver/base.py`, free of Qt) and one line that
-  registers its **kind** of address (`mydevice:...`). Nothing of openSciLab changes; the device
-  list, flows, the command line, the Python API and device processes open it like a built-in one.
-  `examples/plugins/counter_device.py` is a complete example.
+* **As a plugin of your own**: a Python file or package outside openSciLab. Nothing of openSciLab
+  changes. `examples/plugins/counter_device.py` is a complete example.
 * **Built in**, in the project:
   1. a **driver** in `openscilab/driver/<device>/`;
   2. a **device backend** in `openscilab/ui/devices/<device>.py`, which lists the connected
      devices in the device list and opens the one the user picks;
-  3. its kind of address in `driver/discovery.py` (`open_device`, `list_devices`).
+  3. a **plugin** `openscilab/plugins/<device>.py` that registers its kinds of address and, in
+     `setup_ui()`, its backend; its name goes into `BUILT_IN` of `openscilab/plugins/__init__.py`
+     (which also gives the order of the device list).
 
 ```
 openscilab/
@@ -29,7 +32,11 @@ openscilab/
 │   ├── rigoldho/      Rigol DHO900: SCPI, driver, bridge transfer (fetcher, codec), generator, beacon
 │   ├── simulated/     simulator profiles; arduino_shell.py and scpi_shell.py play the Arduino
 │   │                  firmware and the DHO with the bridge app over their real protocols
-│   └── dslogic/       DreamSourceLab DSLogic over USB (libusb)
+│   ├── dslogic/       DreamSourceLab DSLogic over USB (libusb)
+│   ├── kinds.py       the registry of the kinds of devices
+│   └── discovery.py   list_devices(), open_device(address): through the registry
+├── plugins/           the plugin loader; the plugins of openSciLab's own devices:
+│                      pico.py, arduino.py, dslogic.py, rigol.py, simulation.py, remote.py
 └── ui/devices/
     ├── __init__.py    DeviceBackend, DeviceEntry, backends(), register_backend()
     ├── pico.py        autodetect, USB boards, network device, multi device sets
@@ -114,9 +121,8 @@ Everything else has a default for a simple device and is overridden when the dev
 `OTHER` and names itself with `driver_id`.
 
 **In a device process** ([docs/timing.md](timing.md), *Staying responsive*). A device on USB is
-read in a process of its own: a plugin registers its kind with `process=True`, a built-in device
-adds its kind to `PROCESS_KINDS` in `openscilab/driver/process/__init__.py` (it is opened there with
-`discovery.open_device`; the device process loads the plugins itself). What its
+read in a process of its own: its plugin registers its kind with `process=True` (it is opened there
+with `discovery.open_device`; the device process loads the plugins itself). What its
 driver and facets take and return travels between the processes: plain values (numbers, text,
 dataclasses, numpy arrays) by value, drivers, facets and functions by reference (handlers are called
 back). Allocate the samples of a stream with the allocators of `core/sample_store` - in a device
@@ -155,9 +161,10 @@ class MyDeviceBackend(DeviceBackend):
 (like *Network device…*; entries with `simulated=True` are listed in the group *Simulators*), and `idle_notice()` reports a device that cannot be used yet while
 none is connected (like a Pico board in bootloader mode).
 
-A built-in device is added to the list in `backends()` (`ui/devices/__init__.py`); a plugin calls
-`register_backend(MyDeviceBackend())` in its `setup_ui()` ([Plugins](#plugins)) - or needs no
-backend at all. Devices are opened from the device list of the shell; the device card then
+A backend comes to the device list from its plugin, which calls
+`register_backend(MyDeviceBackend())` in its `setup_ui()` ([Plugins](#plugins)); `backends()`
+(`ui/devices/__init__.py`) lists them in the order the plugins load, openSciLab's own first. A kind
+that finds its devices (`detect`) needs no backend at all. Devices are opened from the device list of the shell; the device card then
 captures with them (`ui/devices/capture.py`), the data view shows the captures.
 
 A driver whose firmware the application can update sets `supports_bootloader` (UF2 boards) or
@@ -208,10 +215,12 @@ kinds.register("mydevice", open_mydevice, title="My analyzer", detect=find_mydev
 | `register(...)` | Meaning |
 | --- | --- |
 | `kind` | the part of the address before the colon: letters, digits, `-`, `_`, `.`; not one of openSciLab's own (`pico`, `sim`, ...) |
-| `open(rest)` | opens the device and returns its driver; raises `DeviceConnectionError` (or `OSError`/`ValueError`) with a message for people |
+| `open(rest)` | opens the device and returns its driver; raises `DeviceConnectionError` (or `OSError`/`ValueError`) with a message for people. Keyword options of `open_device` are passed on when it takes them (`download_bitstream` of the DSLogic) |
 | `detect()` | the connected devices for the device list and `openscilab-cli devices`; leave it out for devices that cannot be found |
 | `process` | read the device in a device process of its own (USB, serial ports) |
-| `simulation` | the simulator profile of flows run with *Simulate* or `--sim` |
+| `simulation` | the simulator profile of flows run with *Simulate* or `--sim`; `None` when no simulator can stand in |
+| `instrument(rest)` | instead of or besides `open`: opens the device as an instrument with all its facets (remote devices, simulators); it gets what a flow passes on and it takes: `clock`, `fast`, `seed`, `wiring`, `signals` (`lab/engine/devices.py`) |
+| `simulator` | the device is a simulator itself: a simulated flow opens it as it is |
 
 That is all: the device list shows what `detect()` finds and opens it by its address, a flow uses
 `{type: device.instrument, address: "mydevice:/dev/ttyUSB0"}`, the command line
@@ -230,10 +239,13 @@ def setup_ui():
     register_backend(MyDeviceBackend())  # see "The device backend"
 ```
 
-The plugins load once, when the application starts, or when an address of a kind not known yet
-is opened (command line, scripts, device processes). A plugin that fails does not stop the others:
+The plugins of openSciLab (`openscilab/plugins/`) load first, when a kind of device is looked up;
+the others once, when the application starts, or when an address of a kind not known yet is opened
+(command line, scripts, device processes). An address without a kind (`COM5`, `/dev/ttyACM0`,
+`192.168.1.5:4045`, a comma separated list) is one of Pico boards. A plugin that fails does not stop the others:
 the application says so in its status bar, *Help → Plugins…* shows the error with its traceback,
-`openscilab-cli plugins` lists every plugin and kind (and the commands warn). An address whose kind
+`openscilab-cli plugins` lists every plugin (openSciLab's own as *built in*) and kind (and the
+commands warn). An address whose kind
 nobody registered fails with the list of known kinds. A plugin runs with the rights of openSciLab:
 only install plugins you trust.
 

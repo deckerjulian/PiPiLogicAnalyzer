@@ -113,7 +113,7 @@ def fake(monkeypatch):
 
     monkeypatch.setattr(api, "open_device", open_device)
     monkeypatch.setattr(
-        api, "list_devices", lambda: [discovery.DeviceInfo("pico:/dev/fake", "Fake board", discovery.KIND_PICO)]
+        api, "list_devices", lambda: [discovery.DeviceInfo("pico:/dev/fake", "Fake board", "pico")]
     )
     driver.opened = opened
     return driver
@@ -488,9 +488,15 @@ def test_list_devices(monkeypatch):
 
 
 def test_open_device_identifiers(monkeypatch):
+    import dataclasses
+
+    from openscilab.driver import kinds
+    from openscilab.plugins import pico
+
     calls = []
-    monkeypatch.setattr(discovery, "_open_pico", lambda text: calls.append(("pico", text)))
-    monkeypatch.setattr(discovery, "_open_dslogic", lambda text, download: calls.append(("dslogic", text, download)))
+    monkeypatch.setattr(pico, "_open_board", lambda text: calls.append(("pico", text)))
+    monkeypatch.setitem(kinds._kinds, "dslogic", dataclasses.replace(
+        kinds.find("dslogic"), open=lambda text, download_bitstream=False: calls.append(("dslogic", text, download_bitstream))))
 
     from openscilab.driver.pico import multi
 

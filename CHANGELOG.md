@@ -16,6 +16,18 @@ again from 0.1.
   *Open in a new window* on its right click); closing the window puts it back.
 - The close button of a tab sits inside the tab, centred on its title.
 
+### Devices
+
+- **The built-in devices are plugins too**: the Pico boards, Arduino, DSLogic, Rigol, the
+  simulators and the remote devices register their kinds of address the same way a plugin does
+  (`openscilab/plugins/`). *Help → Plugins…* and `openscilab-cli plugins` list them as *built in*,
+  together with every kind of address. A plugin can now also open its device as an instrument
+  with all its facets (`instrument=`), say that no simulator stands in for it
+  (`simulation=None`), or that it is a simulator itself (`simulator=True`); see
+  [docs/drivers.md](docs/drivers.md#plugins).
+- *Simulate* of a flow runs a simulated Arduino (`arduino-sim:`) on the simulator *uno* and a
+  simulated Rigol (`rigol-sim:`) on *dho924s*, as it does for the real devices (before: *free*).
+
 ## [0.1.0b1] - 2026-10-06
 
 The first release of **openSciLab**, the open measurement and control lab that PiPiLogicAnalyzer

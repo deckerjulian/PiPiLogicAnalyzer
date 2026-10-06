@@ -558,12 +558,11 @@ def open_instrument(address: str, timeout: float = OPEN_TIMEOUT, **options: Any)
     """The instrument at ``address`` (as ``lab.engine.devices.open_instrument`` opens it), in a device
     process of its own. ``factory="module:function"`` opens it with that function instead."""
     started = time.monotonic()
-    from ..kinds import BUILT_IN, find, kind_of
+    from .. import kinds
 
-    kind = kind_of(address)
-    added = None if not kind or kind in BUILT_IN else find(kind)
-    if added is not None and added.module and added.module != "__main__":
-        options = {**options, "modules": [added.module]}
+    kind = kinds.find(kinds.split(address)[0])
+    if kind is not None and not kind.builtin and kind.module and kind.module != "__main__":
+        options = {**options, "modules": [kind.module]}  # (the device process loads openSciLab's own)
     connection = Connection(address, options, timeout)
     log.debug("Device process %s for %s ready after %.2f s", connection.pid, address, time.monotonic() - started)
     return ProcessInstrument(connection)
