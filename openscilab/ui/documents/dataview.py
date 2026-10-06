@@ -1487,6 +1487,9 @@ class DataView(QMainWindow, Document):
         controller.view = self
         self.source = controller
         controller.instrument.owner = self
+        pending, controller.pending_decoders = controller.pending_decoders, None
+        if pending is not None:  # (of a profile loaded while no view captured for the device)
+            self.decoder_manager.load_configuration(pending)
         controller.changed.connect(self._update_actions)
         self.capture_controls.bind(controller, self.hub)
         self._update_actions()

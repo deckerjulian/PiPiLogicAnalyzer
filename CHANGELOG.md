@@ -21,6 +21,8 @@ again from 0.1.
 - *Signals* of a simulator's device card: the button for a channel's own signal says that it acts
   on the channel selected in the table (*Set signal of the selected channel…*) and is off while
   none is selected (before, it did nothing without a selection).
+- Loading a profile from a device card opens no data view: its decoders go to the device's data
+  view when one is open, else to the next one.
 
 ### Devices
 

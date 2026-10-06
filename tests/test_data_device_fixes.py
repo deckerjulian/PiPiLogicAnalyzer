@@ -151,6 +151,19 @@ def test_a_profile_sets_the_next_capture_of_this_device_only(card, shell):
     assert [doc for doc in shell.area.documents() if isinstance(doc, DataView)] == views  # no decoders: no new view
 
 
+def test_a_profile_opens_no_data_view_its_decoders_wait_for_the_next(card, shell):
+    from openscilab.core.profiles import Profile
+
+    decoders = [{"decoder_id": "uart", "channel_map": {0: 0}}]
+    assert card.controller.view is None
+    assert card.controller.load_profile(Profile(name="uart", decoder_configuration=decoders), card)
+    assert not [doc for doc in shell.area.documents() if isinstance(doc, DataView)]
+    assert "next data view" in shell.statusBar().currentMessage()
+    view = shell.show_data(card.instrument)
+    assert [instance.decoder_id for instance in view.provider.instances] == ["uart"]
+    assert card.controller.pending_decoders is None
+
+
 def test_a_status_change_keeps_the_pin_controls(shell, monkeypatch):
     monkeypatch.setattr(messages, "confirm", lambda *args, **kwargs: True)
     instrument = open_simulated("uno")

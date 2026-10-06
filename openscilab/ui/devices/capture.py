@@ -91,6 +91,9 @@ class CaptureController(QObject):
         self.profiles = ProfileStore()
         #: the data view the captures go to (it registers itself, see DataView.use_instrument)
         self.view = None
+        #: the decoders of a profile loaded while no data view captures for the device: the next one
+        #: gets them (``DataView.attach_source``); loading a profile opens no view
+        self.pending_decoders: Optional[list] = None
         #: finds or opens a data view for this instrument (set by the shell)
         self.view_provider: Optional[Callable[["CaptureController"], object]] = None
         #: the settings of the toolbar of the device card (QuickCaptureBar), when it has one
@@ -602,16 +605,18 @@ class CaptureController(QObject):
             data = capture_io.session_to_dict(session, include_samples=False)
             settings.persist_settings(capture_settings_file(self.driver), data)
             self.profile_loaded.emit()
-        view = self.view if profile.decoder_configuration else None
-        if profile.decoder_configuration and view is None:
-            view = self.ensure_view()
-        if view is not None:
-            view.decoder_manager.load_configuration(profile.decoder_configuration)
-            view.statusBar().showMessage(
-                f'Profile "{profile.name}" loaded'
+        decoders = bool(profile.decoder_configuration)
+        if decoders and self.view is not None:
+            self.view.decoder_manager.load_configuration(profile.decoder_configuration)
+        elif decoders:
+            self.pending_decoders = list(profile.decoder_configuration)
+        text = (f'Profile "{profile.name}" loaded'
                 + (", its capture settings apply to the next capture" if profile.capture_settings is not None else "")
-                + (f" (for this device: {', '.join(changes)})" if changes else ""),
-                8000)
+                + (f" (for this device: {', '.join(changes)})" if changes else "")
+                + (", its decoders to the next data view of the device" if decoders and self.view is None else ""))
+        bar = self.view.statusBar() if self.view is not None else _status_bar(parent)
+        if bar is not None:
+            bar.showMessage(text, 8000)
         self.changed.emit()
         return True
 
@@ -687,3 +692,10 @@ def capture_controller(instrument: Instrument) -> Optional[CaptureController]:
         controller = CaptureController(instrument)
         instrument.capture_controller = controller
     return controller
+
+
+def _status_bar(parent: Optional[QWidget]):
+    """The status bar of the window of ``parent`` (``None`` when it has none)."""
+    window = parent.window() if parent is not None else None
+    status_bar = getattr(window, "statusBar", None)
+    return status_bar() if callable(status_bar) else None
