@@ -8,7 +8,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QTabBar
+from PySide6.QtWidgets import QApplication, QTabBar, QToolButton
 
 
 def settle(times: int = 10) -> None:
@@ -20,10 +20,17 @@ def test_tabs_close_on_their_left(shell):
     first, second = shell.new_flow(), shell.new_data_view()
     group = shell.area.group_of(first)
     bar = group.tabBar()
+    settle()
     for index in range(bar.count()):
-        assert bar.tabButton(index, QTabBar.LeftSide) is not None
-        assert bar.tabButton(index, QTabBar.RightSide) is None
-    bar.tabButton(group.indexOf(second), QTabBar.LeftSide).click()
+        holder = bar.tabButton(index, QTabBar.LeftSide)
+        assert holder is not None and bar.tabButton(index, QTabBar.RightSide) is None
+        # inside the tab, not against its edge, and centred on the text
+        tab, button = bar.tabRect(index), holder.findChild(QToolButton, "tab-close")
+        corner = holder.mapTo(bar, button.geometry().topLeft())
+        assert corner.x() - tab.left() >= 4
+        assert abs((corner.y() + button.height() / 2) - tab.center().y()) <= 2
+    holder = bar.tabButton(group.indexOf(second), QTabBar.LeftSide)
+    holder.findChild(QToolButton, "tab-close").click()
     settle()
     assert second not in shell.area.documents() and first in shell.area.documents()
 

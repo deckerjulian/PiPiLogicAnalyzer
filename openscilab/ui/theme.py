@@ -680,7 +680,7 @@ QTabBar::tab:disabled {{
 }}
 QTabWidget#document-group > QTabBar::tab {{
     background: {PANEL};
-    padding: 6px 14px;
+    padding: 6px 12px 6px 0;
     border: 1px solid {BORDER};
     border-bottom: none;
     border-top-left-radius: 4px;

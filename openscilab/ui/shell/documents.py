@@ -36,6 +36,10 @@ from ..icons import icon
 from ..theme import TEXT_MUTED, _repolish
 
 
+#: space left of the close button of a tab (px)
+CLOSE_MARGIN = 4
+
+
 class DocumentGroup(QTabWidget):
     """One group of document tabs."""
 
@@ -62,7 +66,14 @@ class DocumentGroup(QTabWidget):
 
     def tabInserted(self, index: int) -> None:  # noqa: N802 - Qt naming
         super().tabInserted(index)
-        button = QToolButton(self.tabBar())
+        # Qt puts a tab's left button against the edge of the tab: in a holder with a margin of its
+        # own it sits as far in as the text sits from the right edge, centred on the text
+        holder = QWidget(self.tabBar())
+        holder.setObjectName("tab-close-holder")
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(CLOSE_MARGIN, 1, 0, 0)
+        row.setSpacing(0)
+        button = QToolButton(holder)
         button.setObjectName("tab-close")
         button.setIcon(icon("close", TEXT_MUTED))
         button.setIconSize(QSize(10, 10))
@@ -71,13 +82,15 @@ class DocumentGroup(QTabWidget):
         button.setCursor(Qt.PointingHandCursor)
         button.setToolTip("Close")
         button.setAccessibleName("Close the tab")
-        button.clicked.connect(lambda _checked=False, button=button: self._close_tab_of(button))
-        self.tabBar().setTabButton(index, QTabBar.LeftSide, button)
+        button.clicked.connect(lambda _checked=False, holder=holder: self._close_tab_of(holder))
+        row.addWidget(button)
+        holder.setFixedSize(CLOSE_MARGIN + 16, 17)
+        self.tabBar().setTabButton(index, QTabBar.LeftSide, holder)
 
-    def _close_tab_of(self, button: QToolButton) -> None:
+    def _close_tab_of(self, holder: QWidget) -> None:
         bar = self.tabBar()
         for index in range(bar.count()):
-            if bar.tabButton(index, QTabBar.LeftSide) is button:
+            if bar.tabButton(index, QTabBar.LeftSide) is holder:
                 self.tabCloseRequested.emit(index)
                 return
 
