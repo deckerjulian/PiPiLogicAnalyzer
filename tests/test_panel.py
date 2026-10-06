@@ -44,13 +44,13 @@ def flow_file(tmp_path):
 
 
 def gain_panel() -> Panel:
-    panel = Panel(name="Gain", flow="../flows/gain.flow.yaml", columns=4)
+    panel = Panel(name="Gain", flow="../flows/gain.flow.yaml")
     panel.add("input", "gain.a", title="a", options={"value": 0})
-    panel.add("slider", "gain.b", title="b", row=0, column=1, options={"min": 0, "max": 10, "value": 2})
-    panel.add("number", "gain.out", title="a × b", row=1)
-    panel.add("led", "over.result", title="> 5", row=1, column=1)
-    panel.add("button", "sweep.trigger", title="Sweep", row=2)
-    panel.add("number", "sweep.value", title="Step", row=2, column=1, tab="More")
+    panel.add("slider", "gain.b", title="b", options={"min": 0, "max": 10, "value": 2})
+    panel.add("number", "gain.out", title="a × b", x=16, y=112)
+    panel.add("led", "over.result", title="> 5", x=192, y=112)
+    panel.add("button", "sweep.trigger", title="Sweep", x=16, y=208)
+    panel.add("number", "sweep.value", title="Step", tab="More")
     return panel
 
 
@@ -62,17 +62,21 @@ def test_the_model_round_trips_and_finds_problems(flow_file):
     assert panel_model.dumps(again) == text
     assert again.widget("slider").option("max") == 10 and again.tab_names() == ["", "More"]
     assert again.bindings() == ["gain.a", "gain.b", "sweep.trigger"]
+    assert [widget.rect for widget in again.widgets[:2]] == [(16, 16, 272, 72), (304, 16, 240, 72)]  # (free places)
+    assert again.widget("number2").rect == (16, 16, 160, 80) and (again.width, again.height) == (960, 600)
     flow = yaml_io.loads(FLOW)
     assert panel.problems(flow) == []
-    panel.add("number", "gain.a", row=0, column=0)  # an input on a display, and on the place of 'input'
-    panel.add("led", "nothing.out", row=5)
+    panel.add("number", "gain.a")  # an input on a display
+    panel.add("led", "nothing.out").x = panel.width
     found = panel.problems(flow)
-    assert any("no output" in problem for problem in found) and any("overlaps" in problem for problem in found)
+    assert any("no output" in problem for problem in found) and any("outside the panel" in problem for problem in found)
     assert any("no node 'nothing'" in problem for problem in found)
     with pytest.raises(PanelError, match="unknown widget kind"):
         PanelWidget("x", "dial")
     with pytest.raises(PanelError, match="unknown setting"):
         panel_model.loads("widgets: {x: {kind: led, size: 3}}")
+    with pytest.raises(PanelError, match="unknown setting columns"):
+        panel_model.loads("columns: 4\nwidgets: {}")
 
 
 def test_control_values():
@@ -116,21 +120,22 @@ def test_editing_with_undo(shell, flow_file, monkeypatch):
     assert document.current_view() == "Edit" and document.flow() is not None
     widget = document.add_widget("number")
     assert widget.bind == "" and document.selected == widget.id  # several outputs: the inspector binds it
-    document.update_widget(widget.id, bind="gain.out", columns=2)
+    document.update_widget(widget.id, bind="gain.out", width=320)
     assert document.panel.widget(widget.id).bind == "gain.out"
     inspector = document.inspector_widget()
-    assert inspector is not None
-    document.move_selected(1, 1)
-    assert (document.panel.widget(widget.id).row, document.panel.widget(widget.id).column) == (1, 1)
+    assert inspector is not None and inspector.findChild(QWidget, "setting-width").value() == 320
+    document.move_selected(8, 8)
+    document.move_selected(1, 0)  # (moves in a row: one undo step)
+    assert document.panel.widget(widget.id).rect == (25, 24, 320, 80)
     document.undo.undo()
-    assert document.panel.widget(widget.id).row == 0
+    assert document.panel.widget(widget.id).rect == (16, 16, 320, 80)
     document.undo.undo()
     document.undo.undo()
     assert document.panel.widgets == [] and not document.dirty
     document.undo.redo()
     assert document.panel.widgets and document.dirty
     # a click on a widget in the editor selects it
-    document.add_widget("led", "over.result", row=3)
+    document.add_widget("led", "over.result")
     document.select(None)
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
@@ -220,7 +225,7 @@ def test_the_editor_scrolls_over_widgets(shell, flow_file):
 
     document = shell.new_panel(flow_path=flow_file)
     for row in range(30):
-        document.add_widget("number", "gain.out", row=row)
+        document.add_widget("number", "gain.out", y=row * 100)
     QApplication.processEvents()
     bar = document.edit_area.verticalScrollBar()
     assert bar.maximum() > 0
@@ -238,9 +243,11 @@ def test_suggested_widgets_bind_to_ports_of_the_flow():
     widgets = panel_model.suggest(flow)
     binds = {widget.bind: widget.kind for widget in widgets}
     assert binds["sweep.trigger"] == "button" and binds["over.result"] == "led" and binds["gain.out"] == "number"
-    panel = Panel(widgets=widgets, columns=4)
-    assert panel.problems(flow) == []  # bound ports exist, nothing overlaps
-    assert {widget.bind for widget in widgets if widget.row == 0} == {"gain.a", "sweep.trigger"}  # controls first
+    panel = Panel(widgets=widgets)
+    assert panel.problems(flow) == []  # bound ports exist, all on the panel
+    assert not any(panel_model._overlap(first.rect, second.rect) for first in widgets for second in widgets
+                   if first is not second)
+    assert {widget.bind for widget in widgets if widget.y == panel_model.MARGIN} == {"gain.a", "sweep.trigger"}
 
 
 @pytest.mark.parametrize("key", ["05-measurement/06-characteristic-curve", "08-data/07-long-term-logger",
@@ -255,7 +262,9 @@ def test_suggested_panels_have_no_problems(key):
     flow = load_flow(glob.glob(os.path.join(root, "flows", "*.flow.yaml"))[0])
     widgets = panel_model.suggest(flow)
     assert 0 < len(widgets) <= panel_model.SUGGESTED_WIDGETS
-    assert Panel(widgets=widgets, columns=4).problems(flow) == []
+    panel = Panel(widgets=widgets)
+    panel.grow_to_fit()
+    assert panel.problems(flow) == [] and panel.width == 960
 
 
 def test_a_panel_for_the_unsaved_flow_of_the_graph(shell, tmp_path, monkeypatch):
@@ -296,3 +305,140 @@ def test_a_panel_for_the_unsaved_flow_of_the_graph(shell, tmp_path, monkeypatch)
     assert document._write(str(tmp_path / "gain.panel.yaml"))
     saved = panel_model.load(str(tmp_path / "gain.panel.yaml"))
     assert saved.flow == "gain.flow.yaml" and saved.widgets
+
+
+# ------------------------------------------------------------- free layout
+def test_widgets_snap_to_each_other_to_the_panel_and_to_the_raster():
+    other = (16, 16, 160, 64)
+    # the left edge comes within 6 px of the other's right edge, the top of its top: they meet
+    rect, guides = panel_model.snap((181, 19, 160, 80), [other], (960, 600))
+    assert rect == (176, 16, 160, 80) and ("x", 176.0, 16.0, 96.0) in guides and guides[-1][:2] == ("y", 16.0)
+    # nothing near: on the raster of 8 px
+    assert panel_model.snap((301, 203, 100, 50), [other], (960, 600))[0] == (304, 200, 100, 50)
+    # the middle of the panel; within the panel
+    assert panel_model.snap((427, 503, 100, 50), [], (960, 600))[0] == (430, 504, 100, 50)
+    assert panel_model.snap((900, 580, 100, 50), [], (960, 600))[0] == (860, 550, 100, 50)
+    # a resize moves only its edges; at least the smallest size
+    rect, guides = panel_model.snap((300, 200, 100, 50), [other], (960, 600), "right bottom")
+    assert rect == (300, 200, 100, 48)
+    assert panel_model.snap((300, 200, 3, 50), [], (960, 600), "right")[0][2] == panel_model.MIN_SIZE[0]
+    # free (Alt): where the mouse puts it
+    assert panel_model.snap((181, 19, 160, 80), [other], (960, 600), threshold=0, grid=0)[0] == (181, 19, 160, 80)
+
+
+def test_widgets_are_lined_up_and_distributed():
+    rects = {"a": (10, 10, 50, 20), "b": (40, 50, 80, 30), "c": (200, 5, 20, 20)}
+    assert panel_model.align(rects, "left") == {"a": (10, 10, 50, 20), "b": (10, 50, 80, 30), "c": (10, 5, 20, 20)}
+    assert panel_model.align(rects, "right")["a"] == (170, 10, 50, 20)
+    assert panel_model.align(rects, "middle")["b"] == (40, 28, 80, 30)
+    spread = panel_model.distribute(rects, "x")
+    assert spread["a"] == (10, 10, 50, 20) and spread["c"] == (200, 5, 20, 20) and spread["b"] == (90, 50, 80, 30)
+    with pytest.raises(ValueError):
+        panel_model.align(rects, "diagonal")
+
+
+def test_the_editor_moves_resizes_and_selects_with_the_mouse(shell, flow_file):
+    from PySide6.QtCore import QPoint, Qt
+
+    from openscilab.ui.documents.panel import ORIGIN, _EditPage
+
+    document = shell.new_panel(flow_path=flow_file)
+    first = document.add_widget("number", "gain.out", x=16, y=16)
+    second = document.add_widget("led", "over.result", x=400, y=200)
+    page = document.edit_area.widget()
+    assert isinstance(page, _EditPage)
+
+    def at(x, y):  # a point of the panel on the page
+        return QPoint(ORIGIN + x, ORIGIN + y)
+
+    # drag the LED next to the number: it snaps to its edges, the guides show it, one undo step
+    page.press(at(410, 210), second.id, Qt.NoModifier)
+    page.drag_move(at(190, 30), Qt.LeftButton, Qt.NoModifier)
+    assert page.live[second.id] == (176, 16, 120, 80) and page.guides
+    page = document.edit_area.widget()
+    page.release()
+    assert document.panel.widget(second.id).rect == (176, 16, 120, 80) and document.undo.undoText() == "Move"
+    page = document.edit_area.widget()
+    assert not page.guides
+    # the handle at its right edge makes it wider (on the raster); Alt: freely
+    page.press(at(176 + 120, 56), None, Qt.NoModifier)
+    page.drag_move(at(176 + 203, 56), Qt.LeftButton, Qt.NoModifier)
+    assert page.live[second.id] == (176, 16, 200, 80)
+    page.drag_move(at(176 + 203, 56), Qt.LeftButton, Qt.AltModifier)
+    assert page.live[second.id] == (176, 16, 203, 80)
+    page.release()
+    assert document.panel.widget(second.id).rect == (176, 16, 203, 80)
+    # a frame on the free surface selects what it touches; Shift and a click add one
+    page = document.edit_area.widget()
+    page.press(at(5, 300), None, Qt.NoModifier)
+    page.drag_move(at(200, 60), Qt.LeftButton, Qt.NoModifier)
+    page.release()
+    assert document.selection == [first.id, second.id]
+    page.press(at(20, 20), first.id, Qt.ShiftModifier)
+    page.release()
+    assert document.selection == [second.id]
+    # the arrow keys move the selection (Shift: by the raster)
+    from PySide6.QtTest import QTest
+
+    page = document.edit_area.widget()
+    page.setFocus()
+    QTest.keyClick(page, Qt.Key_Right, Qt.ShiftModifier)
+    QTest.keyClick(document.edit_area.widget(), Qt.Key_Down)
+    assert document.panel.widget(second.id).rect == (184, 17, 203, 80)
+    # the corner of the panel resizes it (not smaller than its widgets need)
+    page = document.edit_area.widget()
+    page.press(at(960, 600), None, Qt.NoModifier)
+    page.drag_move(at(10, 10), Qt.LeftButton, Qt.NoModifier)
+    page.release()
+    assert (document.panel.width, document.panel.height) == (387, 120)  # (120: the smallest panel)
+
+
+def test_several_widgets_are_arranged(shell, flow_file):
+    document = shell.new_panel(flow_path=flow_file)
+    ids = [document.add_widget("number", "gain.out", x=x, y=y).id for x, y in ((16, 16), (300, 40), (520, 24))]
+    document.select_many(ids)
+    from PySide6.QtWidgets import QLabel, QMenu
+
+    assert any(label.text() == "<b>3</b> selected" for label in document.inspector_widget().findChildren(QLabel))
+
+    menu = QMenu()
+    document.fill_arrange_menu(menu)
+    titles = [action.text() for action in menu.actions() if action.text()]
+    assert titles[:3] == ["Align left edges", "Align centres", "Align right edges"]
+    next(action for action in menu.actions() if action.text() == "Align top edges").trigger()
+    assert {document.panel.widget(key).y for key in ids} == {16} and document.undo.undoText() == "Align"
+    document.distribute_selected("x")
+    assert [document.panel.widget(key).x for key in ids] == [16, 268, 520]
+    document.select(ids[0])
+    document.raise_selected()
+    assert document.panel.widgets[-1].id == ids[0]
+    document.select_many(ids[:2])
+    document.remove_selected()
+    assert [widget.id for widget in document.panel.widgets] == [ids[2]]
+
+
+def test_a_widget_from_the_palette_lands_where_it_is_dropped(shell, flow_file):
+    document = shell.new_panel(flow_path=flow_file)
+    widget = document.drop_new("slider", "", (100, 200))
+    assert widget.rect == (100, 200, 240, 72) and document.selection == [widget.id]
+    hint = document.edit_area.widget().findChild(QWidget)  # (no hint on a panel with widgets)
+    assert hint is not None
+
+
+def test_the_operated_panel_scales_with_its_window(shell, flow_file):
+    from openscilab.ui.documents.panel import MIN_SCALE, _RunPage
+
+    document = shell.new_panel(Panel(name="Scaled", flow=flow_file, width=400, height=200))
+    document.add_widget("number", "gain.out", x=0, y=0, width=200, height=100)
+    document.set_view("Operate")
+    page = document.operate_area.takeWidget()  # (sized here, not by the scroll area)
+    assert isinstance(page, _RunPage)
+    page.show()
+    page.resize(800, 800)
+    item = document.items["number"]
+    assert item.geometry().getRect() == (0, 0, 400, 200)  # twice the size: the window is twice as wide
+    page.resize(1000, 200)
+    assert item.geometry().getRect() == (300, 0, 200, 100)  # the height limits it: in the middle
+    page.resize(10, 10)
+    assert page.scale() == MIN_SCALE
+    page.close()

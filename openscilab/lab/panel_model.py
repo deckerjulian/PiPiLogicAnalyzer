@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Panels: widgets on a grid, each bound to a port of a flow (``*.panel.yaml``).
+"""Panels: widgets placed freely on a surface, each bound to a port of a flow (``*.panel.yaml``).
 
 Controls (switch, button, slider, input, choice) send values into the flow: to an input of a node
 as if a wire brought them, or out of an output to the inputs wired to it. Displays (number, LED,
@@ -13,11 +13,17 @@ document draws it (``ui/documents/panel.py``)::
 
     panel: Characteristic curve
     flow: ../flows/curve.flow.yaml
-    columns: 6
+    width: 960
+    height: 600
     widgets:
-      start: {kind: button, bind: sweep.next, title: Start, row: 0, column: 0}
-      curve: {kind: chart, bind: measure.value, row: 1, column: 0, columns: 4, rows: 3}
-      slope: {kind: number, bind: fit.slope, unit: Ω, row: 1, column: 4, tab: Results}
+      start: {kind: button, bind: sweep.next, title: Start, x: 16, y: 16, width: 160, height: 64}
+      curve: {kind: chart, bind: measure.value, x: 16, y: 96, width: 464, height: 240}
+      slope: {kind: number, bind: fit.slope, unit: Ω, x: 496, y: 96, width: 160, height: 80, tab: Results}
+
+Places and sizes are pixels of the panel at its size (``width`` × ``height``). The editor keeps
+them on a raster of :data:`GRID` pixels and lines them up with each other (:func:`snap`,
+:func:`align`, :func:`distribute`); a panel that is operated grows or shrinks with its window as a
+whole.
 """
 
 from __future__ import annotations
@@ -61,7 +67,22 @@ OPTIONS = {
     "label": ("text",),
     "button": (),
 }
-_PLACE = ("row", "column", "rows", "columns")
+_PLACE = ("x", "y", "width", "height")
+#: the raster of places and sizes in the editor (pixels)
+GRID = 8
+#: the space around the widgets and between them where a panel places them itself (pixels)
+MARGIN = 16
+#: the size of a new panel (pixels)
+PANEL_SIZE = (960, 600)
+#: the size of a new widget of each kind (pixels)
+WIDGET_SIZES = {
+    "switch": (160, 72), "button": (160, 64), "slider": (240, 72), "input": (272, 72), "choice": (200, 72),
+    "number": (160, 80), "led": (120, 80), "chart": (464, 240), "scope": (464, 240), "label": (240, 40),
+}
+#: the smallest a widget can be (pixels)
+MIN_SIZE = (40, 24)
+#: a place: (x, y, width, height)
+Rect = tuple[int, int, int, int]
 
 
 class PanelError(ValueError):
@@ -75,10 +96,12 @@ class PanelWidget:
     #: ``node.port`` of the flow (empty: not bound yet)
     bind: str = ""
     title: str = ""
-    row: int = 0
-    column: int = 0
-    rows: int = 1
-    columns: int = 1
+    #: the place on the panel (pixels from its top left corner); ``width``/``height`` 0: the size of
+    #: its kind (:data:`WIDGET_SIZES`)
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
     tab: str = ""
     group: str = ""
     options: dict[str, Any] = field(default_factory=dict)
@@ -86,6 +109,17 @@ class PanelWidget:
     def __post_init__(self) -> None:
         if self.kind not in WIDGET_KINDS:
             raise PanelError(f"{self.id}: unknown widget kind {self.kind!r} (kinds: {', '.join(WIDGET_KINDS)})")
+        width, height = WIDGET_SIZES[self.kind]
+        self.width = max(int(self.width or width), MIN_SIZE[0])
+        self.height = max(int(self.height or height), MIN_SIZE[1])
+
+    @property
+    def rect(self) -> Rect:
+        return self.x, self.y, self.width, self.height
+
+    @rect.setter
+    def rect(self, rect: Rect) -> None:
+        self.x, self.y, self.width, self.height = (int(round(value)) for value in rect)
 
     @property
     def role(self) -> str:
@@ -114,9 +148,7 @@ class PanelWidget:
         if self.title:
             data["title"] = self.title
         for name in _PLACE:
-            value = getattr(self, name)
-            if value != (1 if name in ("rows", "columns") else 0):
-                data[name] = value
+            data[name] = getattr(self, name)
         if self.tab:
             data["tab"] = self.tab
         if self.group:
@@ -142,7 +174,10 @@ class Panel:
     name: str = "Panel"
     #: the flow file, relative to the panel file
     flow: str = ""
-    columns: int = 6
+    #: the size of the panel (pixels): its widgets lie within it
+    width: int = PANEL_SIZE[0]
+    height: int = PANEL_SIZE[1]
+    #: in the order they are drawn: a later one lies on an earlier one
     widgets: list[PanelWidget] = field(default_factory=list)
     #: tab names in order ("" is the first, unnamed tab)
     tabs: list[str] = field(default_factory=list)
@@ -163,10 +198,13 @@ class Panel:
         return f"{base}{number}"
 
     def add(self, kind: str, bind: str = "", **settings) -> PanelWidget:
+        """A new widget; without ``x`` and ``y`` on the first free place of its tab (the panel grows
+        when there is none)."""
         widget = PanelWidget(self.unique_id(settings.pop("id", kind)), kind, bind, **settings)
-        if "row" not in settings:
-            widget.row = self.free_row(widget.tab)
+        if "x" not in settings and "y" not in settings:
+            widget.x, widget.y = self.free_place(widget.width, widget.height, widget.tab)
         self.widgets.append(widget)
+        self.grow_to_fit()
         if widget.tab and widget.tab not in self.tabs:
             self.tabs.append(widget.tab)
         return widget
@@ -176,8 +214,25 @@ class Panel:
         self.widgets.remove(widget)
         return widget
 
-    def free_row(self, tab: str = "") -> int:
-        return max((widget.row + widget.rows for widget in self.widgets if widget.tab == tab), default=0)
+    def free_place(self, width: int, height: int, tab: str = "") -> tuple[int, int]:
+        """The first place (top to bottom, left to right) where a widget of this size touches no
+        other one of ``tab`` (:data:`MARGIN` apart) - below them all when the panel has none."""
+        others = [widget.rect for widget in self.widgets if widget.tab == tab]
+        xs = sorted({MARGIN, *(x + w + MARGIN for x, _y, w, _h in others)})
+        ys = sorted({MARGIN, *(y + h + MARGIN for _x, y, _w, h in others)})
+        for y in ys:
+            for x in xs:
+                if x + width + MARGIN > self.width:
+                    break
+                if not any(_overlap((x, y, width, height), other, MARGIN) for other in others):
+                    return x, y
+        return MARGIN, max(ys)
+
+    def grow_to_fit(self) -> None:
+        """Make the panel as large as its widgets need."""
+        for widget in self.widgets:
+            self.width = max(self.width, widget.x + widget.width + MARGIN)
+            self.height = max(self.height, widget.y + widget.height + MARGIN)
 
     def tab_names(self) -> list[str]:
         names = list(self.tabs)
@@ -214,18 +269,10 @@ class Panel:
                     found.append(f"{widget.id}: {widget.bind} is no output (displays show outputs)")
                 elif widget.role == "control" and widget.port not in names_in | names_out:
                     found.append(f"{widget.id}: {widget.node} has no port {widget.port!r}")
-        taken: dict[tuple[str, int, int], str] = {}
         for widget in self.widgets:
-            for row in range(widget.row, widget.row + widget.rows):
-                for column in range(widget.column, widget.column + widget.columns):
-                    key = (widget.tab, row, column)
-                    if key in taken:
-                        found.append(f"{widget.id} overlaps {taken[key]}")
-                        break
-                    taken[key] = widget.id
-                else:
-                    continue
-                break
+            if widget.x < 0 or widget.y < 0 or widget.x + widget.width > self.width \
+                    or widget.y + widget.height > self.height:
+                found.append(f"{widget.id} lies outside the panel ({self.width} × {self.height})")
         return found
 
     # ------------------------------------------------------------- storage
@@ -233,8 +280,7 @@ class Panel:
         data: dict[str, Any] = {"panel": self.name}
         if self.flow:
             data["flow"] = self.flow
-        if self.columns != 6:
-            data["columns"] = self.columns
+        data["width"], data["height"] = self.width, self.height
         if self.tabs:
             data["tabs"] = list(self.tabs)
         data["widgets"] = {widget.id: widget.to_data() for widget in self.widgets}
@@ -244,8 +290,12 @@ class Panel:
     def from_data(data: dict[str, Any]) -> "Panel":
         if not isinstance(data, dict):
             raise PanelError("a panel file holds a mapping")
+        unknown = [name for name in data if name not in ("panel", "flow", "width", "height", "tabs", "widgets")]
+        if unknown:
+            raise PanelError(f"unknown setting {', '.join(map(str, unknown))} of a panel")
         panel = Panel(name=str(data.get("panel", "Panel")), flow=str(data.get("flow", "") or ""),
-                      columns=int(data.get("columns", 6)), tabs=[str(tab) for tab in data.get("tabs", [])])
+                      width=int(data.get("width", PANEL_SIZE[0])), height=int(data.get("height", PANEL_SIZE[1])),
+                      tabs=[str(tab) for tab in data.get("tabs", [])])
         for widget_id, widget in (data.get("widgets") or {}).items():
             panel.widgets.append(PanelWidget.from_data(str(widget_id), widget or {}))
         return panel
@@ -258,7 +308,7 @@ def save(panel: Panel, path: str) -> None:
 def dumps(panel: Panel) -> str:
     import yaml
 
-    return yaml.safe_dump(panel.to_data(), sort_keys=False, allow_unicode=True, default_flow_style=None)
+    return yaml.safe_dump(panel.to_data(), sort_keys=False, allow_unicode=True, default_flow_style=None, width=120)
 
 
 def loads(text: str) -> Panel:
@@ -283,6 +333,158 @@ def flow_path(panel: Panel, panel_path: Optional[str]) -> Optional[str]:
     if os.path.isabs(panel.flow) or not panel_path:
         return panel.flow
     return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(panel_path)), panel.flow))
+
+
+# -------------------------------------------------------------------- layout
+#: a guide the editor draws while a widget snaps: ("x", x, top, bottom) - a vertical line - or
+#: ("y", y, left, right)
+Guide = tuple[str, float, float, float]
+
+
+def _overlap(first: Rect, second: Rect, gap: int = 0) -> bool:
+    """Whether the rectangles come closer than ``gap``."""
+    x1, y1, w1, h1 = first
+    x2, y2, w2, h2 = second
+    return x1 < x2 + w2 + gap and x2 < x1 + w1 + gap and y1 < y2 + h2 + gap and y2 < y1 + h1 + gap
+
+
+def _anchors(start: float, size: float) -> tuple[float, float, float]:
+    return start, start + size / 2, start + size
+
+
+def snap(rect: Rect, others: list[Rect], bounds: tuple[int, int], sides: str = "move", threshold: float = 6,
+         grid: int = GRID) -> tuple[Rect, list[Guide]]:
+    """Where a widget moved or resized with the mouse lands, and the guides that show why.
+
+    ``sides``: ``"move"`` (the whole widget), else the edges a resize moves (``"left top"``,
+    ``"right"``, ...). An edge - or, when moving, also the middle - that comes within ``threshold``
+    of an edge or the middle of another widget or of the panel (``bounds``: its width and height)
+    lines up with it; otherwise it lands on the raster of ``grid``. The widget stays within the
+    panel and at least :data:`MIN_SIZE`. ``grid`` 0 and ``threshold`` 0: where the mouse puts it.
+    """
+    x, y, width, height = (float(value) for value in rect)
+    panel_width, panel_height = bounds
+    targets_x = [value for ox, _oy, ow, _oh in others for value in _anchors(ox, ow)] + [0, panel_width / 2, panel_width]
+    targets_y = [value for _ox, oy, _ow, oh in others for value in _anchors(oy, oh)] + [0, panel_height / 2,
+                                                                                      panel_height]
+
+    def nearest(anchors: list[float], targets: list[float]) -> Optional[float]:
+        """The shift that puts one of ``anchors`` on one of ``targets`` (the smallest), ``None``."""
+        best: Optional[float] = None
+        for anchor in anchors:
+            for target in targets:
+                shift = target - anchor
+                if abs(shift) <= threshold and (best is None or abs(shift) < abs(best)):
+                    best = shift
+        return best
+
+    def on_grid(value: float) -> float:
+        return round(value / grid) * grid if grid else value
+
+    if sides == "move":
+        shift = nearest(list(_anchors(x, width)), targets_x)
+        x = x + shift if shift is not None else on_grid(x)
+        shift = nearest(list(_anchors(y, height)), targets_y)
+        y = y + shift if shift is not None else on_grid(y)
+        x = min(max(x, 0), max(panel_width - width, 0))
+        y = min(max(y, 0), max(panel_height - height, 0))
+    else:
+        left, top, right, bottom = x, y, x + width, y + height
+        if "left" in sides:
+            shift = nearest([left], targets_x)
+            left = min(max(left + shift if shift is not None else on_grid(left), 0), right - MIN_SIZE[0])
+        if "right" in sides:
+            shift = nearest([right], targets_x)
+            right = max(min(right + shift if shift is not None else on_grid(right), panel_width), left + MIN_SIZE[0])
+        if "top" in sides:
+            shift = nearest([top], targets_y)
+            top = min(max(top + shift if shift is not None else on_grid(top), 0), bottom - MIN_SIZE[1])
+        if "bottom" in sides:
+            shift = nearest([bottom], targets_y)
+            bottom = max(min(bottom + shift if shift is not None else on_grid(bottom), panel_height),
+                         top + MIN_SIZE[1])
+        x, y, width, height = left, top, right - left, bottom - top
+    result = (int(round(x)), int(round(y)), int(round(width)), int(round(height)))
+    return result, guides_for(result, others, bounds, sides)
+
+
+def guides_for(rect: Rect, others: list[Rect], bounds: tuple[int, int], sides: str = "move") -> list[Guide]:
+    """The lines on which ``rect`` meets an edge or the middle of the others or of the panel: a line
+    over everything that lies on it."""
+    x, y, width, height = rect
+    panel = (0, 0, bounds[0], bounds[1])
+    moving_x = _anchors(x, width) if sides == "move" else [value for side, value in (("left", x), ("right", x + width))
+                                                            if side in sides]
+    moving_y = _anchors(y, height) if sides == "move" else [value for side, value in (("top", y), ("bottom", y + height))
+                                                             if side in sides]
+    guides: list[Guide] = []
+    for axis, anchors in (("x", moving_x), ("y", moving_y)):
+        for anchor in anchors:
+            touching = [other for other in [*others, panel]
+                        if any(abs(anchor - value) < 0.5 for value in
+                               (_anchors(other[0], other[2]) if axis == "x" else _anchors(other[1], other[3])))]
+            if not touching:
+                continue
+            if axis == "x":
+                low = min([y, *(other[1] for other in touching)])
+                high = max([y + height, *(other[1] + other[3] for other in touching)])
+            else:
+                low = min([x, *(other[0] for other in touching)])
+                high = max([x + width, *(other[0] + other[2] for other in touching)])
+            guide = (axis, float(anchor), float(low), float(high))
+            if guide not in guides:
+                guides.append(guide)
+    return guides
+
+
+#: how :func:`align` lines widgets up
+ALIGNMENTS = ("left", "center", "right", "top", "middle", "bottom")
+
+
+def align(rects: dict[str, Rect], how: str) -> dict[str, Rect]:
+    """The places of ``rects`` lined up on the left edge, the middle or the right edge of them all
+    (``top``, ``middle``, ``bottom`` likewise)."""
+    if how not in ALIGNMENTS:
+        raise ValueError(f"no alignment {how!r} ({', '.join(ALIGNMENTS)})")
+    left = min(x for x, _y, _w, _h in rects.values())
+    right = max(x + w for x, _y, w, _h in rects.values())
+    top = min(y for _x, y, _w, _h in rects.values())
+    bottom = max(y + h for _x, y, _w, h in rects.values())
+    result = {}
+    for key, (x, y, width, height) in rects.items():
+        if how == "left":
+            x = left
+        elif how == "center":
+            x = round((left + right - width) / 2)
+        elif how == "right":
+            x = right - width
+        elif how == "top":
+            y = top
+        elif how == "middle":
+            y = round((top + bottom - height) / 2)
+        else:
+            y = bottom - height
+        result[key] = (x, y, width, height)
+    return result
+
+
+def distribute(rects: dict[str, Rect], axis: str) -> dict[str, Rect]:
+    """The places of ``rects`` with the same space between neighbours, side by side (``axis`` ``"x"``)
+    or one above the other (``"y"``); the first and the last stay where they are."""
+    index = 0 if axis == "x" else 1
+    order = sorted(rects, key=lambda key: rects[key][index])
+    if len(order) < 3:
+        return dict(rects)
+    first, last = rects[order[0]], rects[order[-1]]
+    sizes = sum(rects[key][index + 2] for key in order)
+    gap = (last[index] + last[index + 2] - first[index] - sizes) / (len(order) - 1)
+    result, position = {}, float(first[index])
+    for key in order:
+        rect = list(rects[key])
+        rect[index] = int(round(position))
+        result[key] = tuple(rect)
+        position += rects[key][index + 2] + gap
+    return result  # type: ignore[return-value]
 
 
 # -------------------------------------------------------------------- values
@@ -339,10 +541,11 @@ _VIEWS = {"view.scope": "scope", "view.strip_chart": "chart", "view.number": "nu
 SUGGESTED_WIDGETS = 12
 
 
-def suggest(flow: Flow, registry=None, columns: int = 4) -> list[PanelWidget]:
+def suggest(flow: Flow, registry=None, width: int = PANEL_SIZE[0]) -> list[PanelWidget]:
     """Widgets for a new panel of ``flow``: a control for each input a person sets (a start button
-    of a sweep, the duty cycle of a PWM, an input that must have a value and has no wire), a display for each result (measurements, checks, what
-    view nodes show, captures nobody views). Placed on a grid of ``columns``."""
+    of a sweep, the duty cycle of a PWM, an input that must have a value and has no wire), a display
+    for each result (measurements, checks, what view nodes show, captures nobody views). Placed in
+    rows on a panel ``width`` pixels wide: the controls, the small displays, the charts and scopes."""
     controls: list[tuple[str, str, str, dict]] = []
     small: list[tuple[str, str, str, dict]] = []
     large: list[tuple[str, str, str, dict]] = []
@@ -392,30 +595,32 @@ def suggest(flow: Flow, registry=None, columns: int = 4) -> list[PanelWidget]:
 
     widgets: list[PanelWidget] = []
     names: set[str] = set()
+    cursor = {"x": MARGIN, "y": MARGIN, "row": 0}
 
-    def place(kind: str, bind: str, title: str, options: dict, row: int, column: int, rows: int = 1,
-              span: int = 1) -> None:
+    def place(kind: str, bind: str, title: str, options: dict) -> None:
         base = "".join(char if char.isalnum() else "_" for char in bind.replace(".", "_"))
         name, number = base, 2
         while name in names:
             name, number = f"{base}{number}", number + 1
         names.add(name)
-        widgets.append(PanelWidget(name, kind, bind, title, row=row, column=column, rows=rows, columns=span,
-                                   options=options))
+        widget = PanelWidget(name, kind, bind, title, options=options)
+        if cursor["x"] > MARGIN and cursor["x"] + widget.width + MARGIN > width:  # (the row is full)
+            new_row()
+        widget.x, widget.y = cursor["x"], cursor["y"]
+        cursor["x"] += widget.width + MARGIN
+        cursor["row"] = max(cursor["row"], widget.height)
+        widgets.append(widget)
 
-    row = 0
-    for start in range(0, len(controls), columns):
-        for column, item in enumerate(controls[start:start + columns]):
-            place(*item, row=row, column=column)
-        row += 1
-    room = max(SUGGESTED_WIDGETS - len(widgets), 0)
+    def new_row() -> None:
+        if cursor["row"]:
+            cursor["y"] += cursor["row"] + MARGIN
+        cursor["x"], cursor["row"] = MARGIN, 0
+
+    room = max(SUGGESTED_WIDGETS - len(controls), 0)
     large = large[:min(len(large), max(room // 3, 1) if room else 0)]
     small = small[:room - len(large)]
-    for start in range(0, len(small), columns):
-        for column, item in enumerate(small[start:start + columns]):
-            place(*item, row=row, column=column)
-        row += 1
-    span = max(columns // 2, 1)
-    for index, item in enumerate(large):
-        place(*item, row=row + (index // 2) * 3, column=(index % 2) * span, rows=3, span=span)
+    for group in (controls, small, large):
+        for item in group:
+            place(*item)
+        new_row()
     return widgets

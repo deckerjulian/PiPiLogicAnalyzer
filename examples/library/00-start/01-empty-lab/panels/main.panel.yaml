@@ -1,4 +1,7 @@
 panel: Main
 flow: ../flows/main.flow.yaml
+width: 960
+height: 112
 widgets:
-  hint: {kind: label, text: "Add widgets from the palette and bind them to ports of the flow."}
+  hint: {kind: label, x: 16, y: 16, width: 144, height: 80, text: Add widgets from the palette and bind them to ports of the
+      flow.}

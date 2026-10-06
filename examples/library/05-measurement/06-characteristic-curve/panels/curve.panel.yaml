@@ -1,10 +1,11 @@
 panel: Characteristic curve
 flow: ../flows/curve.flow.yaml
-columns: 4
+width: 960
+height: 400
 widgets:
-  start: {kind: button, bind: sweep.trigger, title: Start}
-  duty: {kind: number, bind: sweep.value, title: Duty cycle, column: 1, digits: 2}
-  volts: {kind: chart, bind: mean.out, title: Mean voltage at A0, row: 1, rows: 3, columns: 2, unit: V}
-  scope: {kind: scope, bind: capture.CH1, title: CH1, row: 1, column: 2, rows: 3}
-  slope: {kind: number, bind: fit.slope, title: Slope, row: 1, column: 3, unit: V}
-  passed: {kind: led, bind: check.pass, title: Passed, row: 2, column: 3}
+  start: {kind: button, bind: sweep.trigger, title: Start, x: 16, y: 16, width: 224, height: 80}
+  duty: {kind: number, bind: sweep.value, title: Duty cycle, x: 256, y: 16, width: 224, height: 80, digits: 2}
+  volts: {kind: chart, bind: mean.out, title: Mean voltage at A0, x: 16, y: 112, width: 456, height: 272, unit: V}
+  scope: {kind: scope, bind: capture.CH1, title: CH1, x: 488, y: 112, width: 224, height: 272}
+  slope: {kind: number, bind: fit.slope, title: Slope, x: 720, y: 112, width: 224, height: 80, unit: V}
+  passed: {kind: led, bind: check.pass, title: Passed, x: 720, y: 208, width: 224, height: 80}

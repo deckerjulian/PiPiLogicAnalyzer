@@ -316,18 +316,23 @@ Every sigrok protocol decoder is a node (133 of them, e.g. `decode.uart`, `decod
 
 ## Panels
 
-A panel (`*.panel.yaml`) is the front panel of a measuring station: widgets on a grid (tabs,
-groups), each bound to a port of a flow.
+A panel (`*.panel.yaml`) is the front panel of a measuring station: widgets placed freely on a
+surface (tabs, groups), each bound to a port of a flow.
 
 ```yaml
 panel: Characteristic curve
 flow: ../flows/curve.flow.yaml
-columns: 4
+width: 960
+height: 400
 widgets:
-  start: {kind: button, bind: sweep.trigger, title: Start}
-  volts: {kind: chart, bind: mean.out, title: Mean voltage, row: 1, rows: 3, columns: 3, unit: V}
-  slope: {kind: number, bind: fit.slope, title: Slope, row: 1, column: 3, unit: V}
+  start: {kind: button, bind: sweep.trigger, title: Start, x: 16, y: 16, width: 224, height: 80}
+  volts: {kind: chart, bind: mean.out, title: Mean voltage, x: 16, y: 112, width: 456, height: 272, unit: V}
+  slope: {kind: number, bind: fit.slope, title: Slope, x: 488, y: 112, width: 224, height: 80, unit: V}
 ```
+
+`width` and `height` are the size of the panel, `x`, `y`, `width` and `height` of a widget its
+place and size on it, in pixels from the top left corner; `tab` and `group` name its tab and the
+framed group it belongs to.
 
 | Widget | Binding | Options |
 | --- | --- | --- |
@@ -344,12 +349,18 @@ widgets:
 
 Controls send into an input of a node (as if a wire brought the value) or out of an output to the
 inputs wired to it; displays show outputs. Controlled inputs count as wired. *Edit* shows the
-grid: drag widgets from the palette onto a free cell, drag them to move them and their corner to
-resize them (a taken place is refused), or use the inspector (ports of a fitting type, tabs and
-groups to choose) and Alt+arrows; a widget whose port does not exist is marked. *Operate* runs
-the flow (the open flow document with its unsaved changes, else the file) until it is stopped;
-F11 shows the panel full screen. Charts zoom and move like the waveform; a double-click goes back
-to the automatic range.
+surface of the panel like a GUI editor: drag widgets from the palette onto it, drag them to move
+them and their eight handles to resize them. Edges and middles snap to those of the other widgets
+and of the panel within 6 pixels - red guides show it - and otherwise to a raster of 8 pixels; Alt
+places freely. Shift or Ctrl and a click add to the selection, a frame drawn on the free surface
+selects what it touches, `Ctrl+A` all; the arrow keys move the selection by a pixel (Shift: by
+the raster). *Arrange* (tool bar, right click) aligns edges or middles, distributes three or more
+evenly and brings widgets to the front or the back; the corner of the panel resizes it. The
+inspector places a widget exactly and binds it (ports of a fitting type, tabs and groups to
+choose); a widget whose port does not exist is marked. *Operate* runs the flow (the open flow
+document with its unsaved changes, else the file) until it is stopped; the panel grows or shrinks
+with its window as a whole (to half its size at least, then it scrolls), F11 shows it full screen.
+Charts zoom and move like the waveform; a double-click goes back to the automatic range.
 
 ## Signal generation
 

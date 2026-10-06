@@ -1,7 +1,9 @@
 panel: Synchronized instruments
 flow: ../flows/sync.flow.yaml
-columns: 4
+width: 960
+height: 208
 widgets:
-  offset: {kind: number, bind: align.offset, title: Correction of the box, columns: 2, unit: s, digits: 4}
-  accuracy: {kind: number, bind: align.uncertainty, title: Accuracy, column: 2, columns: 2, unit: s, digits: 3}
-  edges: {kind: number, bind: align.edges, title: Matched edges, row: 1, columns: 2}
+  offset: {kind: number, bind: align.offset, title: Correction of the box, x: 16, y: 16, width: 456, height: 80, unit: s,
+    digits: 4}
+  accuracy: {kind: number, bind: align.uncertainty, title: Accuracy, x: 488, y: 16, width: 456, height: 80, unit: s, digits: 3}
+  edges: {kind: number, bind: align.edges, title: Matched edges, x: 16, y: 112, width: 456, height: 80}

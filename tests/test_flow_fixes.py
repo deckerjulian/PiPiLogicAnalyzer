@@ -143,14 +143,14 @@ def test_the_panel_inspector_keeps_the_cursor_and_merges_steps(shell, tmp_path):
     document = shell.new_panel(flow_path=flow_file(tmp_path))
     widget = document.add_widget("number", "gain.out")
     inspector = document.inspector_widget()
-    spin = inspector.findChild(QSpinBox, "setting-columns")
+    spin = inspector.findChild(QSpinBox, "setting-width")
     steps = document.undo.count()
     spin.setValue(spin.value() + 1)
     spin.setValue(spin.value() + 1)
     assert document.inspector_widget() is inspector  # not rebuilt under the cursor
     assert document.undo.count() == steps + 1
     document.undo.undo()
-    assert document.panel.widget(widget.id).columns == widget.columns
+    assert document.panel.widget(widget.id).width == widget.width
 
 
 def test_the_panel_uses_the_current_flow(shell, tmp_path):

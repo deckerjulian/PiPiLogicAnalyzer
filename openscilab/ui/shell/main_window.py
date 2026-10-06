@@ -1055,9 +1055,10 @@ class ShellWindow(QMainWindow):
             flow_path = flow_document.path
         if panel is None:
             name = flow_document.flow.name if flow_document is not None and flow_document.flow.name != "Flow" else "Panel"
-            panel = Panel(name=name, flow=os.path.abspath(flow_path) if flow_path else "", columns=4)
+            panel = Panel(name=name, flow=os.path.abspath(flow_path) if flow_path else "")
             if flow_document is not None:
-                panel.widgets = panel_model.suggest(flow_document.flow, flow_document.registry, panel.columns)
+                panel.widgets = panel_model.suggest(flow_document.flow, flow_document.registry, panel.width)
+                panel.grow_to_fit()
         document = self.add_document(PanelDocument(panel, hub=self.hub, flow_document=flow_document))
         if flow_document is not None:
             self.statusBar().showMessage(

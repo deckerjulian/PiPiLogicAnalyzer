@@ -1,4 +1,5 @@
-"""Arranging a panel with the mouse, and zooming charts."""
+"""Arranging a panel with the mouse - events through the widgets, as the user makes them - and
+zooming charts."""
 
 from __future__ import annotations
 
@@ -23,48 +24,80 @@ def editor(shell, flow_file):  # noqa: F811
 
 
 def page_of(document):
-    return document._grid_page("")
+    """The page of the first tab in the editor."""
+    from PySide6.QtWidgets import QTabWidget
+
+    content = document.edit_area.widget()
+    return content.currentWidget() if isinstance(content, QTabWidget) else content
 
 
-def test_the_editor_shows_free_cells(shell, flow_file):  # noqa: F811
+def mouse(target, kind, point, buttons=Qt.LeftButton, modifiers=Qt.NoModifier):
+    """A mouse event at ``point`` (pixels of ``target``)."""
+    position = QPointF(point)
+    button = Qt.LeftButton if kind != QEvent.MouseMove else Qt.NoButton
+    QApplication.sendEvent(target, QMouseEvent(kind, position, target.mapToGlobal(position), button, buttons,
+                                               modifiers))
+
+
+def test_the_editor_shows_the_surface_of_the_panel(shell, flow_file):  # noqa: F811
+    from openscilab.ui.documents.panel import ORIGIN, _EditPage
+
     document = editor(shell, flow_file)
     page = page_of(document)
-    assert page is not None and page.rows >= 6  # three rows of widgets and three free ones
-    assert page.cell_at(page.grid.cellRect(4, 2).center()) == (4, 2)
+    assert isinstance(page, _EditPage)
+    assert page.minimumWidth() == document.panel.width + 2 * ORIGIN
+    for widget in document.panel.widgets[:5]:  # (the first tab)
+        assert document.items[widget.id].geometry() == page.page_rect(widget.rect)
 
 
-def test_a_widget_moves_to_a_free_cell_and_not_onto_another(shell, flow_file):  # noqa: F811
+def test_a_widget_is_dragged_with_the_mouse(shell, flow_file):  # noqa: F811
     document = editor(shell, flow_file)
-    page = page_of(document)
-    widget = document.panel.widgets[0]  # the input at row 0, column 0
-    document.begin_drag(widget.id, "move")
-    document.drag_to(page.mapToGlobal(page.grid.cellRect(1, 1).center()))  # the LED is there
-    assert document._drag_target is None and page.target is not None and page.target[1] is False
-    document.drag_to(page.mapToGlobal(page.grid.cellRect(4, 3).center()))
-    assert document.end_drag()
-    moved = document.panel.widget(widget.id)
-    assert (moved.row, moved.column) == (4, 3)
+    widget = document.panel.widgets[0]  # the input at 16, 16
+    item = document.items[widget.id]
+    middle = item.rect().center()
+    mouse(item, QEvent.MouseButtonPress, middle)  # (the item does not take it: the editor does)
+    assert document.selection == [widget.id]
+    mouse(item, QEvent.MouseMove, middle + QPoint(203, 301))
+    mouse(item, QEvent.MouseButtonRelease, middle + QPoint(203, 301), Qt.NoButton)
+    assert document.panel.widget(widget.id).rect[:2] == (216, 320)  # (on the raster)
     document.undo.undo()
-    assert (document.panel.widget(widget.id).row, document.panel.widget(widget.id).column) == (0, 0)
+    assert document.panel.widget(widget.id).rect[:2] == (16, 16)
 
 
-def test_a_widget_is_resized_at_its_corner(shell, flow_file):  # noqa: F811
+def test_a_widget_is_resized_at_a_handle(shell, flow_file):  # noqa: F811
+    from openscilab.ui.documents.panel import _handles
+
     document = editor(shell, flow_file)
+    widget = next(item for item in document.panel.widgets if item.kind == "button")
+    document.select(widget.id)
     page = page_of(document)
-    widget = next(item for item in document.panel.widgets if item.kind == "button")  # row 2, column 0
-    document.begin_drag(widget.id, "resize")
-    document.drag_to(page.mapToGlobal(page.grid.cellRect(3, 2).center()))
-    assert document.end_drag()
-    resized = document.panel.widget(widget.id)
-    assert (resized.rows, resized.columns) == (2, 3)
+    corner = _handles(page.page_rect(widget.rect))["right bottom"]
+    mouse(page, QEvent.MouseButtonPress, corner)
+    mouse(page, QEvent.MouseMove, corner + QPoint(98, 41))
+    mouse(page, QEvent.MouseButtonRelease, corner + QPoint(98, 41), Qt.NoButton)
+    x, y, width, height = document.panel.widget(widget.id).rect
+    assert (x, y) == widget.rect[:2] and (width, height) == (256, 104)
 
 
 def test_a_widget_is_dropped_from_the_palette(shell, flow_file):  # noqa: F811
+    from PySide6.QtCore import QMimeData
+    from PySide6.QtGui import QDragMoveEvent, QDropEvent
+
+    from openscilab.ui.documents.panel import ORIGIN, PANEL_WIDGET_MIME
+
     document = editor(shell, flow_file)
-    added = document.drop_new("led", "", (4, 2))
-    assert added is not None and (added.row, added.column) == (4, 2)
-    assert document.drop_new("led", "", (0, 0)) is None  # taken
-    assert "taken" in document.flow_label.text()
+    page = page_of(document)
+    data = QMimeData()
+    data.setData(PANEL_WIDGET_MIME, b"led")
+    point = QPointF(ORIGIN + 600 + 16, ORIGIN + 300 + 16)  # (the widget's corner a little above and left)
+    # (Qt delivers drag events only while a drag runs: given to the page as the drag would give them)
+    page.dragMoveEvent(QDragMoveEvent(point.toPoint(), Qt.CopyAction, data, Qt.LeftButton, Qt.NoModifier))
+    # its top on the middle of the panel (600 high): it snaps there, the guide shows it
+    assert page.ghost is not None and page.ghost.topLeft() == QPoint(ORIGIN + 600, ORIGIN + 300) and page.guides
+    page.dropEvent(QDropEvent(point, Qt.CopyAction, data, Qt.LeftButton, Qt.NoModifier))
+    QApplication.processEvents()
+    added = document.panel.widgets[-1]
+    assert added.kind == "led" and added.rect == (600, 300, 120, 80) and document.selection == [added.id]
 
 
 def test_ports_fit_the_widget_and_tabs_are_chosen(shell, flow_file):  # noqa: F811
@@ -86,7 +119,7 @@ def test_edit_and_operate_are_toggles(shell, flow_file):  # noqa: F811
 
 def test_a_binding_that_does_not_work_is_marked(shell, flow_file):  # noqa: F811
     document = editor(shell, flow_file)
-    document.add_widget("number", "nowhere.out", row=5, column=0)
+    document.add_widget("number", "nowhere.out")
     QApplication.processEvents()
     item = document.items[document.panel.widgets[-1].id]
     assert "no port nowhere.out" in item.toolTip()

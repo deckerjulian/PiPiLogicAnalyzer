@@ -1,9 +1,10 @@
 panel: Measurement panel
 flow: ../flows/measure.flow.yaml
-columns: 4
+width: 960
+height: 400
 widgets:
-  measure: {kind: button, bind: capture.arm, title: Measure}
-  frequency: {kind: number, bind: frequency.out, title: Frequency, column: 1, unit: Hz, digits: 6}
-  duty: {kind: number, bind: duty.out, title: Duty cycle, column: 2, digits: 3}
-  ok: {kind: led, bind: check.pass, title: 1 kHz ± 1 Hz, column: 3}
-  scope: {kind: scope, bind: capture.capture, title: D15 and D8, row: 1, columns: 4, rows: 3}
+  measure: {kind: button, bind: capture.arm, title: Measure, x: 16, y: 16, width: 224, height: 80}
+  frequency: {kind: number, bind: frequency.out, title: Frequency, x: 256, y: 16, width: 224, height: 80, unit: Hz, digits: 6}
+  duty: {kind: number, bind: duty.out, title: Duty cycle, x: 488, y: 16, width: 224, height: 80, digits: 3}
+  ok: {kind: led, bind: check.pass, title: 1 kHz ± 1 Hz, x: 720, y: 16, width: 224, height: 80}
+  scope: {kind: scope, bind: capture.capture, title: D15 and D8, x: 16, y: 112, width: 928, height: 272}

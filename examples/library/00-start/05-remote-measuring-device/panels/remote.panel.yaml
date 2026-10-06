@@ -1,8 +1,9 @@
 panel: Remote measuring device
 flow: ../flows/remote.flow.yaml
-columns: 4
+width: 960
+height: 400
 widgets:
-  do0: {kind: switch, bind: do0.value, title: Output do0}
-  calibrate: {kind: button, bind: calibrate.trigger, title: Measure the latency, column: 1}
-  latency: {kind: number, bind: calibrate.result, title: Latency, column: 2, columns: 2}
-  chart: {kind: chart, bind: ai0.out, title: ai0, row: 1, columns: 4, rows: 3, unit: V}
+  do0: {kind: switch, bind: do0.value, title: Output do0, x: 16, y: 16, width: 224, height: 80}
+  calibrate: {kind: button, bind: calibrate.trigger, title: Measure the latency, x: 256, y: 16, width: 224, height: 80}
+  latency: {kind: number, bind: calibrate.result, title: Latency, x: 488, y: 16, width: 456, height: 80}
+  chart: {kind: chart, bind: ai0.out, title: ai0, x: 16, y: 112, width: 928, height: 272, unit: V}

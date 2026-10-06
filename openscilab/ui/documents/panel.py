@@ -6,42 +6,48 @@
 
 """The panel document: a measuring station's front panel bound to a flow.
 
-*Edit*: widgets from the palette onto a grid (tabs, groups), the inspector binds them to ports of
-the flow and places them; undo/redo for every change. *Operate*: the widgets work – controls send
-their values into the running flow, displays show the values of its outputs; ``F11`` shows the
-panel full screen as an application of its own (kiosk). Files: ``*.panel.yaml``.
+*Edit*: widgets from the palette onto the surface of the panel, placed freely. Moved and resized
+with the mouse they snap to the edges and middles of the others and of the panel - guides show it -
+or to a raster of 8 pixels (Alt: freely); Shift or Ctrl add to the selection, a frame drawn on the
+free surface selects what it touches, the arrow keys move the selection, *Arrange* lines several
+up. The inspector binds them to ports of the flow and places them exactly; undo/redo for every
+change. *Operate*: the widgets work – controls send their values into the running flow, displays
+show the values of its outputs; the panel scales with its window as a whole; ``F11`` shows it full
+screen as an application of its own (kiosk). Files: ``*.panel.yaml``.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Iterable, Optional
 
-from PySide6.QtCore import QEvent, QMimeData, QObject, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QPointF, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QCursor,
     QDrag,
     QKeySequence,
     QPainter,
     QPen,
+    QPolygon,
     QShortcut,
     QUndoCommand,
     QUndoStack,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
-    QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -57,12 +63,22 @@ from ...core.hub import Hub
 from ...lab import panel_model
 from ...lab.flow_files import load_flow
 from ...lab.model import Flow, FlowError
-from ...lab.panel_model import CONTROL_KINDS, WIDGET_KINDS, Panel, PanelError, PanelWidget
+from ...lab.panel_model import (
+    CONTROL_KINDS,
+    GRID,
+    MIN_SIZE,
+    WIDGET_KINDS,
+    WIDGET_SIZES,
+    Panel,
+    PanelError,
+    PanelWidget,
+    Rect,
+)
 from .. import messages
 from ..flow.runner import FlowRunner
 from ..icons import icon, set_icon
 from ..panel.widgets import PanelItem, make_item
-from ..theme import ACCENT, BORDER, ERROR, TEXT_MUTED, set_role
+from ..theme import ACCENT, BORDER, BORDER_STRONG, ERROR, PANEL, PANEL_LIGHT, TEXT_MUTED, set_role
 from .base import DocumentWidget
 
 log = logging.getLogger(__name__)
@@ -105,47 +121,8 @@ class PanelEdit(QUndoCommand):
         self.document._restore(self.after)
 
 
-class _Selector(QObject):
-    """In the editor a click on a widget selects it instead of operating it."""
-
-    def __init__(self, document: "PanelDocument", widget_id: str) -> None:
-        super().__init__(document)
-        self.document, self.widget_id = document, widget_id
-
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming
-        if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
-            self.document.select(self.widget_id)
-            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                self._press = event.globalPosition().toPoint()
-            return True
-        if event.type() == QEvent.MouseMove:
-            press = getattr(self, "_press", None)
-            if press is not None and event.buttons() & Qt.LeftButton:
-                position = event.globalPosition().toPoint()
-                if self.document.dragging is None and (position - press).manhattanLength() >= 6:
-                    self.document.begin_drag(self.widget_id, "move")
-                if self.document.dragging is not None:
-                    self.document.drag_to(position)
-            return True
-        if event.type() == QEvent.MouseButtonRelease:
-            self._press = None
-            if self.document.dragging is not None:
-                self.document.end_drag()
-            return True
-        if event.type() == QEvent.Wheel:
-            # not into the widget (a spin box would change), but to the editor so it scrolls
-            area = self.document.edit_area
-            for bar, delta in ((area.verticalScrollBar(), event.pixelDelta().y() or event.angleDelta().y() / 4),
-                               (area.horizontalScrollBar(), event.pixelDelta().x() or event.angleDelta().x() / 4)):
-                bar.setValue(int(bar.value() - delta))
-            return True
-        return False
-
-
-#: height of a grid row in the editor, and the free rows below the widgets
-ROW_HEIGHT = 80
-EMPTY_ROWS = 3
-PANEL_WIDGET_MIME = "application/x-openscilab-panel-widget"
+#: the smallest panel (pixels)
+MIN_PANEL = (200, 120)
 #: the signal types each kind of widget can show or set (missing: any)
 KIND_TYPES = {
     "number": (signals.SCALAR, signals.ANALOG, signals.BOOL),
@@ -178,117 +155,478 @@ class _Palette(QListWidget):
         drag.exec(Qt.CopyAction)
 
 
-class _EditGrid(QWidget):
-    """A tab of the panel in the editor: the cells drawn, widgets dropped and moved onto them."""
+class _Selector(QObject):
+    """In the editor the mouse acts on the surface of the panel, not on the widget under it: a click
+    selects the widget, a drag moves it (:class:`_EditPage`)."""
+
+    def __init__(self, page: "_EditPage", widget_id: str) -> None:
+        super().__init__(page)
+        self.page, self.widget_id = page, widget_id
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming
+        kind = event.type()
+        if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseMove, QEvent.MouseButtonRelease):
+            point = self.page.mapFromGlobal(event.globalPosition().toPoint())
+            if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self.page.press(point, self.widget_id, event.modifiers())
+            elif kind == QEvent.MouseMove:
+                self.page.drag_move(point, event.buttons(), event.modifiers())
+            elif kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self.page.release()
+            return True
+        if kind == QEvent.ContextMenu:
+            self.page.context_menu(event.globalPos(), self.widget_id)
+            return True
+        if kind == QEvent.Wheel:
+            # not into the widget (a spin box would change), but to the editor so it scrolls
+            area = self.page.document.edit_area
+            for bar, delta in ((area.verticalScrollBar(), event.pixelDelta().y() or event.angleDelta().y() / 4),
+                               (area.horizontalScrollBar(), event.pixelDelta().x() or event.angleDelta().x() / 4)):
+                bar.setValue(int(bar.value() - delta))
+            return True
+        return False
+
+
+#: the room around the panel in the editor (pixels)
+ORIGIN = 24
+#: the size of a handle of a selected widget (pixels)
+HANDLE = 8
+#: how close an edge comes to another before it snaps (pixels)
+SNAP_DISTANCE = 6
+#: a panel that is operated is drawn at least this large (its scale); a smaller window scrolls
+MIN_SCALE = 0.5
+#: the room of a group's frame around its widgets, and above them for its title (pixels)
+GROUP_PADDING = 8
+GROUP_TITLE = 22
+#: the edges each handle of a selected widget moves, and its cursor
+CURSORS = {
+    "left top": Qt.SizeFDiagCursor, "top": Qt.SizeVerCursor, "right top": Qt.SizeBDiagCursor,
+    "right": Qt.SizeHorCursor, "right bottom": Qt.SizeFDiagCursor, "bottom": Qt.SizeVerCursor,
+    "left bottom": Qt.SizeBDiagCursor, "left": Qt.SizeHorCursor,
+}
+PANEL_WIDGET_MIME = "application/x-openscilab-panel-widget"
+
+
+def _handles(rect: QRect) -> dict[str, QPoint]:
+    """The handles of a widget's rectangle: where each one sits."""
+    left, top, right, bottom = rect.left(), rect.top(), rect.left() + rect.width(), rect.top() + rect.height()
+    middle_x, middle_y = (left + right) // 2, (top + bottom) // 2
+    return {"left top": QPoint(left, top), "top": QPoint(middle_x, top), "right top": QPoint(right, top),
+            "right": QPoint(right, middle_y), "right bottom": QPoint(right, bottom),
+            "bottom": QPoint(middle_x, bottom), "left bottom": QPoint(left, bottom), "left": QPoint(left, middle_y)}
+
+
+def _union(rects: Iterable[Rect]) -> Rect:
+    rects = list(rects)
+    left, top = min(rect[0] for rect in rects), min(rect[1] for rect in rects)
+    right = max(rect[0] + rect[2] for rect in rects)
+    bottom = max(rect[1] + rect[3] for rect in rects)
+    return left, top, right - left, bottom - top
+
+
+def _paint_groups(painter: QPainter, widgets: list[PanelWidget], to_page: Callable[[PanelWidget], QRect]) -> None:
+    """A frame with its title around the widgets of each group."""
+    groups: dict[str, QRect] = {}
+    for widget in widgets:
+        if widget.group:
+            rect = to_page(widget)
+            groups[widget.group] = groups[widget.group].united(rect) if widget.group in groups else rect
+    painter.setBrush(Qt.NoBrush)
+    for name, rect in groups.items():
+        frame = rect.adjusted(-GROUP_PADDING, -GROUP_TITLE, GROUP_PADDING, GROUP_PADDING)
+        painter.setPen(QPen(QColor(BORDER_STRONG), 1))
+        painter.drawRoundedRect(frame, 6, 6)
+        painter.setPen(QColor(TEXT_MUTED))
+        painter.drawText(frame.adjusted(10, 3, -10, 0), Qt.AlignLeft | Qt.AlignTop, name)
+
+
+class _Overlay(QWidget):
+    """Over the widgets of the editor: the selection with its handles, the corner of the panel, the
+    guides of snapping, the frame that selects and where a widget from the palette lands."""
+
+    def __init__(self, page: "_EditPage") -> None:
+        super().__init__(page)
+        self.page = page
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        page = self.page
+        painter = QPainter(self)
+        accent = QColor(ACCENT)
+        selected = page.selected_here()
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(accent, 2))
+        for widget_id in selected:
+            painter.drawRect(page.page_rect(page.rect_of(widget_id)).adjusted(-1, -1, 1, 1))
+        if len(selected) == 1:
+            painter.setPen(QPen(accent, 1))
+            painter.setBrush(QColor(PANEL_LIGHT))
+            for point in _handles(page.page_rect(page.rect_of(selected[0]))).values():
+                painter.drawRect(QRect(point.x() - HANDLE // 2, point.y() - HANDLE // 2, HANDLE, HANDLE))
+        width, height = page.panel_size()
+        corner = QPoint(ORIGIN + width, ORIGIN + height)
+        painter.setPen(QPen(QColor(TEXT_MUTED), 1.2))
+        for step in (4, 8, 12):  # the corner of the panel: drag it to resize the panel
+            painter.drawLine(corner.x() - step, corner.y() - 2, corner.x() - 2, corner.y() - step)
+        painter.setPen(QPen(QColor(ERROR), 1))
+        for axis, position, low, high in page.guides:
+            if axis == "x":
+                painter.drawLine(QPointF(ORIGIN + position, ORIGIN + low - 8), QPointF(ORIGIN + position, ORIGIN + high + 8))
+            else:
+                painter.drawLine(QPointF(ORIGIN + low - 8, ORIGIN + position), QPointF(ORIGIN + high + 8, ORIGIN + position))
+        for rect in (page.band, page.ghost):
+            if rect is not None:
+                fill = QColor(accent)
+                fill.setAlpha(36)
+                painter.setBrush(fill)
+                painter.setPen(QPen(accent, 1, Qt.DashLine))
+                painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+
+class _EditPage(QWidget):
+    """A tab of the panel in the editor: the surface of the panel with its raster and the widgets on
+    it. They are selected (Shift or Ctrl add, a frame drawn on the free surface takes what it
+    touches), moved and resized with the mouse - snapping to the others, to the panel and to the
+    raster (:func:`~openscilab.lab.panel_model.snap`; Alt places them freely) - and moved with the
+    arrow keys (Shift: by the raster); the corner of the panel resizes it."""
 
     def __init__(self, document: "PanelDocument", tab: str) -> None:
         super().__init__()
         self.document, self.tab = document, tab
-        self.grid: Optional[QGridLayout] = None
-        self.rows = 0
-        self.target: Optional[tuple[QRect, bool]] = None
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.ClickFocus)
+        self.items: dict[str, PanelItem] = {}
+        #: places while the mouse moves or resizes widgets (pixels of the panel), until they are kept
+        self.live: dict[str, Rect] = {}
+        #: the size of the panel while its corner is dragged
+        self.live_size: Optional[tuple[int, int]] = None
+        #: the guides of the snap the mouse made: see panel_model.guides_for
+        self.guides: list = []
+        #: the frame that selects, and where a widget from the palette lands (pixels of the page)
+        self.band: Optional[QRect] = None
+        self.ghost: Optional[QRect] = None
+        self._drag: Optional[dict] = None
+        self._cursor = Qt.ArrowCursor
+        self.overlay = _Overlay(self)
+        self._fit_panel()
 
-    def cell_rect(self, row: int, column: int, rows: int = 1, columns: int = 1) -> QRect:
-        first = self.grid.cellRect(row, column)
-        last = self.grid.cellRect(min(row + rows - 1, self.rows - 1), min(column + columns - 1,
-                                                                           self.document.panel.columns - 1))
-        return first.united(last)
+    # ----------------------------------------------------------- geometry
+    def panel_size(self) -> tuple[int, int]:
+        panel = self.document.panel
+        return self.live_size or (panel.width, panel.height)
 
-    def cell_at(self, point) -> Optional[tuple[int, int]]:
-        if self.grid is None:
-            return None
-        for row in range(self.rows):
-            for column in range(self.document.panel.columns):
-                rect = self.grid.cellRect(row, column).adjusted(-4, -4, 4, 4)
-                if rect.contains(point):
-                    return row, column
+    def _fit_panel(self) -> None:
+        width, height = self.panel_size()
+        self.setMinimumSize(width + 2 * ORIGIN, height + 2 * ORIGIN)
+
+    def widgets(self) -> list[PanelWidget]:
+        return [widget for widget in self.document.panel.widgets if widget.tab == self.tab]
+
+    def rect_of(self, widget_id: str) -> Rect:
+        return self.live.get(widget_id) or self.document.panel.widget(widget_id).rect
+
+    @staticmethod
+    def page_rect(rect: Rect) -> QRect:
+        x, y, width, height = rect
+        return QRect(ORIGIN + x, ORIGIN + y, width, height)
+
+    @staticmethod
+    def to_panel(point: QPoint) -> QPoint:
+        return QPoint(point.x() - ORIGIN, point.y() - ORIGIN)
+
+    def selected_here(self) -> list[str]:
+        return [widget_id for widget_id in self.document.selection if widget_id in self.items]
+
+    def widget_at(self, point: QPoint) -> Optional[str]:
+        """The widget on top at ``point`` (pixels of the page)."""
+        for widget in reversed(self.widgets()):
+            if self.page_rect(self.rect_of(widget.id)).contains(point):
+                return widget.id
         return None
 
-    def show_target(self, place, ok: bool) -> None:
-        self.target = (self.cell_rect(*place), ok) if place is not None and self.grid is not None else None
+    def add_item(self, item: PanelItem) -> None:
+        """A widget of the panel on this page: the mouse and the keys act on the page, not on it."""
+        self.items[item.model.id] = item
+        selector = _Selector(self, item.model.id)
+        for child in [item, *item.findChildren(QWidget)]:
+            child.installEventFilter(selector)
+            child.setMouseTracking(True)
+            child.setFocusPolicy(Qt.NoFocus)
+
+    def place_items(self) -> None:
+        for widget_id, item in self.items.items():
+            item.setGeometry(self.page_rect(self.rect_of(widget_id)))
+            warning = item.findChild(QLabel, "binding-warning")
+            if warning is not None:
+                warning.move(item.width() - 22, 4)
+        for widget_id in self.live:
+            self.items[widget_id].raise_()  # (what the mouse drags lies on the others while it moves)
+        self.overlay.setGeometry(self.rect())
+        self.overlay.raise_()
+        self.overlay.update()
         self.update()
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self.overlay.setGeometry(self.rect())
+
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        super().paintEvent(event)
-        if self.grid is None:
-            return
         painter = QPainter(self)
-        pen = QPen(QColor(BORDER), 1, Qt.DashLine)
-        painter.setPen(pen)
-        for row in range(self.rows):
-            for column in range(self.document.panel.columns):
-                painter.drawRect(self.grid.cellRect(row, column).adjusted(0, 0, -1, -1))
-        if self.target is not None:
-            rect, ok = self.target
-            color = QColor(ACCENT if ok else ERROR)
-            painter.setPen(QPen(color, 2))
-            fill = QColor(color)
-            fill.setAlpha(40)
-            painter.setBrush(fill)
-            painter.drawRect(rect.adjusted(1, 1, -2, -2))
+        width, height = self.panel_size()
+        surface = QRect(ORIGIN, ORIGIN, width, height)
+        painter.fillRect(surface, QColor(PANEL))
+        painter.setPen(QPen(QColor(BORDER_STRONG), 1))
+        step = GRID * 2  # the raster: a dot every second step
+        painter.drawPoints(QPolygon([QPoint(ORIGIN + x, ORIGIN + y) for x in range(step, width, step)
+                                     for y in range(step, height, step)]))
+        painter.setPen(QPen(QColor(BORDER), 1))
+        painter.drawRect(surface.adjusted(0, 0, -1, -1))
+        _paint_groups(painter, self.widgets(), lambda widget: self.page_rect(self.rect_of(widget.id)))
+
+    # -------------------------------------------------------------- mouse
+    def hit(self, point: QPoint) -> Optional[tuple[str, str]]:
+        """The handle at ``point``: ``("resize", sides)`` of the widget selected alone, ``("panel",
+        "right bottom")`` the corner of the panel; ``None``."""
+        selected = self.selected_here()
+        if len(selected) == 1:
+            for sides, handle in _handles(self.page_rect(self.rect_of(selected[0]))).items():
+                if abs(point.x() - handle.x()) <= HANDLE and abs(point.y() - handle.y()) <= HANDLE:
+                    return "resize", sides
+        width, height = self.panel_size()
+        if abs(point.x() - ORIGIN - width) <= HANDLE and abs(point.y() - ORIGIN - height) <= HANDLE:
+            return "panel", "right bottom"
+        return None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton:
+            self.press(event.position().toPoint(), None, event.modifiers())
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self.drag_move(event.position().toPoint(), event.buttons(), event.modifiers())
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton:
+            self.release()
+
+    def press(self, point: QPoint, widget_id: Optional[str], modifiers) -> None:
+        """The left button went down at ``point`` (pixels of the page), on the widget ``widget_id``."""
+        self.setFocus(Qt.MouseFocusReason)
+        document = self.document
+        start = self.to_panel(point)
+        grip = self.hit(point)
+        if grip is not None:
+            if grip[0] == "resize":
+                selected = self.selected_here()[0]
+                self._drag = {"kind": "resize", "ids": [selected], "sides": grip[1], "start": start,
+                              "rect": self.rect_of(selected)}
+            else:
+                self._drag = {"kind": "panel", "start": start, "size": self.panel_size(), "ids": []}
+            return
+        additive = bool(modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.MetaModifier))
+        if widget_id is not None:
+            if additive:
+                document.toggle_selection(widget_id)
+                if widget_id not in document.selection:
+                    return
+            elif widget_id not in document.selection:
+                document.select(widget_id)
+            ids = self.selected_here()
+            self._drag = {"kind": "move", "ids": ids, "start": start, "rects": {key: self.rect_of(key) for key in ids},
+                          "moved": False, "clicked": None if additive else widget_id}
+            return
+        if not additive:
+            document.select(None)
+        before = list(document.selection)
+        self._drag = {"kind": "band", "start": point, "before": before, "touched": before, "ids": []}
+
+    def drag_move(self, point: QPoint, buttons, modifiers) -> None:
+        """The mouse moved to ``point``: a drag goes on (with the left button), else the cursor shows
+        what a press would take hold of."""
+        drag = self._drag
+        if drag is None or not buttons & Qt.LeftButton:
+            self._hover(point)
+            return
+        free = bool(modifiers & Qt.AltModifier)
+        threshold, grid = (0, 0) if free else (SNAP_DISTANCE, GRID)
+        bounds = self.panel_size()
+        position = self.to_panel(point)
+        dx, dy = position.x() - drag["start"].x(), position.y() - drag["start"].y()
+        others = [widget.rect for widget in self.widgets() if widget.id not in drag["ids"]]
+        kind = drag["kind"]
+        if kind == "move":
+            if not drag["moved"] and abs(dx) + abs(dy) < 4:
+                return  # (a click, not a drag yet)
+            drag["moved"] = True
+            union = _union(drag["rects"].values())
+            snapped, guides = panel_model.snap((union[0] + dx, union[1] + dy, union[2], union[3]), others, bounds,
+                                               "move", threshold, grid)
+            shift_x, shift_y = snapped[0] - union[0], snapped[1] - union[1]
+            self.live = {key: (x + shift_x, y + shift_y, width, height)
+                         for key, (x, y, width, height) in drag["rects"].items()}
+            self.guides = [] if free else guides
+        elif kind == "resize":
+            x, y, width, height = drag["rect"]
+            sides = drag["sides"]
+            if "left" in sides:
+                x, width = x + dx, width - dx
+            if "right" in sides:
+                width += dx
+            if "top" in sides:
+                y, height = y + dy, height - dy
+            if "bottom" in sides:
+                height += dy
+            snapped, guides = panel_model.snap((x, y, width, height), others, bounds, sides, threshold, grid)
+            self.live = {drag["ids"][0]: snapped}
+            self.guides = [] if free else guides
+        elif kind == "panel":
+            width, height = drag["size"]
+            needed = self.document.panel_extent()
+            step = grid or 1
+            self.live_size = (max(round((width + dx) / step) * step, needed[0], MIN_PANEL[0]),
+                              max(round((height + dy) / step) * step, needed[1], MIN_PANEL[1]))
+            self._fit_panel()
+        else:
+            self.band = QRect(drag["start"], point).normalized()
+            touched = drag["before"] + [widget.id for widget in self.widgets() if widget.id not in drag["before"]
+                                        and self.page_rect(widget.rect).intersects(self.band)]
+            if touched != drag["touched"]:
+                drag["touched"] = touched
+                self.document.select_many(touched)
+        self.place_items()
+
+    def release(self) -> None:
+        """The left button came up: what was dragged is kept (one undo step)."""
+        drag, self._drag = self._drag, None
+        live, self.live = self.live, {}
+        size, self.live_size = self.live_size, None
+        self.guides, self.band = [], None
+        document = self.document
+        if drag is not None and drag["kind"] in ("move", "resize") and live \
+                and any(rect != document.panel.widget(key).rect for key, rect in live.items()):
+            document.set_places(live, "Move" if drag["kind"] == "move" else "Resize")  # (builds the pages again)
+            return
+        if drag is not None and drag["kind"] == "panel" and size is not None \
+                and size != (document.panel.width, document.panel.height):
+            document.set_panel_size(*size)
+            return
+        if drag is not None and drag["kind"] == "move" and not drag["moved"] and drag["clicked"] \
+                and len(document.selection) > 1:
+            document.select(drag["clicked"])  # (a click on one of several selected: that one alone)
+        self._fit_panel()
+        self.place_items()
+
+    def _hover(self, point: QPoint) -> None:
+        grip = self.hit(point)
+        cursor = CURSORS[grip[1]] if grip is not None else \
+            (Qt.SizeAllCursor if self.widget_at(point) is not None else Qt.ArrowCursor)
+        if cursor != self._cursor:
+            self._cursor = cursor
+            for widget in [self, *self.findChildren(QWidget)]:
+                widget.setCursor(cursor)
+
+    # --------------------------------------------------------- keys, menu
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        document = self.document
+        step = GRID if event.modifiers() & Qt.ShiftModifier else 1
+        moves = {Qt.Key_Left: (-step, 0), Qt.Key_Right: (step, 0), Qt.Key_Up: (0, -step), Qt.Key_Down: (0, step)}
+        if event.key() in moves and document.selection:
+            document.move_selected(*moves[event.key()])
+        elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and document.selection:
+            document.remove_selected()
+        elif event.matches(QKeySequence.SelectAll):
+            document.select_many([widget.id for widget in self.widgets()])
+        elif event.key() == Qt.Key_Escape and document.selection:
+            document.select(None)
+        else:
+            super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self.context_menu(event.globalPos(), self.widget_at(event.pos()))
+
+    def context_menu(self, position: QPoint, widget_id: Optional[str]) -> None:
+        if widget_id is not None and widget_id not in self.document.selection:
+            self.document.select(widget_id)
+        menu = QMenu(self)
+        self.document.fill_arrange_menu(menu)
+        menu.exec(position)
+
+    # ------------------------------------------------- from the palette
+    def _drop_place(self, point: QPoint, kind: str) -> Rect:
+        """Where a widget of ``kind`` dropped at ``point`` lands (snapped like a moved one)."""
+        width, height = WIDGET_SIZES[kind]
+        corner = self.to_panel(point) - QPoint(16, 16)
+        others = [widget.rect for widget in self.widgets()]
+        place, self.guides = panel_model.snap((corner.x(), corner.y(), width, height), others, self.panel_size(),
+                                              "move", SNAP_DISTANCE, GRID)
+        return place
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming
         if event.mimeData().hasFormat(PANEL_WIDGET_MIME):
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        cell = self.cell_at(event.position().toPoint())
-        if cell is None or not event.mimeData().hasFormat(PANEL_WIDGET_MIME):
+        kind = bytes(event.mimeData().data(PANEL_WIDGET_MIME)).decode("ascii")
+        if kind not in WIDGET_SIZES:
             return
-        place = (cell[0], min(cell[1], self.document.panel.columns - 1), 1, 1)
-        self.show_target(place, self.document.fits(self.tab, place))
+        self.ghost = self.page_rect(self._drop_place(event.position().toPoint(), kind))
+        self.overlay.update()
         event.acceptProposedAction()
 
     def dragLeaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self.show_target(None, True)
+        self.ghost, self.guides = None, []
+        self.overlay.update()
 
     def dropEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self.show_target(None, True)
-        cell = self.cell_at(event.position().toPoint())
         kind = bytes(event.mimeData().data(PANEL_WIDGET_MIME)).decode("ascii")
-        if cell is not None and kind:
-            event.acceptProposedAction()
-            QTimer.singleShot(0, lambda: self.document.drop_new(kind, self.tab, cell))
+        self.ghost = None
+        if kind not in WIDGET_SIZES:
+            return
+        x, y, _width, _height = self._drop_place(event.position().toPoint(), kind)
+        self.guides = []
+        self.overlay.update()
+        event.acceptProposedAction()
+        QTimer.singleShot(0, lambda: self.document.drop_new(kind, self.tab, (x, y)))
 
 
-class _Grip(QWidget):
-    """The corner of a widget in the editor: drag it to give the widget more rows or columns."""
+class _RunPage(QWidget):
+    """A tab of the panel that is operated: the widgets where the editor put them, the panel as a
+    whole scaled to the room it has (not below :data:`MIN_SCALE`: a smaller window scrolls)."""
 
-    def __init__(self, document: "PanelDocument", widget_id: str, item: QWidget) -> None:
-        super().__init__(item)
-        self.document, self.widget_id, self.item = document, widget_id, item
-        self.setFixedSize(14, 14)
-        self.setCursor(Qt.SizeFDiagCursor)
-        self.setToolTip("Drag to resize")
-        item.installEventFilter(self)
-        self._place()
-        self.show()
+    def __init__(self, document: "PanelDocument", tab: str) -> None:
+        super().__init__()
+        self.document, self.tab = document, tab
+        self.items: dict[str, PanelItem] = {}
+        panel = document.panel
+        self.setMinimumSize(int(panel.width * MIN_SCALE), int(panel.height * MIN_SCALE))
 
-    def _place(self) -> None:
-        self.move(self.item.width() - self.width(), self.item.height() - self.height())
-        self.raise_()
+    def add_item(self, item: PanelItem) -> None:
+        self.items[item.model.id] = item
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming
-        if watched is self.item and event.type() == QEvent.Resize:
-            self._place()
-        return False
+    def scale(self) -> float:
+        panel = self.document.panel
+        return max(min(self.width() / panel.width, self.height() / panel.height), MIN_SCALE)
+
+    def page_rect(self, rect: Rect) -> QRect:
+        """Where a place of the panel is on the page: scaled, the panel in the middle."""
+        scale = self.scale()
+        left = max((self.width() - self.document.panel.width * scale) / 2, 0)
+        x, y, width, height = rect
+        return QRect(round(left + x * scale), round(y * scale), round(width * scale), round(height * scale))
+
+    def place_items(self) -> None:
+        for item in self.items.values():
+            item.setGeometry(self.page_rect(item.model.rect))
+        self.update()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self.place_items()
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         painter = QPainter(self)
-        painter.setPen(QPen(QColor(TEXT_MUTED), 1.2))
-        for step in (4, 8, 12):
-            painter.drawLine(self.width() - step, self.height() - 2, self.width() - 2, self.height() - step)
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self.document.select(self.widget_id)
-        self.document.begin_drag(self.widget_id, "resize")
-
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self.document.drag_to(event.globalPosition().toPoint())
-
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        self.document.end_drag()
+        _paint_groups(painter, [item.model for item in self.items.values()],
+                      lambda widget: self.page_rect(widget.rect))
 
 
 class PanelDocument(DocumentWidget):
@@ -315,7 +653,8 @@ class PanelDocument(DocumentWidget):
         self.project = project
         self._path = path
         self._flow = flow
-        self.selected: Optional[str] = None
+        #: the selected widgets (ids), the last one selected last
+        self.selection: list[str] = []
         self.items: dict[str, PanelItem] = {}
         self.kiosk: Optional[QWidget] = None
         self.undo = QUndoStack(self)
@@ -324,9 +663,6 @@ class PanelDocument(DocumentWidget):
         self.undo.cleanChanged.connect(self._undo_state_changed)
         self.undo.indexChanged.connect(self._undo_state_changed)  # undo/redo states
         self._keep_inspector = False
-        #: a widget being moved or resized with the mouse: (widget id, "move" or "resize")
-        self.dragging: Optional[tuple[str, str]] = None
-        self._drag_target: Optional[tuple[int, int, int, int]] = None
         self._flow_stamp: Optional[float] = None
         #: finds the open flow document of a file (set by the shell)
         self.flow_provider = None
@@ -375,6 +711,13 @@ class PanelDocument(DocumentWidget):
         bar.add_action("full-screen", self.action_kiosk, "show", NORMAL, text=False)
         bar.add_action("remove", self.action_delete, "edit", LOW, text=False)
         self.addAction(self.action_delete)
+        self.arrange_menu = QMenu(self)
+        self.arrange_menu.aboutToShow.connect(lambda: self.fill_arrange_menu(self.arrange_menu))
+        self.action_arrange = QAction(icon("align"), "Arrange", self)
+        self.action_arrange.setToolTip("Line the selected widgets up, distribute them, bring them to the front")
+        self.action_arrange.setMenu(self.arrange_menu)
+        self.action_arrange.triggered.connect(lambda: self.arrange_menu.popup(QCursor.pos()))
+        bar.add_action("arrange", self.action_arrange, "edit", NORMAL)
         self.action_open_flow = QAction(icon("nodes"), "Open flow", self)
         self.action_open_flow.setToolTip("Open the flow this panel works with")
         self.action_open_flow.triggered.connect(self.open_flow)
@@ -395,7 +738,7 @@ class PanelDocument(DocumentWidget):
         for kind, (role, title) in WIDGET_KINDS.items():
             item = QListWidgetItem(f"{title}  ·  {role}", self.palette)
             item.setData(Qt.UserRole, kind)
-        self.palette.setToolTip("Drag a widget onto the grid, or double-click to add it below the others")
+        self.palette.setToolTip("Drag a widget onto the panel, or double-click to add it on a free place")
         self.palette.itemActivated.connect(lambda item: self.add_widget(item.data(Qt.UserRole)))
         self.palette.setMaximumWidth(220)
         self.edit_area = QScrollArea(editor)
@@ -417,7 +760,8 @@ class PanelDocument(DocumentWidget):
     # ------------------------------------------------------------ identity
     def document_actions(self) -> list:
         """Run, stop, full screen, edit and operate, for the command palette."""
-        return [self.action_run, self.action_stop, self.action_kiosk, self.action_delete, *self.view_actions]
+        return [self.action_run, self.action_stop, self.action_kiosk, self.action_delete, self.action_arrange,
+                *self.view_actions]
 
     def _undo_state_changed(self, *_args) -> None:
         self.document_changed.emit()
@@ -558,32 +902,44 @@ class PanelDocument(DocumentWidget):
     def _push(self, text: str, before: dict, merge_key: Optional[tuple] = None) -> None:
         after = self.panel.to_data()
         if after != before:
+            if not self._keep_inspector:
+                self._inspector = None  # (shows what changed; a change typed into it keeps it)
             self.undo.push(PanelEdit(self, text, before, after, merge_key))
 
     def _restore(self, data: dict) -> None:
         self.panel = Panel.from_data(data)
-        if self.selected and self.selected not in {widget.id for widget in self.panel.widgets}:
-            self.selected = None
+        known = {widget.id for widget in self.panel.widgets}
+        self.selection = [widget_id for widget_id in self.selection if widget_id in known]
         self.rebuild()
         self.document_changed.emit()
 
+    @property
+    def selected(self) -> Optional[str]:
+        """The widget selected alone (``None``: none, or several)."""
+        return self.selection[0] if len(self.selection) == 1 else None
+
     def add_widget(self, kind: str, bind: str = "", **settings) -> PanelWidget:
+        """A new widget (without ``x`` and ``y`` on a free place), selected."""
         before = self.panel.to_data()
         if not bind and kind != "label":
             ports = self.ports(WIDGET_KINDS[kind][0], kind)
             bind = ports[0] if len(ports) == 1 else ""
         widget = self.panel.add(kind, bind, **settings)
-        self.selected = widget.id
+        self.selection = [widget.id]
+        self._inspector = None  # (shows the new widget)
         self._push(f"Add {kind}", before)
         self.selection_changed.emit()
         return widget
 
     def update_widget(self, widget_id: str, **changes) -> None:
-        """Change settings of a widget (``options`` replaces the options)."""
+        """Change settings of a widget (``options`` replaces the options); the panel grows to hold it."""
         before = self.panel.to_data()
         widget = self.panel.widget(widget_id)
         for name, value in changes.items():
             setattr(widget, name, value)
+        widget.x, widget.y = max(int(widget.x), 0), max(int(widget.y), 0)
+        widget.width, widget.height = max(int(widget.width), MIN_SIZE[0]), max(int(widget.height), MIN_SIZE[1])
+        self.panel.grow_to_fit()
         if widget.tab and widget.tab not in self.panel.tabs:
             self.panel.tabs.append(widget.tab)
         self._push(f"Change {widget_id}", before, merge_key=(widget_id, tuple(sorted(changes))))
@@ -596,55 +952,147 @@ class PanelDocument(DocumentWidget):
         finally:
             self._keep_inspector = False
 
-    def remove_selected(self) -> None:
-        if self.selected is None or self.operating:
+    def set_places(self, places: dict[str, Rect], text: str = "Move") -> None:
+        """New places of widgets - moved or resized with the mouse, lined up: one undo step."""
+        before = self.panel.to_data()
+        for widget_id, rect in places.items():
+            self.panel.widget(widget_id).rect = rect
+        self.panel.grow_to_fit()
+        self._push(text, before)
+
+    def move_selected(self, dx: int, dy: int) -> None:
+        """Move the selected widgets by ``dx``, ``dy`` pixels within the panel (the arrow keys); moves
+        in a row are one undo step."""
+        if not self.selection or self.operating:
+            return
+        rects = {widget_id: self.panel.widget(widget_id).rect for widget_id in self.selection}
+        x, y, width, height = _union(rects.values())
+        dx = min(max(dx, -x), self.panel.width - x - width)
+        dy = min(max(dy, -y), self.panel.height - y - height)
+        if not dx and not dy:
             return
         before = self.panel.to_data()
-        self.panel.remove(self.selected)
-        self.selected = None
-        self._push("Remove widget", before)
+        for widget_id, (left, top, w, h) in rects.items():
+            self.panel.widget(widget_id).rect = (left + dx, top + dy, w, h)
+        self._push("Move", before, merge_key=("move", tuple(self.selection)))
+
+    def align_selected(self, how: str) -> None:
+        """Line the selected widgets up (see :func:`~openscilab.lab.panel_model.align`)."""
+        if len(self.selection) >= 2:
+            self.set_places(panel_model.align({key: self.panel.widget(key).rect for key in self.selection}, how),
+                            "Align")
+
+    def distribute_selected(self, axis: str) -> None:
+        """The same space between the selected widgets (see :func:`~openscilab.lab.panel_model.distribute`)."""
+        if len(self.selection) >= 3:
+            self.set_places(panel_model.distribute({key: self.panel.widget(key).rect for key in self.selection},
+                                                   axis), "Distribute")
+
+    def raise_selected(self, front: bool = True) -> None:
+        """The selected widgets on top of the others (``front``) or below them."""
+        if not self.selection:
+            return
+        before = self.panel.to_data()
+        chosen = [widget for widget in self.panel.widgets if widget.id in self.selection]
+        others = [widget for widget in self.panel.widgets if widget.id not in self.selection]
+        self.panel.widgets = others + chosen if front else chosen + others
+        self._push("Bring to front" if front else "Send to back", before)
+
+    def panel_extent(self) -> tuple[int, int]:
+        """The size the widgets of every tab need."""
+        widgets = self.panel.widgets
+        return (max((widget.x + widget.width for widget in widgets), default=0),
+                max((widget.y + widget.height for widget in widgets), default=0))
+
+    def set_panel_size(self, width: int, height: int, merge: bool = False) -> None:
+        """The size of the panel (at least what its widgets need)."""
+        before = self.panel.to_data()
+        needed = self.panel_extent()
+        self.panel.width = max(int(width), needed[0], MIN_PANEL[0])
+        self.panel.height = max(int(height), needed[1], MIN_PANEL[1])
+        self._push("Panel size", before, merge_key=("panel size",) if merge else None)
+
+    def remove_selected(self) -> None:
+        if not self.selection or self.operating:
+            return
+        before = self.panel.to_data()
+        for widget_id in self.selection:
+            self.panel.remove(widget_id)
+        count, self.selection = len(self.selection), []
+        self._push("Remove widget" if count == 1 else "Remove widgets", before)
         self.selection_changed.emit()
 
-    def move_selected(self, rows: int, columns: int) -> None:
-        if self.selected is None:
-            return
-        widget = self.panel.widget(self.selected)
-        self.update_widget(widget.id, row=max(widget.row + rows, 0),
-                           column=min(max(widget.column + columns, 0), self.panel.columns - widget.columns))
-
     def select(self, widget_id: Optional[str]) -> None:
-        self.selected = widget_id
-        self._highlight(widget_id)
+        self.select_many([widget_id] if widget_id else [])
+
+    def toggle_selection(self, widget_id: str) -> None:
+        """Add ``widget_id`` to the selection, or take it out (Shift or Ctrl and a click)."""
+        if widget_id in self.selection:
+            self.select_many([key for key in self.selection if key != widget_id])
+        else:
+            self.select_many([*self.selection, widget_id])
+
+    def select_many(self, widget_ids: Iterable[str]) -> None:
+        self.selection = list(dict.fromkeys(widget_ids))
+        for page in self._edit_pages():
+            page.overlay.update()
         if not self._keep_inspector:
             self._inspector = None
         self.selection_changed.emit()
         self.document_changed.emit()
 
-    def _highlight(self, widget_id: Optional[str]) -> None:
-        for item_id, item in self.items.items():
-            item.setStyleSheet(f"#{item.objectName()} {{ border: 2px solid {ACCENT}; }}" if item_id == widget_id else "")
+    def _edit_pages(self) -> list[_EditPage]:
+        content = self.edit_area.widget()
+        if isinstance(content, _EditPage):
+            return [content]
+        return content.findChildren(_EditPage) if content is not None else []
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        if not self.operating and self.selected is not None and event.modifiers() & Qt.AltModifier:
-            moves = {Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0), Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1)}
-            if event.key() in moves:
-                self.move_selected(*moves[event.key()])
-                return
-        super().keyPressEvent(event)
+    def fill_arrange_menu(self, menu: QMenu) -> None:
+        """*Arrange* (in the tool bar, on a right click in the editor): line up, distribute, order."""
+        menu.clear()
+        count = 0 if self.operating else len(self.selection)
+        for how, title in (("left", "Align left edges"), ("center", "Align centres"),
+                           ("right", "Align right edges"), ("top", "Align top edges"),
+                           ("middle", "Align middles"), ("bottom", "Align bottom edges")):
+            menu.addAction(title, lambda how=how: self.align_selected(how)).setEnabled(count >= 2)
+            if how == "right":
+                menu.addSeparator()
+        menu.addSeparator()
+        for axis, title in (("x", "Distribute horizontally"), ("y", "Distribute vertically")):
+            menu.addAction(title, lambda axis=axis: self.distribute_selected(axis)).setEnabled(count >= 3)
+        menu.addSeparator()
+        menu.addAction("Bring to front", lambda: self.raise_selected(True)).setEnabled(count >= 1)
+        menu.addAction("Send to back", lambda: self.raise_selected(False)).setEnabled(count >= 1)
+        menu.addSeparator()
+        menu.addAction("Select all", lambda: self.select_many(
+            [widget.id for page in self._edit_pages() if page.isVisible() for widget in page.widgets()]))
+        menu.addAction(self.action_delete)
 
     # ------------------------------------------------------------ building
     def rebuild(self) -> None:
-        """Lay the widgets out again (in the editor or for operating)."""
+        """Lay the widgets out again (in the editor or for operating): the same tab, scrolled as it was."""
         operating = self.operating
         area = self.operate_area if operating else self.edit_area
+        old = area.widget()
+        tab = old.tabText(old.currentIndex()) if isinstance(old, QTabWidget) else None
+        focused = isinstance(QApplication.focusWidget(), _EditPage)
+        scrolled = (area.horizontalScrollBar().value(), area.verticalScrollBar().value())
         self.items.clear()
         content = self._build_content(operating)
         old = area.takeWidget()
         area.setWidget(content)
         if old is not None:
             old.deleteLater()
-        if not operating and self.selected:
-            self.select(self.selected)
+        if isinstance(content, QTabWidget) and tab is not None:
+            titles = [content.tabText(index) for index in range(content.count())]
+            if tab in titles:
+                content.setCurrentIndex(titles.index(tab))
+        if scrolled != (0, 0):
+            QTimer.singleShot(0, lambda: (area.horizontalScrollBar().setValue(scrolled[0]),
+                                          area.verticalScrollBar().setValue(scrolled[1])))
+        if focused and not operating:
+            page = content.currentWidget() if isinstance(content, QTabWidget) else content
+            page.setFocus(Qt.OtherFocusReason)
         flow = self.flow_file()
         problems = self.panel.problems(self.flow(), self.registry())
         self.flow_label.setText(("  Flow: " + os.path.basename(flow) if flow else "  No flow")
@@ -652,56 +1100,33 @@ class PanelDocument(DocumentWidget):
         self.flow_label.setToolTip("\n".join(problems))
         self.action_open_flow.setEnabled(bool(flow) or self.flow_document is not None)
         self.action_delete.setEnabled(not operating)
+        self.action_arrange.setEnabled(not operating)
 
     def _build_content(self, operating: bool) -> QWidget:
         tabs = self.panel.tab_names()
-        if len(tabs) == 1:
-            return self._build_grid(tabs[0], operating)
+        pages = [self._build_page(tab, operating) for tab in tabs]
+        if len(pages) == 1:
+            return pages[0]
         widget = QTabWidget()
-        for tab in tabs:
-            widget.addTab(self._build_grid(tab, operating), tab or "Main")
+        for tab, page in zip(tabs, pages):
+            widget.addTab(page, tab or "Main")
         return widget
 
-    def _build_grid(self, tab: str, operating: bool) -> QWidget:
-        page = QWidget() if operating else _EditGrid(self, tab)
-        grid = QGridLayout(page)
-        grid.setSpacing(8)
-        grid.setContentsMargins(12, 12, 12, 12)
+    def _build_page(self, tab: str, operating: bool) -> QWidget:
+        page = _RunPage(self, tab) if operating else _EditPage(self, tab)
         widgets = [widget for widget in self.panel.widgets if widget.tab == tab]
-        groups: dict[str, list[PanelWidget]] = {}
         for widget in widgets:
-            if widget.group:
-                groups.setdefault(widget.group, []).append(widget)
-            else:
-                grid.addWidget(self._item(widget, operating, page), widget.row, widget.column, widget.rows, widget.columns)
-        for name, members in groups.items():
-            top = min(widget.row for widget in members)
-            left = min(widget.column for widget in members)
-            bottom = max(widget.row + widget.rows for widget in members)
-            right = max(widget.column + widget.columns for widget in members)
-            box = QGroupBox(name, page)
-            inner = QGridLayout(box)
-            for widget in members:
-                inner.addWidget(self._item(widget, operating, box), widget.row - top, widget.column - left,
-                                widget.rows, widget.columns)
-            grid.addWidget(box, top, left, bottom - top, right - left)
-        for column in range(self.panel.columns):
-            grid.setColumnStretch(column, 1)
-        rows = max((widget.row + widget.rows for widget in widgets), default=0)
-        if not operating:
-            # free cells to drop widgets into: every row has a height, three more below
-            for row in range(rows + EMPTY_ROWS):
-                grid.setRowMinimumHeight(row, ROW_HEIGHT)
-            rows += EMPTY_ROWS
-            page.grid = grid
-            page.rows = rows
-        grid.setRowStretch(rows, 1)
+            page.add_item(self._item(widget, operating, page))
         if not widgets and not operating:
-            hint = QLabel("Drag a widget from the palette onto the grid (or double-click it); drag widgets to "
-                          "move them, their corner to resize them. The inspector binds them to a port.", page)
+            hint = QLabel("Drag a widget from the palette onto the panel (or double-click it). Drag widgets to "
+                          "move them, their handles to resize them: they snap to each other and to the panel "
+                          "(Alt: freely). Shift adds to the selection, Arrange lines several up; the inspector "
+                          "binds them to a port.", page)
             hint.setWordWrap(True)
             set_role(hint, "hint")
-            grid.addWidget(hint, 0, 0, 1, self.panel.columns)
+            hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+            hint.setGeometry(ORIGIN + 16, ORIGIN + 16, min(560, self.panel.width - 32), 80)
+        page.place_items()
         return page
 
     def _item(self, widget: PanelWidget, operating: bool, parent: QWidget) -> PanelItem:
@@ -709,93 +1134,20 @@ class PanelDocument(DocumentWidget):
         self.items[widget.id] = item
         if operating:
             item.sent.connect(lambda value, model=widget: self.send(model, value))
-        else:
-            selector = _Selector(self, widget.id)
-            for child in [item] + item.findChildren(QWidget):
-                child.installEventFilter(selector)
-            _Grip(self, widget.id, item)
-            problem = self.binding_problem(widget)
-            if problem:
-                item.setToolTip(problem)
-                warning = QLabel("⚠", item)
-                warning.setObjectName("binding-warning")
-                set_role(warning, "warning")
-                warning.setToolTip(problem)
-                warning.move(item.width() - 22, 4)
-                warning.show()
+            return item
+        problem = self.binding_problem(widget)
+        if problem:
+            item.setToolTip(problem)
+            warning = QLabel("⚠", item)
+            warning.setObjectName("binding-warning")
+            set_role(warning, "warning")
+            warning.setToolTip(problem)
+            warning.show()
         return item
 
-    # ---------------------------------------------------- moving with the mouse
-    def occupied(self, tab: str, skip: str = "") -> set[tuple[int, int]]:
-        cells = set()
-        for widget in self.panel.widgets:
-            if widget.tab != tab or widget.id == skip:
-                continue
-            for row in range(widget.row, widget.row + widget.rows):
-                for column in range(widget.column, widget.column + widget.columns):
-                    cells.add((row, column))
-        return cells
-
-    def fits(self, tab: str, place: tuple[int, int, int, int], skip: str = "") -> bool:
-        row, column, rows, columns = place
-        if row < 0 or column < 0 or column + columns > self.panel.columns:
-            return False
-        taken = self.occupied(tab, skip)
-        return not any((r, c) in taken for r in range(row, row + rows) for c in range(column, column + columns))
-
-    def _grid_page(self, tab: str) -> Optional["_EditGrid"]:
-        area = self.edit_area.widget()
-        pages = [area] if isinstance(area, _EditGrid) else (area.findChildren(_EditGrid) if area else [])
-        return next((page for page in pages if page.tab == tab), None)
-
-    def begin_drag(self, widget_id: str, mode: str) -> None:
-        if self.operating:
-            return
-        self.dragging = (widget_id, mode)
-        self._drag_target = None
-
-    def drag_to(self, global_position) -> None:
-        if self.dragging is None:
-            return
-        widget_id, mode = self.dragging
-        widget = self.panel.widget(widget_id)
-        page = self._grid_page(widget.tab)
-        if page is None:
-            return
-        cell = page.cell_at(page.mapFromGlobal(global_position))
-        if cell is None:
-            return
-        row, column = cell
-        if mode == "move":
-            column = min(column, self.panel.columns - widget.columns)
-            place = (row, column, widget.rows, widget.columns)
-        else:
-            place = (widget.row, widget.column, max(row - widget.row + 1, 1), max(column - widget.column + 1, 1))
-        self._drag_target = place if self.fits(widget.tab, place, widget.id) else None
-        page.show_target(place, self._drag_target is not None)
-
-    def end_drag(self) -> bool:
-        if self.dragging is None:
-            return False
-        widget_id, _mode = self.dragging
-        target, self.dragging, self._drag_target = self._drag_target, None, None
-        widget = self.panel.widget(widget_id)
-        page = self._grid_page(widget.tab)
-        if page is not None:
-            page.show_target(None, True)
-        if target is None or target == (widget.row, widget.column, widget.rows, widget.columns):
-            return False
-        row, column, rows, columns = target
-        self.update_widget(widget_id, row=row, column=column, rows=rows, columns=columns)
-        return True
-
-    def drop_new(self, kind: str, tab: str, cell: tuple[int, int]) -> Optional[PanelWidget]:
-        """A widget dragged from the palette onto ``cell`` of ``tab``."""
-        place = (cell[0], min(cell[1], self.panel.columns - 1), 1, 1)
-        if not self.fits(tab, place):
-            self.flow_label.setText("  That place is taken: drop the widget on a free cell")
-            return None
-        return self.add_widget(kind, row=place[0], column=place[1], tab=tab)
+    def drop_new(self, kind: str, tab: str, place: tuple[int, int]) -> PanelWidget:
+        """A widget dragged from the palette, its top left corner at ``place`` on ``tab``."""
+        return self.add_widget(kind, x=int(place[0]), y=int(place[1]), tab=tab)
 
     def binding_problem(self, widget: PanelWidget) -> str:
         """Why the widget's port does not work (empty when it does)."""
@@ -932,7 +1284,14 @@ class PanelDocument(DocumentWidget):
         holder.hide()
         form = QFormLayout(holder)
         form.setContentsMargins(10, 6, 10, 6)
-        if self.selected is None or self.selected not in {widget.id for widget in self.panel.widgets}:
+        if len(self.selection) > 1:
+            form.addRow("Widgets", QLabel(f"<b>{len(self.selection)}</b> selected", holder))
+            note = QLabel("Arrange (in the tool bar, or on a right click) lines them up and distributes them; the "
+                          "arrow keys move them (Shift: by the raster).", holder)
+            note.setWordWrap(True)
+            set_role(note, "hint")
+            form.addRow(note)
+        elif self.selected is None or self.selected not in {widget.id for widget in self.panel.widgets}:
             name = QLineEdit(self.panel.name, holder)
             name.editingFinished.connect(lambda: self._set_panel_name(name.text()))
             form.addRow("Panel", name)
@@ -954,11 +1313,17 @@ class PanelDocument(DocumentWidget):
             row.addWidget(show)
             row.addStretch(1)
             form.addRow("", row)
-            columns = QSpinBox(holder)
-            columns.setRange(1, 24)
-            columns.setValue(self.panel.columns)
-            columns.valueChanged.connect(lambda value: self._set_columns(value))
-            form.addRow("Columns", columns)
+            for name, title in (("width", "Width"), ("height", "Height")):
+                spin = QSpinBox(holder)
+                spin.setRange(MIN_PANEL[0 if name == "width" else 1], 20000)
+                spin.setSingleStep(GRID)
+                spin.setSuffix(" px")
+                spin.setObjectName(f"setting-{name}")
+                spin.setValue(getattr(self.panel, name))
+                spin.setToolTip("The size of the panel (at least what its widgets need); a panel that is operated "
+                                "grows or shrinks with its window")
+                spin.valueChanged.connect(lambda value, key=name: self._set_panel_dimension(key, value))
+                form.addRow(title, spin)
         else:
             widget = self.panel.widget(self.selected)
             form.addRow("Widget", QLabel(f"<b>{widget.id}</b> · {WIDGET_KINDS[widget.kind][1]}", holder))
@@ -973,13 +1338,15 @@ class PanelDocument(DocumentWidget):
                 bind.lineEdit().editingFinished.connect(lambda: self._inspector_update(widget.id, bind=bind.currentText()))
                 bind.activated.connect(lambda _index: self._inspector_update(widget.id, bind=bind.currentText()))
                 form.addRow("Port", bind)
-            for name, low in (("row", 0), ("column", 0), ("rows", 1), ("columns", 1)):
+            for name, title, low in (("x", "X", 0), ("y", "Y", 0), ("width", "Width", MIN_SIZE[0]),
+                                     ("height", "Height", MIN_SIZE[1])):
                 spin = QSpinBox(holder)
-                spin.setRange(low, 99)
+                spin.setRange(low, 20000)
+                spin.setSuffix(" px")
                 spin.setObjectName(f"setting-{name}")
                 spin.setValue(getattr(widget, name))
                 spin.valueChanged.connect(lambda value, key=name: self._inspector_update(widget.id, **{key: value}))
-                form.addRow(name.capitalize(), spin)
+                form.addRow(title, spin)
             for name in ("tab", "group"):
                 choices = (self.panel.tab_names() if name == "tab" else
                            sorted({item.group for item in self.panel.widgets if item.group}))
@@ -1012,10 +1379,14 @@ class PanelDocument(DocumentWidget):
         self.panel.name = name.strip() or self.panel.name
         self._push("Rename the panel", before)
 
-    def _set_columns(self, value: int) -> None:
-        before = self.panel.to_data()
-        self.panel.columns = value
-        self._push("Columns", before)
+    def _set_panel_dimension(self, name: str, value: int) -> None:
+        """The width or height typed into the inspector: the inspector stays."""
+        self._keep_inspector = True
+        try:
+            width, height = (value, self.panel.height) if name == "width" else (self.panel.width, value)
+            self.set_panel_size(width, height, merge=True)
+        finally:
+            self._keep_inspector = False
 
     def _set_options(self, widget_id: str, text: str) -> None:
         import yaml

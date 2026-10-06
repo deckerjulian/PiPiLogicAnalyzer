@@ -25,6 +25,14 @@ again from 0.1.
   view when one is open, else to the next one.
 - A panel has an icon of its own - a dial in a frame, the front of an instrument - and the *Panel*
   button says what a panel is.
+- **Panels are laid out freely, like in a GUI editor**: widgets are placed and sized in pixels
+  on the panel's surface instead of grid cells. Moved or resized (eight handles) they snap to the
+  edges and middles of the other widgets and of the panel - red guides show it - or to a raster of
+  8 pixels (Alt: freely). Shift/Ctrl and a click or a frame on the free surface select several;
+  the arrow keys move the selection; *Arrange* (tool bar, right click) aligns, distributes and
+  orders them; the panel's corner resizes it. An operated panel grows and shrinks with its window
+  as a whole. The panel file stores `width`/`height` of the panel and `x`, `y`, `width`, `height`
+  of each widget (`row`, `column` and `columns` are gone; the example panels are converted).
 - **Templates of your own**: *Project → Save project as template…* (also at the top of the
   *Templates* menu) keeps the project as a template - its flows, panels, nodes, waveforms and
   devices, without the captures and results of its `data` folder, with a name and a description.
