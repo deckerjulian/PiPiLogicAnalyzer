@@ -15,6 +15,9 @@ again from 0.1.
 - **A tab into a window of its own**: drag it off the tab bar or double-click it (as well as
   *Open in a new window* on its right click); closing the window puts it back.
 - The close button of a tab sits inside the tab, centred on its title.
+- The sidebar starts at its width (250 px) instead of taking the room of the hidden node palette
+  as well; the node palette opens beside it at its own width. A layout saved by an earlier version
+  is not restored once (it held the wide sidebar).
 
 ### Devices
 

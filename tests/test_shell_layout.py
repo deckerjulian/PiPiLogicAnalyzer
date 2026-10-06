@@ -1,5 +1,5 @@
-"""The parts of the shell: tabs with their close button on the left, the node palette beside a flow
-that is edited, an activity bar that is arranged with a right click, collapsible parts of the
+"""The parts of the shell: tabs with their close button on the left, the docks at their widths, the
+node palette beside a flow that is edited, an activity bar that is arranged with a right click, collapsible parts of the
 sidebar, the flow's overview."""
 
 from __future__ import annotations
@@ -55,6 +55,19 @@ def test_the_node_palette_shows_beside_a_flow_that_is_edited(shell):
     assert not shell.nodes_dock.isVisible()
     shell.action_nodes.setChecked(True)
     assert shell.nodes_dock.isVisible() and view in shell.area.documents()
+
+
+def test_the_docks_start_at_their_widths(shell, qtbot):
+    from openscilab.ui.shell.main_window import DOCK_WIDTHS, NODES_WIDTH
+
+    # (not with the room of the hidden node palette as well)
+    qtbot.waitUntil(lambda: (shell.sidebar_dock.width(), shell.inspector_dock.width()) == DOCK_WIDTHS)
+    shell.new_flow()
+    qtbot.waitUntil(lambda: shell.nodes_dock.width() == NODES_WIDTH)
+    assert shell.sidebar_dock.width() == DOCK_WIDTHS[0]
+    shell.sidebar_dock.setVisible(False)
+    shell.reset_layout()
+    qtbot.waitUntil(lambda: (shell.sidebar_dock.width(), shell.inspector_dock.width()) == DOCK_WIDTHS)
 
 
 def test_the_activity_bar_is_arranged(shell):

@@ -94,7 +94,11 @@ UPSTREAM_DOCUMENTATION_URL = "https://github.com/gusmanb/logicanalyzer/wiki"
 SHELL_STATE_FILE = "shell-state.json"
 LAYOUTS_FILE = "shell-layouts.json"
 #: Version of the dock layout stored by the shell (a newer layout ignores older ones).
-SHELL_LAYOUT_VERSION = 2  # 2: the node palette is a dock of its own
+SHELL_LAYOUT_VERSION = 3  # 2: the node palette is a dock of its own; 3: the docks sized when shown
+#: the width of the sidebar and of the inspector in a new layout (px)
+DOCK_WIDTHS = (250, 260)
+#: the width of the node palette when it shows beside the sidebar (px)
+NODES_WIDTH = 230
 CAPTURE_EXTENSIONS = (".lac", ".lac.gz", ".sr")
 FLOW_EXTENSIONS = (".flow.yaml", ".flow.yml")
 OPEN_FILE_FILTER = ("openSciLab files (*.lac *.lac.gz *.sr *.flow.yaml *.py *.panel.yaml *.wave.yaml *.sdl);;"
@@ -395,8 +399,9 @@ class ShellWindow(QMainWindow):
 
         self.start_page: Optional[StartPage] = None
         self._default_state = self.saveState(SHELL_LAYOUT_VERSION)
-        if restore_state:
-            self._restore_state()
+        #: the docks take their widths when the window is shown (before, the sidebar gets the room of
+        #: the hidden node palette as well); not when a layout of the user was restored
+        self._docks_sized = bool(restore_state and self._restore_state())
         self._on_active_changed(None)
         self._update_title()
 
@@ -508,7 +513,6 @@ class ShellWindow(QMainWindow):
         self.sidebar_dock.setTitleBarWidget(QWidget(self.sidebar_dock))
         self.sidebar_dock.setFeatures(QDockWidget.DockWidgetClosable)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.sidebar_dock)
-        self.resizeDocks([self.sidebar_dock], [250], Qt.Horizontal)
 
         self.activity_bar.section_selected.connect(self._show_section)
         self.activity_bar.sidebar_toggled.connect(self.sidebar_dock.setVisible)
@@ -531,7 +535,6 @@ class ShellWindow(QMainWindow):
         self.nodes_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.nodes_dock)
         self.splitDockWidget(self.sidebar_dock, self.nodes_dock, Qt.Horizontal)
-        self.resizeDocks([self.nodes_dock], [230], Qt.Horizontal)
         self.nodes_dock.setVisible(False)
         self.action_nodes = QAction(icon("nodes"), "Node palette", self)
         self.action_nodes.setCheckable(True)
@@ -551,7 +554,11 @@ class ShellWindow(QMainWindow):
             and not self.area.is_detached(document)
         wanted = editing and self.action_nodes.isChecked()
         if self.nodes_dock.isVisible() != wanted:
+            sidebar = self.sidebar_dock.width()
             self.nodes_dock.setVisible(wanted)
+            if wanted and self.sidebar_dock.isVisible():  # (beside the sidebar, which keeps its width)
+                QTimer.singleShot(0, lambda: self.resizeDocks([self.sidebar_dock, self.nodes_dock],
+                                                              [sidebar, NODES_WIDTH], Qt.Horizontal))
 
     def poll_ports(self) -> None:
         """Read the serial ports in a thread (listing them takes up to a fifth of a second on
@@ -601,7 +608,6 @@ class ShellWindow(QMainWindow):
         self.inspector_dock.setWidget(self.inspector)
         self.inspector_dock.setTitleBarWidget(QWidget(self.inspector_dock))
         self.addDockWidget(Qt.RightDockWidgetArea, self.inspector_dock)
-        self.resizeDocks([self.inspector_dock], [260], Qt.Horizontal)
 
     def _build_console(self) -> None:
         namespace = {
@@ -2223,11 +2229,24 @@ class ShellWindow(QMainWindow):
         self.sidebar_dock.setVisible(True)
         self.inspector_dock.setVisible(True)
         self.console_dock.setVisible(False)
+        QTimer.singleShot(0, self.size_docks)  # (once the restored layout is laid out)
 
-    def _restore_state(self) -> None:
+    def size_docks(self) -> None:
+        """The sidebar and the inspector at their widths of a new layout (:data:`DOCK_WIDTHS`)."""
+        self.resizeDocks([self.sidebar_dock, self.inspector_dock], list(DOCK_WIDTHS), Qt.Horizontal)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        if not self._docks_sized:
+            self._docks_sized = True
+            QTimer.singleShot(0, self.size_docks)  # (once the window has its size)
+
+    def _restore_state(self) -> bool:
+        """The window as it was; whether its layout was restored."""
         state = settings.get_settings(SHELL_STATE_FILE)
         if not isinstance(state, dict):
-            return
+            return False
+        restored = False
         try:
             width, height = int(state.get("width", 0)), int(state.get("height", 0))
             if width > 400 and height > 300:
@@ -2237,7 +2256,7 @@ class ShellWindow(QMainWindow):
                 self.move(int(state["x"]), int(state["y"]))  # not where no screen is any more
             layout = state.get("layout")
             if isinstance(layout, str):
-                self.restoreState(QByteArray.fromBase64(layout.encode("ascii")), SHELL_LAYOUT_VERSION)
+                restored = self.restoreState(QByteArray.fromBase64(layout.encode("ascii")), SHELL_LAYOUT_VERSION)
             section = state.get("section")
             if section in self.activity_bar.keys():
                 self.activity_bar.select(section)
@@ -2246,7 +2265,8 @@ class ShellWindow(QMainWindow):
             if state.get("maximized"):
                 QTimer.singleShot(0, self.showMaximized)
         except (TypeError, ValueError):
-            return
+            return restored
+        return restored
 
     def restore_session(self) -> bool:
         """Open the documents (and connect the devices) of the last session; whether any opened."""
