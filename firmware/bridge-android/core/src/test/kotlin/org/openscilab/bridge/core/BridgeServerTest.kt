@@ -129,9 +129,12 @@ class BridgeServerTest {
 
     @Test
     fun instrumentAway() {
-        dho.close()
+        // The bridge first, then the instrument away: Linux hands the port just closed to the next
+        // socket bound to port 0, so a bridge started later could listen on the instrument's port
+        // and pass the commands to itself.
         val away = BridgeServer(BridgeConfig(version = "0.1.0", port = 0, beaconPort = 0, instrumentPort = dho.port, instrumentTimeoutMs = 500), SnapshotCache(root))
         away.start()
+        dho.close()
         Socket("127.0.0.1", away.port).use { client ->
             client.soTimeout = 5000
             client.getOutputStream().write("*IDN?\n:BRIDge:VERSion?\n".toByteArray())
