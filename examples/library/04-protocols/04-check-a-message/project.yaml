@@ -1,0 +1,7 @@
+project: Check a message
+description: Does the device send what it should? The Pico sends "openSciLab Pico" on GP11; the flow
+  decodes it and compares the text - a test that passes or fails, also on the command line
+  (openscilab run flows/check.flow.yaml ends with 1 when it fails).
+devices:
+  pico: sim:pico
+open: [flows/check.flow.yaml]

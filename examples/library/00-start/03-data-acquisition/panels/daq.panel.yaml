@@ -1,0 +1,8 @@
+panel: Data acquisition
+flow: ../flows/daq.flow.yaml
+columns: 4
+widgets:
+  output: {kind: slider, bind: output.volts, title: AO0, columns: 2, min: -10, max: 10, step: 0.5, unit: V, value: 2}
+  mean: {kind: number, bind: ai0_mean.out, title: Mean of AI0, column: 2, unit: V, digits: 3}
+  ai0: {kind: chart, bind: stream.AI0, title: AI0, row: 1, columns: 4, rows: 2, unit: V}
+  ai2: {kind: chart, bind: stream.AI2, title: AI2 (AO0), row: 3, columns: 4, rows: 2, unit: V}

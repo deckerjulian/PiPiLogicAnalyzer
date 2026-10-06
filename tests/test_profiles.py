@@ -11,17 +11,17 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication, QInputDialog
 
-from pipilogicanalyzer.core import settings
-from pipilogicanalyzer.core.capture_io import session_to_dict
-from pipilogicanalyzer.core.profiles import (
+from openscilab.core import settings
+from openscilab.core.capture_io import session_to_dict
+from openscilab.core.profiles import (
     Profile,
     ProfileStore,
     read_profiles_file,
     strip_type_metadata,
     write_profiles_file,
 )
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
-from pipilogicanalyzer.sigrok.provider import DecoderInstance, SigrokProvider
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.sigrok.provider import DecoderInstance, SigrokProvider
 
 
 def make_settings() -> CaptureSession:
@@ -61,7 +61,7 @@ def test_a_profile_with_the_same_name_is_replaced():
     store.add(Profile("Bus", make_settings()))
     store.add(Profile("Other"))
     store.add(Profile("Bus", None, [{"decoder_id": "uart"}]))
-    assert [profile.name for profile in store.profiles] == ["Bus", "Other"]
+    assert [profile.name for profile in store.user_profiles()] == ["Bus", "Other"]
     assert store.get("Bus").capture_settings is None
     assert store.remove("Bus") and not store.remove("Bus")
 
@@ -76,7 +76,7 @@ def test_samples_are_never_stored():
 
 def test_a_corrupt_profiles_file_is_ignored():
     settings.persist_settings("profiles.json", {"Profiles": ["not a profile"]})
-    assert ProfileStore().profiles == []
+    assert ProfileStore().user_profiles() == []
 
 
 # ---------------------------------------------------------------------- files
@@ -203,23 +203,31 @@ def application():
 
 
 @pytest.fixture
-def window(application, monkeypatch):
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def window(application, monkeypatch, make_dataview):
+    """A data view with a capture, fed by the capture controller of a simulated device (the device
+    card keeps the profiles)."""
     from test_ui import make_session
 
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.confirm", lambda *args, **kwargs: True)
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.info", lambda *args, **kwargs: None)
-    main = MainWindow()
+    from openscilab.driver.simulated import open_simulated
+    from openscilab.ui.devices.capture import capture_controller
+
+    monkeypatch.setattr("openscilab.ui.messages.confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr("openscilab.ui.messages.info", lambda *args, **kwargs: None)
+    main = make_dataview()
     main.load_session(make_session())
+    main.attach_source(capture_controller(open_simulated("free")))
     yield main
     main.close()
 
 
 def test_main_window_profiles_menu(window, monkeypatch):
+    from PySide6.QtWidgets import QMenu
+
     monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("Demo", True))
     window.provider.add_instance(DecoderInstance(decoder_id="i2c", channel_map={0: 0, 1: 1}))
+    controller = window.source
 
-    window.add_profile()
+    assert controller.add_profile(window)
 
     stored = ProfileStore().get("Demo")
     assert stored is not None
@@ -227,44 +235,51 @@ def test_main_window_profiles_menu(window, monkeypatch):
     assert stored.capture_settings.capture_channels[0].samples is None
     assert stored.decoder_configuration[0]["decoder_id"] == "i2c"
 
-    window._rebuild_profiles_menu()
-    assert "Demo" in [action.text() for action in window.profiles_menu.actions()]
+    menu = QMenu()
+    controller.fill_profiles_menu(menu, window)
+    assert "Demo" in [action.text() for action in menu.actions()]
 
     window.provider.clear()
-    window.load_profile(stored)
+    controller.load_profile(stored, window)
     assert [instance.decoder_id for instance in window.provider.instances] == ["i2c"]
-    for driver_file in ("capture-settings-serial.json", "capture-settings-multi.json"):
-        assert settings.get_settings(driver_file)["Frequency"] == 1_000_000
+    from openscilab.ui.dialogs.capture_dialog import capture_settings_file
 
-    window.delete_profile(window.profiles.get("Demo"))
+    # the settings of this kind of device, not those of every kind
+    assert settings.get_settings(capture_settings_file(controller.driver))["Frequency"] == 1_000_000
+
+    controller.delete_profile(controller.profiles.get("Demo"), window)
     assert ProfileStore().get("Demo") is None
 
 
-def test_adding_a_profile_without_anything_to_store_is_refused(application, monkeypatch):
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_adding_a_profile_without_anything_to_store_is_refused(application, monkeypatch, make_dataview):
+    from openscilab.driver.simulated import open_simulated
+    from openscilab.ui.devices.capture import capture_controller
 
     asked = []
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.info", lambda *args, **kwargs: asked.append(True))
+    monkeypatch.setattr("openscilab.ui.messages.info", lambda *args, **kwargs: asked.append(True))
     monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: pytest.fail("asked"))
-    main = MainWindow()
+    main = make_dataview()
+    controller = capture_controller(open_simulated("free"))
+    main.attach_source(controller)
     try:
-        main.add_profile()
+        assert not controller.add_profile(main)
     finally:
         main.close()
-    assert asked and ProfileStore().profiles == []
+    assert asked and ProfileStore().user_profiles() == []
 
 
 def test_importing_profiles_keeps_existing_ones_on_request(window, tmp_path, monkeypatch):
-    window.profiles.add(Profile("Keep", make_settings()))
+    controller = window.source
+    controller.profiles.add(Profile("Keep", make_settings()))
     path = tmp_path / "incoming.json"
     write_profiles_file(str(path), [Profile("Keep"), Profile("New", make_settings())])
 
     monkeypatch.setattr(
-        "pipilogicanalyzer.ui.main_window.QFileDialog.getOpenFileName",
+        "openscilab.ui.devices.capture.QFileDialog.getOpenFileName",
         lambda *args, **kwargs: (str(path), ""),
     )
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.choose", lambda *args, **kwargs: 1)  # keep existing
-    window.import_profiles()
+    monkeypatch.setattr("openscilab.ui.messages.choose", lambda *args, **kwargs: 1)  # keep existing
+    assert controller.import_profiles(window) == 1
 
-    assert window.profiles.get("Keep").capture_settings is not None
+    assert controller.profiles.get("Keep").capture_settings is not None
     assert ProfileStore().get("New") is not None

@@ -1,0 +1,78 @@
+{
+  "Profiles": [
+    {
+      "Name": "USB full speed (12 Mbit/s)",
+      "CaptureSettings": {
+        "Frequency": 100000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "D+",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 2",
+            "ChannelNumber": 1,
+            "ChannelName": "D-",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "usb_signalling",
+          "label": "USB signalling",
+          "channel_map": {
+            "0": 0,
+            "1": 1
+          },
+          "options": {
+            "signalling": "full-speed"
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        },
+        {
+          "decoder_id": "usb_packet",
+          "label": "USB packets",
+          "channel_map": {},
+          "options": {
+            "signalling": "full-speed"
+          },
+          "color_index": 1,
+          "enabled": true,
+          "parent": 0
+        }
+      ],
+      "Notes": "D+ to CH1, D- to CH2, GND to GND. Needs 100 MHz: with less the decoder misses bits."
+    }
+  ]
+}

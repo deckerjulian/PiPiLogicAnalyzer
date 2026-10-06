@@ -10,10 +10,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.driver.base import ACQUISITION_STREAM, AnalyzerDriverType
-from pipilogicanalyzer.driver.dslogic import BitstreamMissingError, usb
-from pipilogicanalyzer.driver.models import TriggerType
-from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+from openscilab.driver.base import ACQUISITION_STREAM, AnalyzerDriverType
+from openscilab.driver.dslogic import BitstreamMissingError, usb
+from openscilab.driver.models import TriggerType
+from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
 from test_dslogic_driver import FakeDSLogic, info, open_driver
 
@@ -112,10 +112,9 @@ def test_edge_trigger_on_channel_32(pro32):
         dialog.close()
 
 
-def test_main_window_lists_and_connects_a_dslogic(application, monkeypatch):
-    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_the_device_list_offers_and_connects_a_dslogic(application, monkeypatch, shell):
+    from openscilab.ui.devices import dslogic as dslogic_devices
+    from openscilab.ui.devices import pico as pico_devices
 
     board = info(0x002A, super_speed=True)
     monkeypatch.setattr(usb, "list_devices", lambda: [board])
@@ -125,29 +124,23 @@ def test_main_window_lists_and_connects_a_dslogic(application, monkeypatch):
         dslogic_devices.dslogic_driver, "DSLogicDriver",
         lambda found: open_driver(device) if found is board else None,
     )
-    window = MainWindow()
-    try:
-        window.refresh_ports()
-        combo = window.port_combo
-        index = window._port_index(dslogic_devices.usb_entry(board.location))
-        assert index >= 0 and "U3Pro16" in combo.itemText(index)
-        combo.setCurrentIndex(index)
-        window.connect_device()
-        assert window.driver is not None and window.driver.driver_type == AnalyzerDriverType.DSLOGIC
-        assert window.capture_button.isEnabled()
-        assert not window.action_bootloader.isEnabled()
-        assert window.action_board_test.isEnabled()
-        window.disconnect_device()
-        assert device.closed
-    finally:
-        window.close()
+    section = shell.devices_section
+    section.refresh()
+    labels = [section.list.item(row).text() for row in range(section.list.count())]
+    assert any("U3Pro16" in label for label in labels)
+    instrument = shell.connect_entry(dslogic_devices.usb_entry(board.location))
+    assert instrument.capture.driver.driver_type == AnalyzerDriverType.DSLOGIC
+    card = shell.device_card(instrument)
+    assert card.data_button.isEnabled()
+    assert not card.action_bootloader.isVisible() and card.action_self_test.isVisible()
+    card.disconnect_button.click()
+    assert device.closed
 
 
-def test_missing_bitstream_offers_the_download(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as module
-    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_missing_bitstream_offers_the_download(application, monkeypatch, shell):
+    from openscilab.ui import messages
+    from openscilab.ui.devices import dslogic as dslogic_devices
+    from openscilab.ui.devices import pico as pico_devices
 
     board = info(0x0020)
     monkeypatch.setattr(usb, "list_devices", lambda: [board])
@@ -163,26 +156,29 @@ def test_missing_bitstream_offers_the_download(application, monkeypatch):
     downloads = []
     monkeypatch.setattr(dslogic_devices.dslogic_driver, "DSLogicDriver", driver_factory)
     monkeypatch.setattr(dslogic_devices.dslogic_resources, "download", lambda name: downloads.append(name))
-    monkeypatch.setattr(module.messages, "choose", lambda *args, **kwargs: 0)
-    window = MainWindow()
-    try:
-        window.refresh_ports()
-        window.port_combo.setCurrentIndex(window._port_index(dslogic_devices.usb_entry(board.location)))
-        window.connect_device()
-        assert downloads == ["DSLogicPlus.bin"]
-        assert len(attempts) == 2 and window.driver is not None
-        window.disconnect_device()
-    finally:
-        window.close()
+    monkeypatch.setattr(messages, "choose", lambda *args, **kwargs: 0)
+    instrument = shell.connect_entry(dslogic_devices.usb_entry(board.location))
+    assert downloads == ["DSLogicPlus.bin"]
+    assert len(attempts) == 2 and instrument is not None
+    shell.disconnect_instrument(instrument)
 
 
-def test_main_window_shows_a_stream_while_it_runs(application, monkeypatch):
+def window_shell(window):
+    """The shell the data view lives in."""
+    from openscilab.ui.shell.main_window import ShellWindow
+
+    widget = window
+    while widget is not None and not isinstance(widget, ShellWindow):
+        widget = widget.parent()
+    return widget
+
+
+def test_main_window_shows_a_stream_while_it_runs(application, monkeypatch, make_dataview):
     import numpy as np
 
-    from pipilogicanalyzer.driver.dslogic import driver as driver_module
-    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+    from openscilab.driver.dslogic import driver as driver_module
+    from openscilab.ui.devices import dslogic as dslogic_devices
+    from openscilab.ui.devices import pico as pico_devices
     from test_dslogic_driver import session, stream_data
 
     monkeypatch.setattr(driver_module, "PROGRESS_INTERVAL", 0)
@@ -202,11 +198,9 @@ def test_main_window_shows_a_stream_while_it_runs(application, monkeypatch):
 
     device.bulk_read = paced_read
 
-    window = MainWindow()
+    window = make_dataview()
     try:
-        window.refresh_ports()
-        window.port_combo.setCurrentIndex(window._port_index(dslogic_devices.usb_entry(board.location)))
-        window.connect_device()
+        window.use_instrument(window_shell(window).connect_entry(dslogic_devices.usb_entry(board.location)))
         seen = []
         window.model.view_changed.connect(
             lambda: window.model.is_live and seen.append(
@@ -259,14 +253,13 @@ def test_dialog_offers_an_endless_stream(pro32):
         dialog.close()
 
 
-def test_main_window_shows_an_endless_stream_in_a_moving_window(application, monkeypatch):
+def test_main_window_shows_an_endless_stream_in_a_moving_window(application, monkeypatch, make_dataview):
     import numpy as np
 
-    from pipilogicanalyzer.core.analysis import ChannelTransitions
-    from pipilogicanalyzer.driver.dslogic import driver as driver_module
-    from pipilogicanalyzer.ui.devices import dslogic as dslogic_devices
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+    from openscilab.core.analysis import ChannelTransitions
+    from openscilab.driver.dslogic import driver as driver_module
+    from openscilab.ui.devices import dslogic as dslogic_devices
+    from openscilab.ui.devices import pico as pico_devices
     from test_dslogic_driver import session, stream_data
 
     monkeypatch.setattr(driver_module, "PROGRESS_INTERVAL", 0)
@@ -279,11 +272,9 @@ def test_main_window_shows_an_endless_stream_in_a_moving_window(application, mon
     signals, chunks = stream_data(streamed)
     device.bulk_in = [b"\x55\x55\x55\x55" + bytes(508)] + chunks
 
-    window = MainWindow()
+    window = make_dataview()
     try:
-        window.refresh_ports()
-        window.port_combo.setCurrentIndex(window._port_index(dslogic_devices.usb_entry(board.location)))
-        window.connect_device()
+        window.use_instrument(window_shell(window).connect_entry(dslogic_devices.usb_entry(board.location)))
         capture = session([0, 1], frequency=1_000_000, pre=0, post=keep, acquisition_mode=ACQUISITION_STREAM,
                           trigger_type=TriggerType.IMMEDIATE, continuous=True)
         window._begin_capture(capture)

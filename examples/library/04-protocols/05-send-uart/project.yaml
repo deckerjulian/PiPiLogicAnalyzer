@@ -1,0 +1,7 @@
+project: Send UART
+description: The Uno sends "Hi" with its own UART on D7 (9600 baud). D7 is wired to D3; a capture of
+  D3 waits for the start bit (448 samples at 100 kHz, what the Uno holds) and the decoder reads the
+  text back.
+devices:
+  uno: sim:uno
+open: [flows/send.flow.yaml]

@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.sigrok.engine import Annotation, AnnotationSegment
-from pipilogicanalyzer.sigrok.links import PART, WHOLE, linked_segments, read_parts
+from openscilab.sigrok.engine import Annotation, AnnotationSegment
+from openscilab.sigrok.links import PART, WHOLE, linked_segments, read_parts
 
 
 @dataclass
@@ -68,15 +68,14 @@ def test_an_entry_described_by_another_row_is_still_a_value(groups):
     assert read_parts(linked_segments(groups, cycle), groups[0]) == []
 
 
-def test_the_waveform_shows_the_parts_of_a_hovered_instruction(groups):
-    from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-    from pipilogicanalyzer.ui.main_window import MainWindow
-    from pipilogicanalyzer.ui.widgets.annotation_viewer import build_hover
+def test_the_waveform_shows_the_parts_of_a_hovered_instruction(groups, make_dataview):
+    from openscilab.driver.models import AnalyzerChannel, CaptureSession
+    from openscilab.ui.widgets.annotation_viewer import build_hover
 
     QApplication.instance() or QApplication([])
     session = CaptureSession(frequency=1_000_000, pre_trigger_samples=0, post_trigger_samples=100)
     session.capture_channels = [AnalyzerChannel(channel_number=0, samples=np.zeros(100, np.uint8))]
-    window = MainWindow()
+    window = make_dataview()
     try:
         window.resize(1200, 700)
         window.load_session(session)

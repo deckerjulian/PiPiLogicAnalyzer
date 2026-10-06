@@ -1,0 +1,25 @@
+flow: UART check
+description: The simulator sends 'openSciLab' over UART on D9; the decoder must read exactly that.
+nodes:
+  sim: {type: device.instrument, address: sim:free}
+  cap:
+    type: device.capture
+    channels: [D9]
+    rate: 4 MHz
+    duration: 1.2 ms
+    pre: 40
+    trigger: {edge: falling, source: D9}
+  uart: {type: decode.uart, channels: {rx: D9}, baudrate: 115200, format: ascii}
+  table: {type: data.table}
+  check:
+    type: control.compare
+    op: ==
+    value: |
+      openSciLab
+  result: {type: view.led, title: UART check}
+edges:
+  - sim.device -> cap.device
+  - cap.capture -> uart.in
+  - uart.table -> table.in
+  - uart.text -> check.a
+  - check.result -> result.in

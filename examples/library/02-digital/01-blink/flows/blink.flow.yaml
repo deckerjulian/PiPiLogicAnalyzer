@@ -1,0 +1,17 @@
+flow: Blink
+description: 'control.timer ticks every 250 ms; the counter and ''a % 2'' turn the ticks into 1, 0, 1, ... for D13.'
+nodes:
+  uno: {type: device.instrument, at: [0, 0]}
+  timer: {type: control.timer, interval: 250 ms, count: 8, at: [0, 232]}
+  count: {type: control.counter, at: [272, 232]}
+  toggle: {type: dsp.math, expression: a % 2, at: [544, 208]}
+  led_pin: {type: gpio.write, pin: D13, at: [808, 88]}
+  monitor: {type: device.monitor, pins: [D13], rate: 20 Hz, duration: 2.2 s, at: [272, 32]}
+  led: {type: view.led, title: D13, at: [544, 56]}
+edges:
+  - uno.device -> led_pin.device
+  - uno.device -> monitor.device
+  - timer.tick -> count.in
+  - count.count -> toggle.a
+  - toggle.out -> led_pin.value
+  - monitor.D13 -> led.in

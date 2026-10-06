@@ -10,10 +10,9 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-from pipilogicanalyzer.sigrok.engine import Annotation, AnnotationSegment
-from pipilogicanalyzer.sigrok.provider import AnnotationGroup, DecoderInstance
-from pipilogicanalyzer.ui.main_window import MainWindow
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.sigrok.engine import Annotation, AnnotationSegment
+from openscilab.sigrok.provider import AnnotationGroup, DecoderInstance
 
 ZOOM_LEVELS = (1, 2, 4, 7, 50, 1_000_000)
 
@@ -24,8 +23,8 @@ def application():
 
 
 @pytest.fixture
-def window(application):
-    main = MainWindow()
+def window(application, make_dataview):
+    main = make_dataview()
     main.resize(1000, 700)
     yield main
     main.close()

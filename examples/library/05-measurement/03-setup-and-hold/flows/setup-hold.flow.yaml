@@ -1,0 +1,21 @@
+flow: Setup and hold
+description: A capture at 50 MHz (20 ns resolution) of the SPI clock and data.
+nodes:
+  la: {type: device.instrument, at: [0, 96]}
+  capture:
+    type: device.capture
+    channels: [D10, D11]
+    rate: 50 MHz
+    samples: 200000
+    at: [272, 96]
+  timing: {type: measure.setup_hold, edge: rising, at: [544, 160]}
+  setup: {type: view.number, title: Setup time, unit: s, at: [808, 160]}
+  hold: {type: view.number, title: Hold time, unit: s, at: [808, 336]}
+  check: {type: report.check, name: Setup time, low: 1.0e-07, unit: s, at: [808, 0]}
+edges:
+  - la.device -> capture.device
+  - capture.D11 -> timing.data
+  - capture.D10 -> timing.clock
+  - timing.setup -> setup.in
+  - timing.hold -> hold.in
+  - timing.setup -> check.in

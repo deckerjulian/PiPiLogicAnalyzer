@@ -1,0 +1,13 @@
+flow: DAQ latency
+description: 'remote.call runs the command once at the start; the log shows the measured latency and its uncertainty.'
+nodes:
+  daq: {type: device.instrument, at: [0, 88]}
+  calibrate: {type: remote.call, command: calibrate_latency, args: {repeats: 6}, timeout: 20 s, at: [272, 0]}
+  log: {type: view.log, title: Latency of the inputs, at: [544, 0]}
+  ai0: {type: remote.receive, channel: ai0, duration: 1.5 s, at: [272, 184]}
+  chart: {type: view.strip_chart, title: AI0, window: 2 s, at: [544, 184]}
+edges:
+  - daq.device -> calibrate.device
+  - daq.device -> ai0.device
+  - calibrate.result -> log.in
+  - ai0.out -> chart.in

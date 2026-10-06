@@ -1,0 +1,6 @@
+project: Arbitrary waveform
+description: A curve of your own - a formula over one period (x from 0 to 1) with numpy functions,
+  here a sine with its third harmonic - played by the generator and captured on CH1.
+devices:
+  scope: sim:dho924s
+open: [flows/arbitrary.flow.yaml]

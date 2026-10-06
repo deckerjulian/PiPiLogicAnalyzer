@@ -1,0 +1,6 @@
+project: Repeated captures
+description: A timer arms the capture five times, 200 ms apart. Each capture is measured; Run data in
+  the toolbar shows all five captures and the measurements on one time axis.
+devices:
+  la: sim:free
+open: [flows/repeat.flow.yaml]

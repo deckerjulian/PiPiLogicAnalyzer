@@ -1,0 +1,8 @@
+project: Pulse train
+description: Three pulses of 0.5 ms, one every 1 ms, timed by the board on D7. D7 is wired to D3 on the
+  simulated Uno; a capture of D3 (448 samples at 100 kHz, what the Uno holds) waits for the first edge
+  and measures count and width. A sequence starts the pulses 1 ms after the capture is armed - also
+  in virtual time, where the capture lets the flow's time run on while it waits.
+devices:
+  uno: sim:uno
+open: [flows/pulses.flow.yaml]

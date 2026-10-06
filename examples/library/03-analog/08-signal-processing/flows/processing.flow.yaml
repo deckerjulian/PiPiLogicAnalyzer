@@ -1,0 +1,88 @@
+flow: Signal processing
+description: 'dsp.derivative, dsp.integral, dsp.resample, convert.to_analog and dsp.average on one capture and on eight captures in a row.'
+nodes:
+  scope: {type: device.instrument, at: [0, 448]}
+  capture:
+    type: device.capture
+    channels: [CH3, CH2, D15]
+    rate: 100 kHz
+    samples: 2000
+    at: [272, 296]
+  slope: {type: dsp.derivative, at: [544, 168]}
+  steepness: {type: dsp.math, expression: abs(a), at: [808, 0]}
+  mean_slope: {type: measure.mean, at: [1080, 8]}
+  slope_check:
+    type: report.check
+    name: Slope of the triangle
+    expected: 3000
+    tolerance: 100
+    unit: V/s
+    at: [1352, 8]
+  area: {type: dsp.integral, at: [544, 432]}
+  total: {type: measure.max, at: [808, 456]}
+  area_check:
+    type: report.check
+    name: Area under the square in 20 ms
+    expected: 0.033
+    tolerance: 0.0005
+    unit: V·s
+    at: [1080, 448]
+  slower: {type: dsp.resample, rate: 20 kHz, at: [544, 304]}
+  swing: {type: measure.peak_to_peak, at: [808, 344]}
+  swing_check:
+    type: report.check
+    name: Triangle at 20 kHz
+    expected: 3
+    tolerance: 0.05
+    unit: V
+    at: [1080, 272]
+  volts: {type: convert.to_analog, low: 0 V, high: 3.3 V, at: [544, 584]}
+  level: {type: measure.mean, at: [808, 600]}
+  level_check:
+    type: report.check
+    name: D15 in volts on average
+    expected: 1.65
+    tolerance: 0.02
+    unit: V
+    at: [1080, 624]
+  repeat: {type: control.timer, interval: 5 ms, count: 8, delay: 30 ms, at: [0, 624]}
+  sine:
+    type: device.capture
+    channels: [CH1, D15]
+    rate: 1 MHz
+    samples: 2000
+    trigger: {edge: rising, source: D15}
+    at: [272, 600]
+  averaged: {type: dsp.average, mode: captures, count: 8, at: [544, 752]}
+  averaged_swing: {type: measure.peak_to_peak, at: [808, 736]}
+  average_check:
+    type: report.check
+    name: Averaged sine
+    low: 3.95
+    high: 4.15
+    unit: V
+    at: [1080, 800]
+  slope_view: {type: view.scope, title: Slope of CH3, at: [808, 192]}
+  average_view: {type: view.scope, title: CH1 averaged, at: [808, 840]}
+edges:
+  - scope.device -> capture.device
+  - scope.device -> sine.device
+  - capture.CH3 -> slope.in
+  - slope.out -> steepness.a
+  - steepness.out -> mean_slope.in
+  - mean_slope.out -> slope_check.in
+  - slope.out -> slope_view.in
+  - capture.CH2 -> area.in
+  - area.out -> total.in
+  - total.out -> area_check.in
+  - capture.CH3 -> slower.in
+  - slower.out -> swing.in
+  - swing.out -> swing_check.in
+  - capture.D15 -> volts.in
+  - volts.out -> level.in
+  - level.out -> level_check.in
+  - repeat.tick -> sine.arm
+  - sine.CH1 -> averaged.in
+  - averaged.out -> averaged_swing.in
+  - averaged.out -> average_view.in
+  - averaged_swing.out -> average_check.in

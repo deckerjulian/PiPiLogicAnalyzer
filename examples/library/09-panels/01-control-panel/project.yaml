@@ -1,0 +1,7 @@
+project: Control panel
+description: Operates an Arduino Uno from a panel - a slider sets the PWM of D9, a switch the LED on
+  D13; the panel shows the voltage at A0 (behind the RC low pass) as a number and a chart, and the
+  pins D2 and D13 as LEDs. Press Run in the panel (it runs until Stop).
+devices:
+  uno: sim:uno
+open: [panels/control.panel.yaml, flows/control.flow.yaml]

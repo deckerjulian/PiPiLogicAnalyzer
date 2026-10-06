@@ -1,0 +1,8 @@
+project: Remote microphone
+description: A remote microphone sends 8000 samples a second in blocks; every block carries the time
+  of its first sample. The scope shows the signal, the spectrum its 440 Hz tone, the number the
+  level the microphone computes itself.
+devices:
+  mic: remote-sim:audio
+realtime: true
+open: [flows/microphone.flow.yaml]

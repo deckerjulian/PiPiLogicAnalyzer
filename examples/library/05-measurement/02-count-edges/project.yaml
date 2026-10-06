@@ -1,0 +1,6 @@
+project: Count edges
+description: Counts the rising edges of D15 in a 100 ms capture (100 at 1 kHz) and the edges of the
+  UART line D9 - measure.count works on signals, events and tables.
+devices:
+  la: sim:free
+open: [flows/count.flow.yaml]

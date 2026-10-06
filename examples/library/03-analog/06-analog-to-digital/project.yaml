@@ -1,0 +1,6 @@
+project: Analog to digital
+description: A threshold with hysteresis turns the triangle on CH3 into a logic signal; its
+  frequency and duty cycle are measured like those of a digital channel.
+devices:
+  scope: sim:dho924s
+open: [flows/threshold.flow.yaml]

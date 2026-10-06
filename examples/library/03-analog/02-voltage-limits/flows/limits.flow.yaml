@@ -1,0 +1,17 @@
+flow: Voltage limits
+description: 'The monitor reads A0 at 20 Hz; while the RC low pass charges, the voltage enters the window.'
+nodes:
+  uno: {type: device.instrument, at: [0, 240]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, duty: 0.6, at: [272, 344]}
+  monitor: {type: device.monitor, analog: [A0], rate: 20 Hz, duration: 2 s, at: [272, 136]}
+  window: {type: control.limit, low: 2.5, high: 3.5, at: [544, 56]}
+  inside: {type: view.led, title: A0 inside 2.5-3.5 V, at: [808, 0]}
+  outside: {type: view.log, title: Outside the window, at: [808, 152]}
+  chart: {type: view.strip_chart, title: A0, window: 3 s, at: [544, 264]}
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> monitor.device
+  - monitor.A0 -> window.in
+  - monitor.A0 -> chart.in
+  - window.ok -> inside.in
+  - window.violation -> outside.in

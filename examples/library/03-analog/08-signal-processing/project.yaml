@@ -1,0 +1,8 @@
+project: Signal processing
+description: Slope, area, a lower rate and an average on the channels of a simulated oscilloscope -
+  the triangle on CH3 rises 3 V in 1 ms (3000 V/s), the 10 kHz square on CH2 stays at 1.65 V on
+  average, the logic channel D15 becomes volts, and eight captures of the noisy sine on CH1, each
+  started by the rising edge of D15, are averaged into a clean one.
+devices:
+  scope: sim:dho924s
+open: [flows/processing.flow.yaml]

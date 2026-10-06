@@ -13,13 +13,13 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core import device_info, firmware
-from pipilogicanalyzer.driver.pico import detector, protocol
-from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
-from pipilogicanalyzer.driver.pico.detector import DetectedDevice, ForeignPico, UsbPortInfo
-from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
-from pipilogicanalyzer.ui.dialogs.device_dialogs import DeviceInfoDialog
-from pipilogicanalyzer.ui.dialogs.firmware_dialog import ConnectedDevice, FirmwareDialog
+from openscilab.core import device_info, firmware
+from openscilab.driver.pico import detector, protocol
+from openscilab.driver.pico.analyzer import PicoDriver
+from openscilab.driver.pico.detector import DetectedDevice, ForeignPico, UsbPortInfo
+from openscilab.driver.emulated import EmulatedAnalyzerDriver
+from openscilab.ui.dialogs.device_dialogs import DeviceInfoDialog
+from openscilab.ui.dialogs.firmware_dialog import ConnectedDevice, FirmwareDialog
 
 from test_driver import FakeTransport
 
@@ -71,8 +71,8 @@ def test_uf2_image_is_read(tmp_path):
 
 
 def test_longest_board_type_wins():
-    assert firmware.board_from_text("PiPiLogicAnalyzer_BOARD_PICO.uf2").name == "PICO"
-    assert firmware.board_from_text("PiPiLogicAnalyzer_BOARD_PICO_W.uf2").name == "W"
+    assert firmware.board_from_text("openSciLab-pico_BOARD_PICO.uf2").name == "PICO"
+    assert firmware.board_from_text("openSciLab-pico_BOARD_PICO_W.uf2").name == "W"
     assert firmware.board_from_text("blink.uf2") is None
 
 
@@ -85,11 +85,11 @@ def test_invalid_uf2_files_are_rejected(tmp_path, content):
 
 
 def test_find_images_skips_invalid_files(tmp_path):
-    make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2")
+    make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO.uf2")
     (tmp_path / "broken.uf2").write_bytes(bytes(512))
     (tmp_path / "notes.txt").write_text("x")
     images = firmware.find_images([str(tmp_path), str(tmp_path / "missing")])
-    assert [image.file_name for image in images] == ["PiPiLogicAnalyzer_BOARD_PICO.uf2"]
+    assert [image.file_name for image in images] == ["openSciLab-pico_BOARD_PICO.uf2"]
 
 
 def test_compatibility(tmp_path):
@@ -124,7 +124,7 @@ def test_boot_drives_are_found(tmp_path):
 
 
 def test_flashing_copies_the_image(tmp_path):
-    image = make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2")
+    image = make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO.uf2")
     drive = firmware.boot_drive_at(str(make_drive(tmp_path, "RPI-RP2", "RPI-RP2")))
 
     target = firmware.flash_image(str(image), drive)
@@ -175,15 +175,15 @@ def test_port_labels_tell_identical_boards_apart(monkeypatch):
     labels = [info.label for info in detector.list_port_infos()]
 
     assert labels == [
-        "/dev/a (PiPiLogicAnalyzer, S/N E66138)",
-        "/dev/b (PiPiLogicAnalyzer, S/N E6614C)",
+        "/dev/a (openSciLab Pico, S/N E66138)",
+        "/dev/b (openSciLab Pico, S/N E6614C)",
         "/dev/micropython (MicroPython)",
         "/dev/ttyS0",
     ]
 
 
 def test_multi_connect_dialog_shows_serial_numbers(application, monkeypatch):
-    from pipilogicanalyzer.ui.dialogs.device_dialogs import MultiConnectDialog
+    from openscilab.ui.dialogs.device_dialogs import MultiConnectDialog
 
     ports = [
         fake_port(device="/dev/a", vid=detector.VID, pid=detector.PID, serial_number="E66138", location="1-1"),
@@ -194,10 +194,10 @@ def test_multi_connect_dialog_shows_serial_numbers(application, monkeypatch):
 
     table = dialog.port_table
     assert [[table.item(row, column).text() for column in range(4)] for row in range(2)] == [
-        ["/dev/a", "PiPiLogicAnalyzer", "E66138", "1-1"],
-        ["/dev/b", "PiPiLogicAnalyzer", "E6614C", "1-2"],
+        ["/dev/a", "openSciLab Pico", "E66138", "1-1"],
+        ["/dev/b", "openSciLab Pico", "E6614C", "1-2"],
     ]
-    assert dialog.combos[0].itemText(2) == "/dev/b (PiPiLogicAnalyzer, S/N E6614C)"
+    assert dialog.combos[0].itemText(2) == "/dev/b (openSciLab Pico, S/N E6614C)"
 
     dialog.combos[0].setCurrentIndex(2)
     dialog.combos[1].setCurrentIndex(1)
@@ -209,9 +209,8 @@ def test_multi_connect_dialog_shows_serial_numbers(application, monkeypatch):
     assert plain.combos[0].itemText(1) == "/dev/x"
 
 
-def test_device_list_only_offers_analyzers(application, monkeypatch):
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_device_list_only_offers_analyzers(application, monkeypatch, shell):
+    from openscilab.ui.devices import pico as pico_devices
 
     ports = [
         fake_port(device="/dev/analyzer", vid=detector.VID, pid=detector.PID, serial_number="E66138"),
@@ -220,24 +219,25 @@ def test_device_list_only_offers_analyzers(application, monkeypatch):
     ]
     monkeypatch.setattr(detector.list_ports, "comports", lambda: ports)
     monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [])
-    window = MainWindow()
-    try:
-        window.refresh_ports()
-        combo = window.port_combo
-        items = [combo.itemData(index) for index in range(combo.count()) if combo.itemText(index)]
-        assert {item.backend for item in items} == {"pico"}
-        assert [(item.kind, item.value) for item in items] == [
-            ("autodetect", None),
-            ("serial", "/dev/analyzer"),
-            ("network", None),
-            ("multi", None),
-        ]
-    finally:
-        window.close()
+    section = shell.devices_section
+    section.refresh()
+    items = [section.list.item(row).data(0x0100) for row in range(section.list.count())]
+    items = [item for item in items if item is not None and item != "simulators" and item.backend != "sim"]
+    # the other kinds offer only their manual entries: none of these ports is theirs
+    others = [item for item in items if item.backend != "pico"]
+    assert {item.backend for item in others} <= {"arduino", "rigol", "remote", "remote-sim"}
+    assert not [item for item in others if item.kind in ("serial", "network")]
+    items = [item for item in items if item.backend == "pico"]
+    assert [(item.kind, item.value) for item in items] == [
+        ("autodetect", None),
+        ("serial", "/dev/analyzer"),
+        ("network", None),
+        ("multi", None),
+    ]
 
 
 def test_multi_compose_dialog_shows_serial_numbers(application):
-    from pipilogicanalyzer.ui.dialogs.device_dialogs import MultiComposeDialog
+    from openscilab.ui.dialogs.device_dialogs import MultiComposeDialog
 
     devices = [
         DetectedDevice(port_name="/dev/a", serial_number="E66138", parent_id="1-1"),
@@ -259,9 +259,9 @@ def extended_device(monkeypatch):
     transport = FakeTransport()
     transport._responses[0] = "LOGIC_ANALYZER_PICO_V6_5"
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
-    driver = PiPiLogicAnalyzerDriver("/dev/fake")
+    driver = PicoDriver("/dev/fake")
     for line in (
         "CAPS:SELFTEST,SIMULATION,DEVICEINFO",
         "INFO:BOARD:PICO",
@@ -344,9 +344,9 @@ def firmware_dialog(tmp_path, images, drives=(), foreign=(), analyzers=None, tou
 
 def test_flashing_needs_a_matching_image(application, tmp_path):
     drive = firmware.boot_drive_at(str(make_drive(tmp_path, "RPI-RP2", "RPI-RP2")))
-    pico = firmware.read_uf2(str(make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2")))
+    pico = firmware.read_uf2(str(make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO.uf2")))
     pico2 = firmware.read_uf2(
-        str(make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO_2.uf2", families=(firmware.FAMILY_RP2350_ARM_S,)))
+        str(make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO_2.uf2", families=(firmware.FAMILY_RP2350_ARM_S,)))
     )
     dialog = firmware_dialog(tmp_path, [pico, pico2], drives=[drive])
 
@@ -362,9 +362,9 @@ def test_flashing_needs_a_matching_image(application, tmp_path):
 
 
 def test_flashing_waits_for_the_analyzer(application, tmp_path, monkeypatch):
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr("openscilab.ui.messages.confirm", lambda *args, **kwargs: True)
     drive = firmware.boot_drive_at(str(make_drive(tmp_path, "RPI-RP2", "RPI-RP2")))
-    image = firmware.read_uf2(str(make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2")))
+    image = firmware.read_uf2(str(make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO.uf2")))
     analyzers: list = []
     dialog = firmware_dialog(tmp_path, [image], drives=[drive], analyzers=analyzers)
 
@@ -461,7 +461,7 @@ def test_detected_analyzers_are_asked_for_their_firmware(application, tmp_path):
 
 
 def test_version_7_firmware_is_described():
-    from pipilogicanalyzer.driver.pico.protocol import parse_version
+    from openscilab.driver.pico.protocol import parse_version
 
     version = parse_version("LOGIC_ANALYZER_PICO_V7_0")
     assert (version.major, version.minor) == (7, 0)
@@ -478,50 +478,41 @@ def test_firmware_descriptions():
 
 
 # ---------------------------------------------------------------- main window
-def test_main_window_notices_boards_without_firmware(application, tmp_path, monkeypatch):
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_the_device_list_notices_boards_without_firmware(application, tmp_path, monkeypatch, shell):
+    from openscilab.ui.devices import pico as pico_devices
 
     drive = firmware.boot_drive_at(str(make_drive(tmp_path, "RPI-RP2", "RPI-RP2")))
     monkeypatch.setattr(pico_devices.firmware_images, "find_boot_drives", lambda: [drive])
     monkeypatch.setattr(pico_devices.detector, "detect_foreign_picos", lambda: [])
-    window = MainWindow()
-    try:
-        window._check_for_new_boards()
-        assert not window.firmware_notice.isHidden()
-        assert "bootloader mode" in window.firmware_notice.text()
-    finally:
-        window.close()
+    section = shell.devices_section
+    section.refresh()
+    assert not section.notice.isHidden() and not section.firmware_button.isHidden()
+    assert "bootloader mode" in section.notice.text()
 
 
-def test_a_board_with_outdated_firmware_is_offered_the_update(application, monkeypatch):
-    from pipilogicanalyzer.driver.base import FirmwareOutdatedError
-    from pipilogicanalyzer.ui import messages
-    from pipilogicanalyzer.ui.devices import pico as pico_devices
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_a_board_with_outdated_firmware_is_offered_the_update(application, monkeypatch, shell):
+    from openscilab.driver.base import FirmwareOutdatedError
+    from openscilab.ui import messages
+    from openscilab.ui.devices import pico as pico_devices
 
-    def outdated(backend, entry, parent):
+    def outdated(address, download_bitstream=False):
         raise FirmwareOutdatedError("Install the firmware.", "LOGIC_ANALYZER_V6_5", "/dev/old")
 
-    monkeypatch.setattr(pico_devices.PicoBackend, "connect", outdated)
+    from openscilab.driver import discovery
+
+    monkeypatch.setattr(discovery, "open_device", outdated)
     questions = []
     monkeypatch.setattr(messages, "confirm", lambda *args, **kwargs: questions.append(args[2]) or True)
-    window = MainWindow()
     updates = []
-    monkeypatch.setattr(window, "install_firmware", lambda: updates.append(True))
-    try:
-        window.port_combo.clear()
-        window.port_combo.addItem("old board", pico_devices.serial_entry("/dev/old"))
-        window.connect_device()
-        assert window.driver is None and updates == [True]
-        assert "/dev/old" in questions[0]
-    finally:
-        window.close()
+    monkeypatch.setattr(shell, "show_hardware", lambda *args: updates.append(True))
+    assert shell.connect_entry(pico_devices.serial_entry("/dev/old")) is None
+    assert updates == [True] and len(shell.hub) == 0  # the connected hardware offers the update
+    assert "/dev/old" in questions[0]
 
 
 def test_the_firmware_version_is_read_from_the_image(tmp_path):
     path = make_uf2(
-        tmp_path / "PiPiLogicAnalyzer_BOARD_PICO_2.uf2",
+        tmp_path / "openSciLab-pico_BOARD_PICO_2.uf2",
         families=(firmware.FAMILY_RP2350_ARM_S,),
         content=b"\x00binary info\x00LOGIC_ANALYZER_PICO_2_V7_1\x00rest",
     )
@@ -529,13 +520,13 @@ def test_the_firmware_version_is_read_from_the_image(tmp_path):
 
     assert image.device_version == "LOGIC_ANALYZER_PICO_2_V7_1"
     assert image.version == "7.1" and image.version_label == "firmware 7.1"
-    assert image.label == "Raspberry Pi Pico 2 - 7.1 PiPiLogicAnalyzer_BOARD_PICO_2.uf2"
+    assert image.label == "Raspberry Pi Pico 2 - 7.1 openSciLab-pico_BOARD_PICO_2.uf2"
 
 
 def test_a_version_split_across_two_blocks_is_still_found(tmp_path):
     # 256 payload bytes per block: the string starts in the first block and ends in the second
     content = b"x" * 250 + b"LOGIC_ANALYZER_ZERO_V7_1" + b"\x00"
-    path = make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_ZERO.uf2", content=content)
+    path = make_uf2(tmp_path / "openSciLab-pico_BOARD_ZERO.uf2", content=content)
 
     assert firmware.read_uf2(str(path)).version == "7.1"
 
@@ -549,7 +540,7 @@ def test_images_without_a_version_stay_usable(tmp_path):
 
 
 def test_a_two_digit_minor_version_is_read_completely(tmp_path):
-    path = make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2", content=b"\x00LOGIC_ANALYZER_PICO_V7_10\x00")
+    path = make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO.uf2", content=b"\x00LOGIC_ANALYZER_PICO_V7_10\x00")
 
     assert firmware.read_uf2(str(path)).version == "7.10"
 
@@ -563,7 +554,7 @@ def test_both_firmware_identities_are_understood(tmp_path):
     assert (old.board_name, old.major, old.minor) == ("PICO_2", 7, 0)
     assert firmware.describe_firmware("PIPI_LOGIC_ANALYZER_PICO_V7_1").startswith("firmware 7.1")
 
-    path = make_uf2(tmp_path / "PiPiLogicAnalyzer_BOARD_PICO.uf2",
+    path = make_uf2(tmp_path / "openSciLab-pico_BOARD_PICO.uf2",
                     content=b"\x00PIPI_LOGIC_ANALYZER_PICO_V7_1\x00")
     assert firmware.read_uf2(str(path)).version == "7.1"
 
@@ -572,7 +563,68 @@ def test_firmware_and_application_share_the_protocol_version():
     """``FIRMWARE_PROTOCOL`` is raised in both places together."""
     import re
 
-    cmake = os.path.join(os.path.dirname(__file__), "..", "firmware", "PiPiLogicAnalyzer", "CMakeLists.txt")
+    cmake = os.path.join(os.path.dirname(__file__), "..", "firmware", "pico", "CMakeLists.txt")
     with open(cmake, encoding="utf-8") as handle:
         match = re.search(r"add_compile_definitions\(FIRMWARE_PROTOCOL=(\d+)\)", handle.read())
     assert match and int(match.group(1)) == protocol.FIRMWARE_PROTOCOL
+
+
+# ------------------------------------------------- updates of any instrument
+def test_the_update_method_of_a_driver():
+    assert firmware.update_method(SimpleNamespace(supports_bootloader=True)).key == "uf2"
+    assert firmware.update_method(SimpleNamespace(supports_bootloader=False)) is None
+    assert firmware.update_method(SimpleNamespace(firmware_update_method="avrdude")).tool == "avrdude"
+    assert firmware.update_method(EmulatedAnalyzerDriver()) is None
+
+
+def fake_tool(name: str) -> str:
+    """An executable in the tools folder of the settings that prints its arguments."""
+    from openscilab.core.settings import settings_directory
+
+    folder = os.path.join(settings_directory(), "tools")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name)
+    with open(path, "w") as handle:
+        handle.write("#!/bin/sh\necho \"$@\"\n")
+    os.chmod(path, 0o755)
+    return path
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a shell script as the tool")
+def test_tool_commands():
+    with pytest.raises(firmware.FirmwareToolMissing, match="bossac is not installed"):
+        firmware.tool_command("bossac", "fw.bin", "/dev/ttyACM0")
+    path = fake_tool("avrdude")
+    command = firmware.tool_command("avrdude", "fw.hex", "/dev/ttyUSB0", part="atmega2560")
+    assert command[0] == path and "atmega2560" in command and "flash:w:fw.hex:i" in command
+    fake_tool("adb")
+    assert firmware.tool_command("adb", "bridge.apk")[1:] == ["install", "-r", "bridge.apk"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a shell script as the tool")
+def test_running_an_update_tool(application, monkeypatch):
+    from openscilab.ui import messages
+    from openscilab.ui.dialogs.firmware_dialog import run_update_tool
+
+    shown = []
+    monkeypatch.setattr(messages, "info", lambda parent, title, text, details=None: shown.append(details))
+    monkeypatch.setattr(messages, "warning", lambda parent, title, text, details=None: shown.append(text))
+    assert run_update_tool(None, "esptool", "/dev/ttyUSB0", image="fw.bin") is None  # not installed
+    assert "esptool is not installed" in shown[-1]
+    fake_tool("bossac")
+    assert run_update_tool(None, "bossac", "/dev/ttyACM0", image="fw.bin") == "/dev/ttyACM0"
+    assert "--port=/dev/ttyACM0" in shown[-1] and "fw.bin" in shown[-1]
+
+
+def test_update_firmware_from_the_shell(shell, monkeypatch):
+    from openscilab.driver.simulated import open_simulated
+
+    from openscilab.ui.documents.hardware import HardwareDocument
+
+    assert "Install or &update firmware..." in [action.text() for action in shell.devices_menu.actions()]
+    shell.action_update_firmware.trigger()
+    assert isinstance(shell.active_document(), HardwareDocument)  # one place for firmware
+    simulated = open_simulated("free")
+    shell.hub.add(simulated)
+    card = shell.open_device_card(simulated)
+    assert not card.action_firmware.isVisible()  # a simulator has no firmware

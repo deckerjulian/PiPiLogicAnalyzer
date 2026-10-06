@@ -1,0 +1,34 @@
+;
+; Copyright (C) 2026 Julian Decker
+;
+; Part of openSciLab.
+;
+; SPDX-License-Identifier: GPL-3.0-or-later
+;
+
+; Transmitters of the commands 26 TX_UART and 27 TX_SPI (after the examples of the Pico SDK).
+
+; UART 8N1, LSB first: 8 cycles per bit, the clock divider sets the baud rate. The side-set pin
+; and the OUT pin are the TX pin. Stalls at "pull" with the line idle (high).
+.program tx_uart
+.side_set 1 opt
+    pull       side 1 [7]   ; stop bit (or idle while the FIFO is empty)
+    set x, 7   side 0 [7]   ; start bit
+bitloop:
+    out pins, 1             ; one data bit
+    jmp x-- bitloop   [6]   ; 8 cycles per bit
+
+; SPI, clock phase 0 (data valid on the leading edge), 8 bits per word via autopull/autopush
+; (threshold 8, shift left: MSB first). Side-set: SCK, OUT: MOSI, IN: MISO. 4 cycles per bit.
+; The clock polarity (mode 2 and 3) inverts SCK with the output override of the GPIO.
+.program tx_spi_cpha0
+.side_set 1
+    out pins, 1  side 0 [1] ; stalls here with SCK idle when the FIFO is empty
+    in pins, 1   side 1 [1]
+
+; SPI, clock phase 1 (data valid on the trailing edge)
+.program tx_spi_cpha1
+.side_set 1
+    out x, 1     side 0     ; stalls here with SCK idle when the FIFO is empty
+    mov pins, x  side 1 [1]
+    in pins, 1   side 0

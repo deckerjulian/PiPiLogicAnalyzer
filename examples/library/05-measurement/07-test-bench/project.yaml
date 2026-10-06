@@ -1,0 +1,7 @@
+project: Test bench
+description: Tests a device under test and writes a report with passed or failed. On the command
+  line it is a test - "openscilab run flows/test.flow.yaml" ends with 1 when a check fails -, the
+  panel runs it with a button. The device under test is simulated (sim:free).
+devices:
+  dut: sim:free
+open: [panels/test.panel.yaml, flows/test.flow.yaml]

@@ -1,0 +1,7 @@
+project: Empty lab
+description: An empty measuring station with a simulated logic analyzer; replace the device with
+  yours in project.yaml (or in the device list) and build the flow.
+icon: file-plus
+devices:
+  sim: sim:free
+open: [flows/main.flow.yaml]

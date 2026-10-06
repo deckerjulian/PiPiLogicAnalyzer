@@ -1,0 +1,18 @@
+flow: Calibrate latency
+description: 'timing.calibrate measures and keeps the latency; its result starts a stream at the same rate, which uses it.'
+nodes:
+  pico: {type: device.instrument, at: [0, 216]}
+  calibrate: {type: timing.calibrate, pin: GP16, channel: GP17, rate: 100 kHz, repeats: 8, at: [272, 280]}
+  latency: {type: view.number, title: Latency, unit: s, at: [544, 400]}
+  uncertainty: {type: view.number, title: Uncertainty, unit: s, at: [544, 576]}
+  latency_check: {type: report.check, name: Latency, low: 0.0002, high: 0.003, unit: s, at: [544, 224]}
+  stream: {type: device.stream, channels: [GP12], rate: 100 kHz, duration: 0.3 s, at: [544, 0]}
+  scope: {type: view.scope, title: GP12, at: [808, 0]}
+edges:
+  - pico.device -> calibrate.device
+  - pico.device -> stream.device
+  - calibrate.latency -> latency.in
+  - calibrate.latency -> latency_check.in
+  - calibrate.uncertainty -> uncertainty.in
+  - calibrate.latency -> stream.start
+  - stream.capture -> scope.in

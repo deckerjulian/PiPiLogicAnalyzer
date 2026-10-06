@@ -1,0 +1,34 @@
+flow: PWM sweep
+description: 'control.sweep sets the duty cycle, waits 600 ms (six time constants of the RC low pass), then ''step'' reads A0; the reading asks for the next step.'
+nodes:
+  uno: {type: device.instrument, at: [0, 128]}
+  sweep: {type: control.sweep, start: 0, stop: 1, step: 0.25, dwell: 600 ms, at: [0, 216]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, at: [272, 80]}
+  a0: {type: gpio.read, pin: A0, analog: true, at: [272, 224]}
+  table: {type: data.table, columns: [duty, volts], at: [544, 176]}
+  view: {type: view.table, title: Duty cycle and voltage, at: [808, 176]}
+  xy:
+    type: view.xy
+    title: A0 over the duty cycle
+    x_label: Duty cycle
+    y_label: A0 (V)
+    at: [544, 368]
+  range:
+    type: report.check
+    name: A0 within 0-5 V
+    low: -0.05
+    high: 5.05
+    unit: V
+    at: [544, 0]
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> a0.device
+  - sweep.value -> pwm.duty
+  - sweep.value -> table.duty
+  - sweep.value -> xy.x
+  - sweep.step -> a0.trigger
+  - a0.value -> table.volts
+  - a0.value -> xy.y
+  - a0.value -> sweep.next
+  - a0.value -> range.in
+  - table.table -> view.in

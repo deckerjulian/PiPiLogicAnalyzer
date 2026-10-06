@@ -1,0 +1,6 @@
+project: Test report
+description: A complete test of a device - checks of the clock, the 1 kHz signal and the UART text
+  with limits, sections with explanations, and the report as HTML (or PDF with a .pdf path).
+devices:
+  dut: sim:free
+open: [flows/report.flow.yaml]

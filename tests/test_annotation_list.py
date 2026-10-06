@@ -9,16 +9,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core import capture_io
-from pipilogicanalyzer.core.profiles import read_profiles_file
-from pipilogicanalyzer.sigrok.engine import AnnotationSegment
-from pipilogicanalyzer.sigrok.provider import SigrokProvider
-from pipilogicanalyzer.ui.dialogs.annotation_list import COLUMNS, AnnotationListWindow, RelatedRow
-from pipilogicanalyzer.ui.view_model import CaptureViewModel
+from openscilab.core import capture_io
+from openscilab.core.profiles import read_profiles_file
+from openscilab.sigrok.engine import AnnotationSegment
+from openscilab.sigrok.provider import SigrokProvider
+from openscilab.ui.dialogs.annotation_list import COLUMNS, AnnotationListWindow, RelatedRow
+from openscilab.ui.view_model import CaptureViewModel
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEMO = os.path.join(ROOT, "examples", "c64-demo.lac")
-PROFILE = os.path.join(ROOT, "examples", "c64-expansion-port-profile.json")
+PROFILE = os.path.join(ROOT, "examples", "profiles", "c64-expansion-port.json")
 
 
 @pytest.fixture(scope="module")
@@ -40,7 +40,7 @@ def test_entries_of_another_row_during_an_entry():
 
 @pytest.mark.skipif(not os.path.isfile(DEMO), reason="the demo capture is missing")
 def test_the_disassembly_lists_the_bytes_read_and_the_details(application):
-    from pipilogicanalyzer.sigrok.engine import DecoderRegistry
+    from openscilab.sigrok.engine import DecoderRegistry
 
     registry = DecoderRegistry()
     registry.load()

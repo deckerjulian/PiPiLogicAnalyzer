@@ -1,0 +1,6 @@
+project: Frequency and duty cycle
+description: Frequency, period, duty cycle and pulse width of the 1 kHz signal on D15 and the 1 MHz
+  clock on D8, each with a check against its nominal value.
+devices:
+  la: sim:free
+open: [flows/timing.flow.yaml]

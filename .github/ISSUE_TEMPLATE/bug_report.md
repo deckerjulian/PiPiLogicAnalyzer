@@ -12,8 +12,9 @@ labels: bug
 
 - Operating system:
 - Application: downloaded build (version) / from source (commit, Python version)
-- Board and firmware (Device → Device information... → Copy to clipboard):
+- Device and firmware (device card → Details → Copy the details), or the simulator (sim:uno, ...):
 
-**Capture or screenshot**
+**Capture, flow or screenshot**
 
-<!-- A .lac file or a screenshot that shows the problem helps a lot. -->
+<!-- A .lac file, the flow or project (*.flow.yaml, project.yaml) or a screenshot that shows the
+problem helps a lot. -->

@@ -1,0 +1,20 @@
+flow: Edge trigger
+description: 'A capture that starts on a rising edge of D15, with 2500 samples before the trigger.'
+nodes:
+  la: {type: device.instrument, at: [0, 0]}
+  capture:
+    type: device.capture
+    channels: [D15, D8, D9]
+    rate: 1 MHz
+    samples: 10000
+    pre: 2500
+    trigger: {edge: rising, source: D15}
+    at: [272, 0]
+  scope: {type: view.scope, title: Triggered on D15, at: [544, 0]}
+  note:
+    type: structure.comment
+    text: 'The trigger is the ''trigger'' parameter of the capture: edge (rising or falling) and source (a captured channel).'
+    at: [0, 328]
+edges:
+  - la.device -> capture.device
+  - capture.capture -> scope.in

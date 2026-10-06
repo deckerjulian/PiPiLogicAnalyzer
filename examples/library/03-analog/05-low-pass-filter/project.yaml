@@ -1,0 +1,6 @@
+project: Low pass filter
+description: The 1 kHz sine on CH1 is noisy. A low pass filter (FIR, 3 kHz) removes the noise - the
+  scopes show the signal before and after, the numbers its RMS.
+devices:
+  scope: sim:dho924s
+open: [flows/filter.flow.yaml]

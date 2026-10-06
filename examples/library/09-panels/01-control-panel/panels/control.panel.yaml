@@ -1,0 +1,12 @@
+panel: Control panel
+flow: ../flows/control.flow.yaml
+columns: 4
+tabs: ['', Chart]
+widgets:
+  title: {kind: label, text: Arduino Uno, columns: 4}
+  duty: {kind: slider, bind: pwm.duty, title: PWM of D9, row: 1, columns: 2, min: 0, max: 1, step: 0.05, value: 0.5}
+  led: {kind: switch, bind: led.value, title: LED D13, row: 1, column: 2}
+  volts: {kind: number, bind: monitor.A0, title: A0, row: 2, unit: V, digits: 3}
+  d2: {kind: led, bind: monitor.D2, title: D2, row: 2, column: 1}
+  d13: {kind: led, bind: monitor.D13, title: D13, row: 2, column: 2}
+  chart: {kind: chart, bind: monitor.A0, title: A0 over time, tab: Chart, columns: 4, rows: 3, unit: V}

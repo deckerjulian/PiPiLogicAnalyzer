@@ -1,0 +1,7 @@
+project: Scope measurements
+description: The four channels of a simulated oscilloscope (1 kHz sine, 10 kHz square, 500 Hz
+  triangle, 100 Hz ramp) - mean, RMS, peak to peak and minimum/maximum of each, as the measurement
+  menu of a scope shows them.
+devices:
+  scope: sim:dho924s
+open: [flows/measure.flow.yaml]

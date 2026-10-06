@@ -1,0 +1,9 @@
+project: DAQ latency
+description: Without a sync signal a DAQ stamps its blocks from when they arrive - between the start
+  command and the arrival. Its command calibrate_latency switches DO0, wired back to its line LOOP, and
+  measures the latency of its inputs; from then on its blocks are stamped with it (device card - Inputs).
+  With real hardware the script keeps it in a file for the next start.
+devices:
+  daq: remote-sim:daq
+realtime: true
+open: [flows/latency.flow.yaml]

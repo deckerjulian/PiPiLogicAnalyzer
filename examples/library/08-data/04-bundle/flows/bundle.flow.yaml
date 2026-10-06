@@ -1,0 +1,29 @@
+flow: Bundle
+description: 'The bundle waits until every field has a value and sends them as one mapping (later, every new value is sent with the latest of the others). structure.unbundle takes the fields apart again - here the frequency, checked against 1 kHz.'
+nodes:
+  la: {type: device.instrument, at: [0, 104]}
+  capture: {type: device.capture, channels: [D15], rate: 1 MHz, duration: 10 ms, at: [272, 104]}
+  frequency: {type: measure.frequency, at: [544, 112]}
+  duty: {type: measure.duty, at: [544, 216]}
+  pair: {type: structure.bundle, fields: [frequency, duty], at: [808, 152]}
+  log: {type: view.log, title: Frequency and duty cycle, at: [1080, 288]}
+  file: {type: data.logger, path: pairs.csv, at: [1080, 176]}
+  parts: {type: structure.unbundle, fields: [frequency, duty], at: [1080, 0]}
+  check:
+    type: report.check
+    name: Frequency from the bundle
+    expected: 1000
+    tolerance: 10
+    unit: Hz
+    at: [1352, 0]
+  measuring: {type: structure.group, title: Measured together, size: [222, 239], at: [528, 72]}
+edges:
+  - la.device -> capture.device
+  - capture.D15 -> frequency.in
+  - capture.D15 -> duty.in
+  - frequency.out -> pair.frequency
+  - duty.out -> pair.duty
+  - pair.out -> log.in
+  - pair.out -> file.in
+  - pair.out -> parts.in
+  - parts.frequency -> check.in

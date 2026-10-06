@@ -1,0 +1,9 @@
+panel: Test bench
+flow: ../flows/test.flow.yaml
+columns: 3
+widgets:
+  run: {kind: button, bind: uart_capture.arm, title: Run the tests}
+  uart: {kind: led, bind: uart_check.result, title: UART, row: 1}
+  clock: {kind: led, bind: clock_check.pass, title: Clock, row: 1, column: 1}
+  frequency: {kind: number, bind: frequency.out, title: Clock frequency, row: 1, column: 2, unit: Hz}
+  trace: {kind: scope, bind: uart_capture.capture, title: UART, row: 2, columns: 3, rows: 2}

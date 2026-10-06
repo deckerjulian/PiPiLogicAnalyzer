@@ -1,0 +1,8 @@
+project: Long-term logger
+description: Records inputs of a device for a long time into a CSV file and shows them as a strip
+  chart. On the command line give the time, e.g. "openscilab run flows/logger.flow.yaml
+  --duration 1h". The device is a simulated Arduino Uno (PWM of D9 through an RC low pass at A0,
+  a push button on D2).
+devices:
+  uno: sim:uno
+open: [panels/logger.panel.yaml, flows/logger.flow.yaml]

@@ -1,0 +1,12 @@
+flow: Main
+nodes:
+  sim: {type: device.instrument, at: [0, 0]}
+  note:
+    type: structure.comment
+    text: |
+      'sim' is the device of project.yaml (a simulated logic analyzer).
+      Add nodes with Tab or from the palette; drag from a port to the
+      empty canvas to add a node that fits it. Panel (toolbar) makes a
+      front panel for this flow.
+    at: [0, 120]
+edges: []

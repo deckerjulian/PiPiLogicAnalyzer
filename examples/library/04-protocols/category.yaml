@@ -1,0 +1,3 @@
+title: Protocols
+description: Decoding UART, SPI and I²C with the protocol decoders, checking what a device sends, and sending - with the device's own hardware or as a pattern.
+icon: bus

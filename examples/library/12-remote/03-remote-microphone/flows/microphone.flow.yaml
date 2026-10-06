@@ -1,0 +1,17 @@
+flow: Remote microphone
+description: Blocks of an analog input arrive as analog signals with their time base; the spectrum is the FFT of each block.
+nodes:
+  mic: {type: device.instrument, at: [0, 168]}
+  samples: {type: remote.receive, channel: mic, at: [272, 104]}
+  level: {type: remote.receive, channel: level, at: [272, 240]}
+  scope: {type: view.scope, title: Microphone, at: [544, 144]}
+  fft: {type: dsp.fft, window: hann, scale: dB, at: [544, 0]}
+  spectrum: {type: view.spectrum, title: Spectrum, at: [808, 0]}
+  show_level: {type: view.number, title: Level (RMS), unit: V, digits: 3, at: [544, 304]}
+edges:
+  - mic.device -> samples.device
+  - mic.device -> level.device
+  - samples.out -> scope.in
+  - samples.out -> fft.in
+  - fft.out -> spectrum.in
+  - level.out -> show_level.in

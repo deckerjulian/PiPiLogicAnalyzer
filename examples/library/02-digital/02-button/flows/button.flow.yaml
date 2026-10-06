@@ -1,0 +1,25 @@
+flow: Button
+description: 'The device node tells the simulator when the button is pressed (signals). Live, every block of the stream is counted; at the end the buffer hands the whole recording to the debounce filter and the check.'
+nodes:
+  uno:
+    type: device.instrument
+    signals: {channels: {D2: {type: button, presses: [[0.1, 0.35], [0.6, 0.8]], bounce: 2 ms, bounces: 4}}}
+    at: [0, 96]
+  stream: {type: device.stream, channels: [D2], rate: 10 kHz, duration: 1 s, at: [272, 96]}
+  raw: {type: measure.count, edge: falling, at: [544, 224]}
+  raw_view: {type: view.number, title: Edges of the contact, at: [808, 232]}
+  recording: {type: data.buffer, length: 2 s, at: [544, 72]}
+  debounce: {type: dsp.debounce, time: 5 ms, at: [808, 72]}
+  presses: {type: measure.count, edge: falling, at: [1080, 72]}
+  presses_view: {type: view.number, title: Presses, at: [1352, 144]}
+  check: {type: report.check, name: Presses, expected: 2, at: [1352, 0]}
+edges:
+  - uno.device -> stream.device
+  - stream.D2 -> raw.in
+  - raw.out -> raw_view.in
+  - stream.D2 -> recording.in
+  - stream.done -> recording.read
+  - recording.out -> debounce.in
+  - debounce.out -> presses.in
+  - presses.out -> presses_view.in
+  - presses.out -> check.in

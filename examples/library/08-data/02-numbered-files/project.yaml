@@ -1,0 +1,6 @@
+project: Numbered files
+description: Three captures, one per second, each in a file of its own - capture-001.lac,
+  capture-002.lac, capture-003.lac in the data folder. Open them from the Project sidebar.
+devices:
+  la: sim:free
+open: [flows/files.flow.yaml]

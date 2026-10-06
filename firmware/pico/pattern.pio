@@ -1,0 +1,50 @@
+;
+; Copyright (C) 2026 Julian Decker
+;
+; Part of openSciLab.
+;
+; SPDX-License-Identifier: GPL-3.0-or-later
+;
+
+; Pattern generator (command 22 GEN_START). pattern.c copies one of the programs and patches it
+; for the request before loading it:
+;
+;   * the WAIT instructions wait for a rising edge of the trigger input (flag 1) or become NOPs
+;   * OUT writes 8, 16 or 32 bits (one sample) to the pins; autopull has the same threshold
+;   * "jmp x-- sample" ends after X + 1 samples (length x passes); for passes 0 (until stopped)
+;     it becomes "jmp sample"
+;   * SET drives the sync pin: high from the first sample until the end (no SET pin without one)
+;   * "irq nowait 4 rel" tells the CPU that the output started (after the trigger)
+;
+; pattern_fast takes 2 cycles per sample (TIMING_PATTERN_FAST_CYCLES), the clock divider sets the
+; rate; pattern_slow takes 4 + ISR cycles per sample (TIMING_PATTERN_SLOW_CYCLES), a whole
+; number of cycles, for every rate below a quarter of the system clock.
+
+.program pattern_fast
+    wait 0 gpio 1           ; trigger input low ...
+    wait 1 gpio 1           ; ... then high: a rising edge
+    set pins, 1             ; sync pin high
+    irq nowait 4 rel        ; started
+public sample:
+    out pins, 32            ; one sample
+public last:
+    jmp x-- sample          ; next sample
+    set pins, 0             ; sync pin low after the last sample
+public done:
+    jmp done
+
+.program pattern_slow
+    wait 0 gpio 1
+    wait 1 gpio 1
+    set pins, 1
+    irq nowait 4 rel
+public sample:
+    out pins, 32
+    mov y, isr
+delay:
+    jmp y-- delay           ; ISR + 1 cycles
+public last:
+    jmp x-- sample
+    set pins, 0
+public done:
+    jmp done

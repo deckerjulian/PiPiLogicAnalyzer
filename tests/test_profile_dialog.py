@@ -9,11 +9,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core.profiles import Profile, ProfileStore
-from pipilogicanalyzer.driver.base import AnalyzerDriverType
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-from pipilogicanalyzer.ui.dialogs import profile_dialog
-from pipilogicanalyzer.ui.dialogs.profile_dialog import ProfileEditDialog, ProfileSettingsDriver
+from openscilab.core.profiles import Profile, ProfileStore
+from openscilab.driver.base import AnalyzerDriverType
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.ui.dialogs import profile_dialog
+from openscilab.ui.dialogs.profile_dialog import ProfileEditDialog, ProfileSettingsDriver
 
 
 @pytest.fixture(scope="module")
@@ -42,8 +42,8 @@ def test_the_stand_in_driver_follows_the_channels():
 
 
 def test_the_capture_dialog_opens_for_a_multi_device_profile(application, monkeypatch):
-    from pipilogicanalyzer.core import settings as settings_store
-    from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+    from openscilab.core import settings as settings_store
+    from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
     monkeypatch.setattr(settings_store, "get_settings", lambda *args, **kwargs: None)
     dialog = CaptureDialog(ProfileSettingsDriver(settings(0, 30)))
@@ -116,9 +116,12 @@ def test_the_capture_settings_are_edited_without_touching_the_defaults(applicati
     assert dialog.profile is None and "needs capture settings or decoders" in dialog.message.text()
 
 
-def test_the_profiles_menu_edits_a_profile(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as main_window_module
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_the_profiles_menu_edits_a_profile(application, monkeypatch, make_dataview):
+    from PySide6.QtWidgets import QMenu
+
+    from openscilab.driver.simulated import open_simulated
+    from openscilab.ui.devices.capture import capture_controller
+    from openscilab.ui.dialogs import profile_dialog
 
     class FakeEditDialog:
         def __init__(self, profile, current_decoders, other_names, parent=None):
@@ -127,15 +130,18 @@ def test_the_profiles_menu_edits_a_profile(application, monkeypatch):
         def exec(self):
             return True
 
-    monkeypatch.setattr(main_window_module, "ProfileEditDialog", FakeEditDialog)
-    window = MainWindow()
+    monkeypatch.setattr(profile_dialog, "ProfileEditDialog", FakeEditDialog)
+    window = make_dataview()
+    controller = capture_controller(open_simulated("free"))
+    window.attach_source(controller)
     try:
-        window.profiles.add(Profile("Bus", settings(0)))
-        window._rebuild_profiles_menu()
-        (submenu,) = [action.menu() for action in window.profiles_menu.actions() if action.text() == "Bus"]
+        controller.profiles.add(Profile("Bus", settings(0)))
+        menu = QMenu()
+        controller.fill_profiles_menu(menu, window)
+        (submenu,) = [action.menu() for action in menu.actions() if action.text() == "Bus"]
         assert [action.text() for action in submenu.actions() if action.text()] == ["Load", "Edit...", "Delete..."]
 
-        window.edit_profile(window.profiles.get("Bus"))
+        assert controller.edit_profile(controller.profiles.get("Bus"), window)
 
         stored = ProfileStore()
         assert stored.get("Bus") is None and stored.get("Renamed").notes == "edited"

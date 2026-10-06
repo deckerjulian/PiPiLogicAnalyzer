@@ -1,0 +1,24 @@
+flow: Read a table
+description: data.file_read reads the CSV as a table; report.table and report.image put it into the report.
+nodes:
+  file: {type: data.file_read, path: diode.csv, at: [0, 328]}
+  view: {type: view.table, title: diode.csv, at: [272, 560]}
+  intro:
+    type: report.section
+    title: Diode
+    text: Current through a silicon diode over its forward voltage.
+    at: [272, 432]
+  table: {type: report.table, title: Measured values, at: [272, 320]}
+  diagram:
+    type: report.image
+    title: Characteristic curve
+    x: volts
+    y: milliamps
+    x_label: Voltage (V)
+    y_label: Current (mA)
+    at: [272, 168]
+  report: {type: report.write, path: diode.html, title: Diode, at: [272, 0]}
+edges:
+  - file.table -> view.in
+  - file.table -> table.in
+  - file.table -> diagram.in

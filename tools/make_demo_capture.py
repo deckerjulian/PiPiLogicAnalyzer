@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Julian Decker
 #
-# Part of PiPiLogicAnalyzer.
+# Part of openSciLab.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,7 +10,7 @@
 Useful to try the application (and the protocol decoders) without hardware::
 
     python tools/make_demo_capture.py
-    pipilogicanalyzer examples/demo.lac
+    openscilab examples/demo.lac
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipilogicanalyzer.core import capture_io  # noqa: E402
-from pipilogicanalyzer.core.regions import SampleRegion  # noqa: E402
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession  # noqa: E402
+from openscilab.core import capture_io  # noqa: E402
+from openscilab.core.regions import SampleRegion  # noqa: E402
+from openscilab.driver.models import AnalyzerChannel, CaptureSession  # noqa: E402
 
 SAMPLE_RATE = 1_000_000
 

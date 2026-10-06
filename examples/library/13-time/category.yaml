@@ -1,0 +1,3 @@
+title: Time
+description: When samples were taken - a sync signal from openSciLab that aligns instruments (and remote devices) to a few microseconds, a loopback that measures the latency of an instrument behind USB, a remote DAQ that records the sync signal in its blocks. Simulated here; the Pico simulator emulates USB like the real one (docs/timing.md).
+icon: clock

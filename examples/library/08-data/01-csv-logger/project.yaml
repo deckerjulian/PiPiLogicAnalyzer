@@ -1,0 +1,6 @@
+project: CSV logger
+description: Writes every reading of A0 and D2 with its time into data/log.csv - one line per value,
+  for a spreadsheet or a script. Set a duration in the inspector of the flow for a long recording.
+devices:
+  uno: sim:uno
+open: [flows/logger.flow.yaml]

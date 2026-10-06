@@ -1,0 +1,11 @@
+project: Remote measuring device
+description: A measuring device on another computer (a Raspberry Pi, the PC of a DAQ) sends its samples
+  to openSciLab with the time it took them; openSciLab measures that computer's clock, so they line up
+  with everything else. device/my_device.py is the script for the other computer - fill in your
+  hardware where it says so. Until it runs, a simulated remote DAQ stands in (remote-sim:daq); then
+  set the device in project.yaml to remote:my-device.
+icon: wifi
+devices:
+  box: remote-sim:daq
+realtime: true
+open: [panels/remote.panel.yaml, flows/remote.flow.yaml]

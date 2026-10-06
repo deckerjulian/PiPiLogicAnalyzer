@@ -10,13 +10,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core.profiles import read_profiles_file
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-from pipilogicanalyzer.sigrok.composition import compose
-from pipilogicanalyzer.sigrok.provider import DecoderInstance, SigrokProvider
+from openscilab.core.profiles import read_profiles_file
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.sigrok.composition import compose
+from openscilab.sigrok.provider import DecoderInstance, SigrokProvider
 
 PROJECT_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROFILE = os.path.join(PROJECT_DIRECTORY, "examples", "c64-expansion-port-profile.json")
+PROFILE = os.path.join(PROJECT_DIRECTORY, "examples", "profiles", "c64-expansion-port.json")
 
 pytestmark = pytest.mark.skipif(
     not os.path.isfile(os.path.join(PROJECT_DIRECTORY, "decoders", "c64bus", "pd.py")),
@@ -30,7 +30,7 @@ HALF = 10
 
 @pytest.fixture(scope="module")
 def registry():
-    from pipilogicanalyzer.sigrok.engine import DecoderRegistry
+    from openscilab.sigrok.engine import DecoderRegistry
 
     registry = DecoderRegistry()
     registry.load()
@@ -96,7 +96,7 @@ def segments_of(group, annotation_id):
 
 
 def test_channels_are_assigned_automatically_by_name(registry):
-    from pipilogicanalyzer.ui.widgets.decoder_manager import DecoderManager
+    from openscilab.ui.widgets.decoder_manager import DecoderManager
 
     profile = master_slave_profile()
     info = registry.get("c64bus")
@@ -111,8 +111,8 @@ def test_channels_are_assigned_automatically_by_name(registry):
 
 
 def test_capture_channel_0_is_assigned_by_id():
-    from pipilogicanalyzer.driver.models import AnalyzerChannel
-    from pipilogicanalyzer.ui.widgets.decoder_manager import DecoderManager
+    from openscilab.driver.models import AnalyzerChannel
+    from openscilab.ui.widgets.decoder_manager import DecoderManager
 
     # The id matches capture channel 0, the name matches nothing.
     info = SimpleNamespace(
@@ -164,7 +164,7 @@ def test_a_bus_changing_at_the_read_point_is_flagged(registry):
     _session, group, _groups = decode_cycles(registry, modify=change_a0_at_the_edge)
 
     reads = segments_of(group, "read")
-    assert reads[0].values[:2] == ["R $FFFC = $E2 (unstable: A0)", "R $FFFC = $E2?"]
+    assert reads[0].values[:2] == ("R $FFFC = $E2 (unstable: A0)", "R $FFFC = $E2?")
     assert reads[1].values[0] == "R $8009 = $4C"
     assert [segment.values[0] for segment in segments_of(group, "unstable")] == [
         "Bus changing at the read point: A0"
@@ -192,16 +192,15 @@ def test_composition_shows_how_address_and_data_are_built(registry):
     assert "Changing" not in composition.describe()
 
 
-def test_hovering_an_annotation_marks_it_in_the_waveform(registry):
+def test_hovering_an_annotation_marks_it_in_the_waveform(registry, make_dataview):
     from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication
 
-    from pipilogicanalyzer.ui.main_window import MainWindow
-    from pipilogicanalyzer.ui.widgets.annotation_viewer import ANNOTATION_HEIGHT
+    from openscilab.ui.widgets.annotation_viewer import ANNOTATION_HEIGHT
 
     application = QApplication.instance() or QApplication([])  # noqa: F841
     session, group, groups = decode_cycles(registry)
-    window = MainWindow()
+    window = make_dataview()
     try:
         window.resize(1200, 800)
         window.load_session(session)
@@ -232,19 +231,18 @@ def test_hovering_an_annotation_marks_it_in_the_waveform(registry):
         window.close()
 
 
-def test_an_annotation_row_opens_as_a_list(registry):
+def test_an_annotation_row_opens_as_a_list(registry, make_dataview):
     from PySide6.QtCore import QEvent, QPoint, Qt
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 
-    from pipilogicanalyzer.ui.dialogs.annotation_list import TYPE_COLUMN, VALUE_COLUMN
-    from pipilogicanalyzer.ui.main_window import MainWindow
-    from pipilogicanalyzer.ui.view_model import AnnotationHover
-    from pipilogicanalyzer.ui.widgets.annotation_viewer import ANNOTATION_HEIGHT
+    from openscilab.ui.dialogs.annotation_list import TYPE_COLUMN, VALUE_COLUMN
+    from openscilab.ui.view_model import AnnotationHover
+    from openscilab.ui.widgets.annotation_viewer import ANNOTATION_HEIGHT
 
     application = QApplication.instance() or QApplication([])
     session, group, groups = decode_cycles(registry)
-    window = MainWindow()
+    window = make_dataview()
     try:
         window.resize(1200, 800)
         window.load_session(session)
@@ -305,6 +303,6 @@ def test_an_annotation_row_opens_as_a_list(registry):
 
 def test_bus_cycles_keep_the_value_in_the_short_texts(registry):
     _session, group, _groups = decode_cycles(registry)
-    assert segments_of(group, "read")[0].values == ["R $FFFC = $E2", "R $FFFC=$E2", "FFFC=E2", "E2", "R"]
+    assert segments_of(group, "read")[0].values == ("R $FFFC = $E2", "R $FFFC=$E2", "FFFC=E2", "E2", "R")
     (write,) = segments_of(group, "write")
-    assert write.values == ["W $D020 = $06", "W $D020=$06", "D020=06", "06", "W"]
+    assert write.values == ("W $D020 = $06", "W $D020=$06", "D020=06", "06", "W")

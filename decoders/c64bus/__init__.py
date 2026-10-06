@@ -1,5 +1,5 @@
 ##
-## This file is part of the PiPiLogicAnalyzer project.
+## This file is part of the openSciLab project.
 ##
 ## C64 / 6502 system bus decoder for sigrok.
 ##

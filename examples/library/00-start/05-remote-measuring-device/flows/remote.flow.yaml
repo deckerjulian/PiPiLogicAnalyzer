@@ -1,0 +1,17 @@
+flow: Remote measuring device
+description: remote.receive hands on the blocks of ai0 with their time on the device (its clock measured over the network); they go onto a strip chart and into data/ai0.lac. The panel switches do0 and measures the latency of the device's inputs with its loopback (calibrate_latency).
+nodes:
+  box: {type: device.instrument, at: [0, 232]}
+  ai0: {type: remote.receive, channel: ai0, at: [272, 88]}
+  do0: {type: remote.set, channel: do0, value: false, at: [272, 384]}
+  calibrate: {type: remote.call, command: calibrate_latency, args: {repeats: 10}, at: [272, 216]}
+  chart: {type: view.strip_chart, title: ai0, window: 10 s, at: [544, 112]}
+  record: {type: data.logger, path: ai0.lac, at: [544, 0]}
+  latency: {type: view.number, title: Latency of the inputs, at: [544, 280]}
+edges:
+  - box.device -> ai0.device
+  - box.device -> do0.device
+  - box.device -> calibrate.device
+  - ai0.out -> chart.in
+  - ai0.out -> record.in
+  - calibrate.result -> latency.in

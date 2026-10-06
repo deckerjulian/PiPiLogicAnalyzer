@@ -1,0 +1,7 @@
+project: Own nodes
+description: Node types of your own - every function with @node in the project's nodes folder is a
+  node of the palette (here example.bit_rate and example.blink in nodes/example_nodes.py). A plain
+  function is computed from its inputs, an async one runs with the flow.
+devices:
+  la: sim:free
+open: [flows/bit-rate.flow.yaml, nodes/example_nodes.py]

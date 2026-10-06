@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=openSciLab
+Comment=Open measurement and control lab: logic analyzer, flows, panels and simulated instruments
+Exec=openSciLab %f
+Icon=openscilab
+Terminal=false
+Categories=Development;Electronics;
+Keywords=logic;analyzer;sigrok;protocol;decoder;rp2040;lab;measurement;flow;

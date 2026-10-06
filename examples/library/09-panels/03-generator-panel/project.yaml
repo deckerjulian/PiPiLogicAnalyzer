@@ -1,0 +1,7 @@
+project: Generator panel
+description: A function generator with a panel - sliders set frequency and amplitude of the sine on
+  the oscilloscope's generator output while it plays; the button captures
+  CH1 and the panel shows it with its RMS and frequency.
+devices:
+  scope: sim:dho924s
+open: [panels/generator.panel.yaml, flows/generator.flow.yaml]

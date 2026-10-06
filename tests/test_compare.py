@@ -10,9 +10,9 @@ import time
 
 import numpy as np
 
-from pipilogicanalyzer.core import compare
-from pipilogicanalyzer.core.compare import align_offset, compare_sessions, difference_regions
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.core import compare
+from openscilab.core.compare import align_offset, compare_sessions, difference_regions
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
 
 
 def session_of(channels: dict[int, np.ndarray]) -> CaptureSession:
@@ -93,7 +93,7 @@ def test_difference_regions():
         (8, 9, "Diff 2"),
         (10, 12, "Diff 3"),
     ]
-    assert regions[0].region_color.red() > regions[0].region_color.green()
+    assert regions[0].region_color[0] > regions[0].region_color[1]  # red, green, blue, alpha
     assert difference_regions(compare_sessions(reference, reference)) == []
 
 

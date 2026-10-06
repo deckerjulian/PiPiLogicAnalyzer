@@ -1,0 +1,6 @@
+project: Spectrum
+description: The FFT of the 10 kHz square wave on CH2 - its odd harmonics (30, 50, 70 kHz ...) stand
+  out in the spectrum view. Compare with the sine on CH1 by changing the wire.
+devices:
+  scope: sim:dho924s
+open: [flows/spectrum.flow.yaml]

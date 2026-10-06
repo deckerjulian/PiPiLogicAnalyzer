@@ -1,0 +1,6 @@
+project: Square wave
+description: The square wave output of the Arduino Uno (a timer on D9) at 10 kHz, measured by a
+  capture of the same pin.
+devices:
+  uno: sim:uno
+open: [flows/square.flow.yaml]

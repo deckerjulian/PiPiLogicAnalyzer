@@ -1,0 +1,67 @@
+{
+  "Profiles": [
+    {
+      "Name": "I\u00b2C 400 kHz (fast mode)",
+      "CaptureSettings": {
+        "Frequency": 8000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "SCL",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 2",
+            "ChannelNumber": 1,
+            "ChannelName": "SDA",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 1,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "i2c",
+          "label": "I\u00b2C",
+          "channel_map": {
+            "0": 0,
+            "1": 1
+          },
+          "options": {
+            "address_format": "shifted"
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "SCL to CH1, SDA to CH2, GND to GND."
+    }
+  ]
+}

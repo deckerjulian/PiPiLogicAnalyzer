@@ -1,0 +1,6 @@
+project: Measurement panel
+description: A button captures D15 and D8; the panel shows frequency and duty cycle, an LED tells
+  whether the frequency is within 1 kHz ± 1 Hz, the scope shows the capture.
+devices:
+  la: sim:free
+open: [panels/measure.panel.yaml, flows/measure.flow.yaml]

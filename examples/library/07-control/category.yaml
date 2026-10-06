@@ -1,0 +1,3 @@
+title: Control
+description: Flows that decide - timers, sweeps, sequences, state machines, comparisons and subflows that are used like one node.
+icon: sequence

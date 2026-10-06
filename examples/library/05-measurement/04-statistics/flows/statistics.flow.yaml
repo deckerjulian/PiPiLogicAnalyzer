@@ -1,0 +1,36 @@
+flow: Statistics
+description: control.timer arms ten captures; data.table collects the frequencies with their index.
+nodes:
+  la: {type: device.instrument, at: [0, 168]}
+  timer: {type: control.timer, interval: 100 ms, count: 10, at: [0, 256]}
+  capture: {type: device.capture, channels: [D15], rate: 1 MHz, duration: 20 ms, at: [272, 168]}
+  frequency: {type: measure.frequency, at: [544, 232]}
+  table: {type: data.table, columns: [capture, frequency], at: [808, 312]}
+  view: {type: view.table, title: Frequencies, at: [1080, 432]}
+  check:
+    type: report.check
+    name: Frequency
+    expected: 1000
+    tolerance: 2
+    unit: Hz
+    at: [808, 128]
+  report_table: {type: report.table, title: Frequency of every capture, at: [1080, 320]}
+  diagram:
+    type: report.image
+    title: Frequency over the captures
+    x: capture
+    y: frequency
+    x_label: Capture
+    y_label: Frequency (Hz)
+    at: [1080, 168]
+  report: {type: report.write, path: statistics.html, title: Statistics, at: [1080, 0]}
+edges:
+  - la.device -> capture.device
+  - timer.tick -> capture.arm
+  - timer.index -> table.capture
+  - capture.D15 -> frequency.in
+  - frequency.out -> table.frequency
+  - frequency.out -> check.in
+  - table.table -> view.in
+  - table.table -> report_table.in
+  - table.table -> diagram.in

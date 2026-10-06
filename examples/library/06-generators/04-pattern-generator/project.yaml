@@ -1,0 +1,7 @@
+project: Pattern generator
+description: A digital pattern on D0-D3 written in SDL (h = samples high, l = low, {...}n = a group repeated n times, b = a byte) and
+  played by the simulator's pattern generator; its outputs are looped back to the inputs, so the
+  capture shows the pattern.
+devices:
+  la: sim:free
+open: [flows/pattern.flow.yaml]

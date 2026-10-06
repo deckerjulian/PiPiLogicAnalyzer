@@ -1,0 +1,15 @@
+flow: Generator panel
+description: Values at the generator's 'frequency' and 'amplitude' change it while it plays; 'Capture' arms the capture.
+nodes:
+  scope: {type: device.instrument, at: [0, 144]}
+  generator: {type: gen.waveform, kind: sine, frequency: 1 kHz, amplitude: 1 V, at: [272, 272]}
+  capture: {type: device.capture, channels: [CH1], rate: 2 MHz, samples: 20000, at: [272, 24]}
+  rms: {type: measure.rms, at: [544, 168]}
+  digital: {type: dsp.threshold, threshold: 0, hysteresis: 0.1, at: [544, 0]}
+  frequency: {type: measure.frequency, at: [808, 0]}
+edges:
+  - scope.device -> generator.device
+  - scope.device -> capture.device
+  - capture.CH1 -> rms.in
+  - capture.CH1 -> digital.in
+  - digital.out -> frequency.in

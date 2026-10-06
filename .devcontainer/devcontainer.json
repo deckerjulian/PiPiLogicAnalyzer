@@ -1,0 +1,27 @@
+{
+  "name": "openSciLab",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "QT_QPA_PLATFORM": "offscreen"
+  },
+  "postCreateCommand": "python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": ".venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "cmake.configureOnOpen": false
+      },
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "platformio.platformio-ide"
+      ]
+    }
+  }
+}

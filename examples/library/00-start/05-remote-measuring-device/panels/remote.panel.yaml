@@ -1,0 +1,8 @@
+panel: Remote measuring device
+flow: ../flows/remote.flow.yaml
+columns: 4
+widgets:
+  do0: {kind: switch, bind: do0.value, title: Output do0}
+  calibrate: {kind: button, bind: calibrate.trigger, title: Measure the latency, column: 1}
+  latency: {kind: number, bind: calibrate.result, title: Latency, column: 2, columns: 2}
+  chart: {kind: chart, bind: ai0.out, title: ai0, row: 1, columns: 4, rows: 3, unit: V}

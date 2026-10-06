@@ -1,0 +1,46 @@
+flow: Test report
+description: report.check nodes test the values; report.write writes all of them when the flow ends - PASSED only when every check passed.
+nodes:
+  dut: {type: device.instrument, at: [0, 368]}
+  capture:
+    type: device.capture
+    channels: [D8, D9, D15]
+    rate: 10 MHz
+    duration: 3 ms
+    at: [272, 368]
+  intro:
+    type: report.section
+    title: Device under test
+    text: 'The simulated device: clock on D8, UART on D9, 1 kHz on D15.'
+    at: [808, 1216]
+  clock: {type: measure.frequency, at: [544, 400]}
+  clock_check:
+    type: report.check
+    name: Clock D8
+    low: 990000
+    high: 1010000
+    unit: Hz
+    at: [808, 352]
+  duty: {type: measure.duty, at: [544, 512]}
+  duty_check: {type: report.check, name: Duty cycle D8, low: 0.45, high: 0.55, at: [808, 528]}
+  slow: {type: measure.period, at: [544, 616]}
+  slow_check:
+    type: report.check
+    name: Period D15
+    expected: 0.001
+    tolerance: 1.0e-05
+    unit: s
+    at: [808, 696]
+  uart: {type: decode.uart, channels: {rx: D9}, baudrate: 115200, format: ascii, at: [544, 184]}
+  uart_check: {type: control.compare, op: contains, value: openSciLab, at: [808, 168]}
+  report: {type: report.write, path: test-report.html, title: Test report, at: [808, 0]}
+edges:
+  - dut.device -> capture.device
+  - capture.D8 -> clock.in
+  - capture.D8 -> duty.in
+  - capture.D15 -> slow.in
+  - capture.capture -> uart.in
+  - clock.out -> clock_check.in
+  - duty.out -> duty_check.in
+  - slow.out -> slow_check.in
+  - uart.text -> uart_check.a

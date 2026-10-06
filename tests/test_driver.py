@@ -9,18 +9,19 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver.pico import protocol
-from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver, unpack_channel_samples
-from pipilogicanalyzer.driver.base import (
+from openscilab.driver.pico import protocol
+from openscilab.driver.pico.analyzer import PicoDriver, unpack_channel_samples
+from openscilab.driver.base import (
     FirmwareOutdatedError,
     AnalyzerDriverType,
     CaptureError,
     CaptureMode,
 )
-from pipilogicanalyzer.driver.pico.protocol import parse_version
-from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
-from pipilogicanalyzer.driver.models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType
-from pipilogicanalyzer.driver.pico.transport import Transport, TransportError
+from openscilab.driver.pico.protocol import parse_version
+from openscilab.driver.emulated import EmulatedAnalyzerDriver
+from openscilab.driver.models import AnalyzerChannel, BurstInfo, CaptureSession, TriggerType
+from openscilab.driver.base import DeviceConnectionError as ConnectionRefused
+from openscilab.driver.pico.transport import Transport, TransportError
 
 
 class FakeTransport(Transport):
@@ -97,9 +98,9 @@ class FakeTransport(Transport):
 def driver(monkeypatch):
     transport = FakeTransport()
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
-    instance = PiPiLogicAnalyzerDriver("/dev/fake")
+    instance = PicoDriver("/dev/fake")
     instance.test_transport = transport  # type: ignore[attr-defined]
     return instance
 
@@ -117,11 +118,11 @@ def test_version_parsing():
     assert parse_version("garbage").major == 0
 
 
-def open_with(monkeypatch, transport: FakeTransport, **options) -> PiPiLogicAnalyzerDriver:
+def open_with(monkeypatch, transport: FakeTransport, **options) -> PicoDriver:
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
-    return PiPiLogicAnalyzerDriver("/dev/fake", **options)
+    return PicoDriver("/dev/fake", **options)
 
 
 @pytest.mark.parametrize("protocol_line", [None, "PROTOCOL:0", f"PROTOCOL:{protocol.FIRMWARE_PROTOCOL + 1}"])
@@ -218,8 +219,8 @@ def test_pattern_trigger_follows_the_reported_groups(driver):
     assert driver.pattern_trigger_groups() == ()
     assert not driver.validate_settings(session, session.total_samples)
 
-    driver._capabilities = None
     driver.test_transport.queue_response("CAPS:SELFTEST,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23")
+    driver.refresh_capabilities()
     assert driver.pattern_trigger_groups() == ((0, 21), (21, 3))
     assert driver.validate_settings(session, session.total_samples)  # channels 17 to 20
 
@@ -241,6 +242,8 @@ def test_edge_trigger_with_output_needs_the_capability(driver):
     assert not driver.validate_settings(session, session.total_samples)
 
     driver.test_transport.queue_response("CAPS:EDGE_TRIGGER_OUT")
+    assert not driver.validate_settings(session, session.total_samples)  # a failed query is not repeated at once
+    driver.refresh_capabilities()
     assert driver.validate_settings(session, session.total_samples)
 
     request = driver.compose_request(session, CaptureMode.CHANNELS_8)
@@ -265,6 +268,7 @@ def test_start_capture_sends_the_request_and_decodes_the_samples(driver):
     session = make_session(channels=4, pre=2, post=6)
     transport = driver.test_transport
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     transport.queue_data(build_capture_payload([0b0001, 0b0011, 0b0000, 0b1111] * 2, CaptureMode.CHANNELS_8))
 
     done = threading.Event()
@@ -309,6 +313,7 @@ def test_timestamp_block_is_only_read_when_the_device_sends_one(driver):
 
     transport = driver.test_transport
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     transport.queue_data(build_capture_payload([1, 0, 1, 0], CaptureMode.CHANNELS_8, timestamps=[1]))
 
     done = threading.Event()
@@ -386,6 +391,7 @@ def test_a_failed_read_is_reported_to_the_handler(driver):
     session = make_session(channels=1, pre=2, post=6)
     transport = driver.test_transport
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     transport.queue_data(struct.pack("<I", 8))  # length only, no samples
 
     done = threading.Event()
@@ -403,6 +409,7 @@ def test_aborting_a_capture_does_not_report_an_error(driver):
     session = make_session(channels=1, pre=2, post=6)
     transport = driver.test_transport
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
 
     results = []
     driver.start_capture(session, results.append)
@@ -423,3 +430,87 @@ def test_the_interceptor_mode_follows_the_sample_bits(driver):
     assert driver.get_capture_mode([0, 3]) is CaptureMode.CHANNELS_8
     assert driver.get_capture_mode([4]) is CaptureMode.CHANNELS_16
     assert driver.get_capture_mode([12]) is CaptureMode.CHANNELS_24
+
+
+# ---------------------------------------------------------------- reliability
+def test_a_board_left_streaming_is_resynchronised_on_open(monkeypatch):
+    """A board still sending for a program that is gone answers the identification with
+    leftovers first: the driver stops it and asks once more."""
+    transport = FakeTransport()
+    transport._responses.insert(0, "\x00\x17garbage of a stream")
+    resets = []
+    monkeypatch.setattr(transport, "reset_input", lambda: resets.append(len(transport.written)))
+    monkeypatch.setattr("openscilab.driver.pico.analyzer.RESYNC_DELAY_S", 0.0)
+    opened = open_with(monkeypatch, transport)
+    assert opened.device_version == "LOGIC_ANALYZER_V6_0"
+    assert protocol.CMD_ABORT_CAPTURE in bytes(transport.written)
+    assert len(resets) >= 2  # before the first question and after stopping the board
+
+
+def test_a_board_that_does_not_identify_is_refused(monkeypatch):
+    transport = FakeTransport()
+    transport._responses[:0] = ["nonsense", "more nonsense"]
+    monkeypatch.setattr("openscilab.driver.pico.analyzer.RESYNC_DELAY_S", 0.0)
+    with pytest.raises(ConnectionRefused, match="Invalid device identification"):
+        open_with(monkeypatch, transport)
+    assert transport.closed
+
+
+def test_a_stopped_capture_does_not_end_the_next_one(driver):
+    """Stop and start again at once: the reader of the stopped capture must not report a
+    failure or mark the device idle while the new capture runs."""
+    transport = driver.test_transport
+    results = []
+    gates = [threading.Event(), threading.Event()]
+    readers = []
+
+    def read_exactly(count, timeout=None):
+        gate = gates[len(readers)]
+        readers.append(threading.current_thread())
+        gate.wait(5)
+        raise TransportError("the port was closed")
+
+    transport.read_exactly = read_exactly
+    transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
+    driver.start_capture(make_session(channels=1, pre=2, post=6), results.append)
+    old_thread = driver._capture_thread
+    while not readers:
+        time.sleep(0.001)
+    driver.stop_capture()  # the old reader is still blocked in its read
+    transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
+    assert driver.start_capture(make_session(channels=1, pre=2, post=6), results.append) == CaptureError.NONE
+    gates[0].set()  # only now the old reader wakes up and fails
+    old_thread.join(5)
+    assert driver.is_capturing and results == []  # it stayed silent and left the new capture alone
+    driver.stop_capture()
+    gates[1].set()
+
+
+def test_a_failed_capability_query_is_not_repeated_for_every_property(driver):
+    transport = driver.test_transport
+    asked = []
+    original = transport.read_line
+
+    def read_line(timeout=None):
+        asked.append(timeout)
+        return original(timeout)
+
+    transport.read_line = read_line
+    for _ in range(5):
+        assert driver.capabilities() == frozenset()
+        driver.supports_state_mode()
+    assert len(asked) == 1  # one question, not one per property
+    transport.queue_response("CAPS:STATE_MODE")
+    assert "STATE_MODE" in driver.refresh_capabilities()
+
+
+def test_device_details_are_read_once(driver):
+    transport = driver.test_transport
+    transport.queue_response("CAPS:DEVICEINFO")
+    for line in ("INFO:chip:RP2040", "INFO_END"):
+        transport.queue_response(line)
+    assert driver.device_details() == {"chip": "RP2040"}
+    written = len(transport.written)
+    assert driver.device_details() == {"chip": "RP2040"} and len(transport.written) == written

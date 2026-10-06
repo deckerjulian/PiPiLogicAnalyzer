@@ -1,0 +1,13 @@
+project: Calibrate latency
+description: How late do the samples of a USB instrument arrive? GP16 of the Pico is wired to GP17;
+  timing.calibrate switches GP16 while the Pico streams GP17. No edge comes before its command and no
+  sample after its arrival - half of the shortest loop is the latency, kept for the Pico at this rate.
+  The stream that follows is placed with it (device card - Timing).
+devices:
+  pico: sim:pico
+simulation:
+  wiring:
+    # the loopback: GP16 (an output) on GP17 (a channel)
+    pico: [{from: GP16, to: GP17}]
+realtime: true
+open: [flows/calibrate.flow.yaml]

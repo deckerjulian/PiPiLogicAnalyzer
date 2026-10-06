@@ -6,13 +6,13 @@ import os
 
 import pytest
 
-from pipilogicanalyzer.core import alignment, capture_io
-from pipilogicanalyzer.core.profiles import read_profiles_file
-from pipilogicanalyzer.sigrok.provider import SigrokProvider
+from openscilab.core import alignment, capture_io
+from openscilab.core.profiles import read_profiles_file
+from openscilab.sigrok.provider import SigrokProvider
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEMO = os.path.join(ROOT, "examples", "c64-demo.lac")
-PROFILE = os.path.join(ROOT, "examples", "c64-expansion-port-profile.json")
+PROFILE = os.path.join(ROOT, "examples", "profiles", "c64-expansion-port.json")
 
 pytestmark = pytest.mark.skipif(
     not (os.path.isfile(DEMO) and os.path.isfile(os.path.join(ROOT, "decoders", "c64bus", "pd.py"))),
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def decoded():
-    from pipilogicanalyzer.sigrok.engine import DecoderRegistry
+    from openscilab.sigrok.engine import DecoderRegistry
 
     registry = DecoderRegistry()
     registry.load()

@@ -12,8 +12,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QAction, QKeySequence, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-from pipilogicanalyzer.ui.main_window import MainWindow
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
 
 SAMPLES = 20_000
 
@@ -32,9 +31,9 @@ def many_channels(count: int = 20) -> CaptureSession:
 
 
 @pytest.fixture
-def window():
+def window(make_dataview):
     application = QApplication.instance() or QApplication([])
-    main = MainWindow()
+    main = make_dataview()
     main.resize(1200, 600)
     main.show()
     main.load_session(many_channels())
@@ -129,3 +128,36 @@ def test_arrow_and_plus_minus_keys(window):
     action_for(window, "-").trigger()
     assert window.model.visible_samples == 1_000
     assert action_for(window, "=") is action_for(window, "+")
+
+
+def test_cmd_and_two_fingers_zoom_the_waveform(window):
+    viewer = window.sample_viewer
+    viewer.wheelEvent(wheel(viewer, pixel=(0, 240), angle=(0, 1920), phase=Qt.ScrollUpdate,
+                            modifiers=Qt.ControlModifier))
+    assert window.model.visible_samples == 500
+
+
+def test_pinch_and_smart_zoom_in_every_part_of_the_waveform(window):
+    from PySide6.QtGui import QNativeGestureEvent, QPointingDevice
+
+    def gesture(kind, value=0.0):
+        position = QPointF(400, 20)
+        return QNativeGestureEvent(kind, QPointingDevice.primaryPointingDevice(), 2, position, position, position,
+                                   value, QPointF(0, 0))
+
+    for widget in (window.sample_viewer, window.sample_marker):
+        window.model.set_view(5_000, 1_000)
+        assert widget.event(gesture(Qt.ZoomNativeGesture, 1.0))
+        assert window.model.visible_samples == 500
+    assert window.sample_viewer.event(gesture(Qt.SmartZoomNativeGesture))
+    assert window.model.visible_samples == window.model.sample_count
+
+
+def test_the_overview_follows_the_trackpad(window):
+    previewer = window.previewer
+    first = window.model.first_sample
+    previewer.wheelEvent(wheel(previewer, pixel=(-30, 0), angle=(-240, 0), phase=Qt.ScrollUpdate))
+    assert window.model.first_sample > first
+    first = window.model.first_sample
+    previewer.wheelEvent(wheel(previewer, angle=(0, -120)))  # a mouse wheel notch: a quarter view
+    assert window.model.first_sample == first + 250

@@ -1,0 +1,21 @@
+flow: Low pass filter
+description: dsp.filter on the analog signal; both versions are measured.
+nodes:
+  scope: {type: device.instrument, at: [0, 168]}
+  capture: {type: device.capture, channels: [CH1], rate: 500 kHz, samples: 20000, at: [272, 168]}
+  filter: {type: dsp.filter, kind: lowpass, cutoff: 3 kHz, method: fir, taps: 201, at: [544, 56]}
+  raw_view: {type: view.scope, title: CH1 as captured, at: [544, 368]}
+  filtered_view: {type: view.scope, title: CH1 filtered, at: [808, 112]}
+  rms_raw: {type: measure.rms, at: [544, 256]}
+  rms_filtered: {type: measure.rms, at: [808, 0]}
+  show_raw: {type: view.number, title: RMS as captured, unit: V, at: [808, 264]}
+  show_filtered: {type: view.number, title: RMS filtered, unit: V, at: [1080, 0]}
+edges:
+  - scope.device -> capture.device
+  - capture.CH1 -> raw_view.in
+  - capture.CH1 -> filter.in
+  - filter.out -> filtered_view.in
+  - capture.CH1 -> rms_raw.in
+  - filter.out -> rms_filtered.in
+  - rms_raw.out -> show_raw.in
+  - rms_filtered.out -> show_filtered.in

@@ -1,0 +1,74 @@
+{
+  "Profiles": [
+    {
+      "Name": "I\u00b2S audio",
+      "CaptureSettings": {
+        "Frequency": 20000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "SCK",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 2",
+            "ChannelNumber": 1,
+            "ChannelName": "WS",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 3",
+            "ChannelNumber": 2,
+            "ChannelName": "SD",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 1,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "i2s",
+          "label": "I\u00b2S",
+          "channel_map": {
+            "0": 0,
+            "1": 1,
+            "2": 2
+          },
+          "options": {},
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "Bit clock (SCK/BCLK) to CH1, word select (WS/LRCLK) to CH2, data (SD) to CH3."
+    }
+  ]
+}

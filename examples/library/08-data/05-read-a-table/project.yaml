@@ -1,0 +1,4 @@
+project: Read a table
+description: Reads measured values from a CSV file (data/diode.csv, the curve of a diode) and makes
+  a report with the table and its diagram - results of other tools fit into the same reports.
+open: [flows/table.flow.yaml]

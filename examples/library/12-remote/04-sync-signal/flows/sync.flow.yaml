@@ -1,0 +1,19 @@
+flow: Sync signal
+description: 'The stream of D5 goes to remote.sync, which reports the offset of the station''s clock and the scatter of the matched edges (a few µs at 100 kHz).'
+nodes:
+  station: {type: device.instrument, at: [0, 64]}
+  la: {type: device.instrument, at: [0, 192]}
+  stream: {type: device.stream, channels: [D5], rate: 100 kHz, duration: 5 s, at: [272, 176]}
+  sync: {type: remote.sync, sync: SYNC, at: [544, 168]}
+  temperature: {type: remote.receive, channel: temperature, duration: 5 s, at: [272, 24]}
+  scatter: {type: view.number, title: Scatter of the sync edges, unit: s, at: [808, 112]}
+  edges: {type: view.number, title: Matched edges, at: [808, 288]}
+  chart: {type: view.strip_chart, title: Temperature, window: 10 s, at: [544, 0]}
+edges:
+  - station.device -> sync.device
+  - station.device -> temperature.device
+  - la.device -> stream.device
+  - stream.D5 -> sync.signal
+  - sync.uncertainty -> scatter.in
+  - sync.edges -> edges.in
+  - temperature.out -> chart.in

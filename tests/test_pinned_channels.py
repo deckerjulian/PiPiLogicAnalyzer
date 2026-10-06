@@ -9,15 +9,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.ui.main_window import MainWindow
-from pipilogicanalyzer.ui.widgets.sample_viewer import MIN_CHANNEL_HEIGHT
+from openscilab.ui.widgets.sample_viewer import MIN_CHANNEL_HEIGHT
 from test_ui import make_session
 
 
 @pytest.fixture
-def window():
+def window(make_dataview):
     QApplication.instance() or QApplication([])
-    main = MainWindow()
+    main = make_dataview()
     main.resize(1200, 800)
     main.load_session(make_session())
     yield main

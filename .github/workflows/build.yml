@@ -3,10 +3,11 @@
 # To keep the builds short:
 # * pull requests: tests only
 # * push to main: tests, the application for Windows, macOS (Apple Silicon) and Linux, published
-#   as the pre-release "latest-build". The firmware is only rebuilt when firmware/ changed since
-#   that release; otherwise its images are reused.
+#   as the pre-release "latest-build". The Pico firmware is only rebuilt when firmware/ changed
+#   since that release; otherwise its images are reused. The Arduino firmware and the bridge app
+#   are built when their sources exist (firmware/arduino, firmware/bridge-android).
 # * tag v* and manual runs (Actions -> Build -> Run workflow): everything, including the firmware
-#   and macOS (Intel); a tag creates a regular release.
+#   and macOS (Intel); a tag creates a release (a pre-release for alpha, beta and rc versions).
 # A push that changes documentation alone starts no run; pull requests always run the tests.
 
 name: Build
@@ -30,7 +31,7 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.12"
-  # Same versions as the Raspberry Pi Pico VS Code extension (firmware/PiPiLogicAnalyzer/CMakeLists.txt).
+  # Same versions as the Raspberry Pi Pico VS Code extension (firmware/pico/CMakeLists.txt).
   # build_all.sh finds the tools in ~/.pico-sdk, the directory layout of that extension.
   PICO_SDK_VERSION: "2.1.1"
   PICOTOOL_VERSION: "2.1.1"
@@ -69,6 +70,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       firmware: ${{ steps.plan.outputs.firmware }}
+      arduino: ${{ steps.plan.outputs.arduino }}
+      bridge: ${{ steps.plan.outputs.bridge }}
       platforms: ${{ steps.plan.outputs.platforms }}
     steps:
       - uses: actions/checkout@v5
@@ -80,10 +83,10 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           project=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          package=$(python3 -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('pipilogicanalyzer/__init__.py').read()).group(1))")
-          firmware=$(sed -n 's/^pico_set_program_version(PiPiLogicAnalyzer "\(.*\)")$/\1/p' firmware/PiPiLogicAnalyzer/CMakeLists.txt)
+          package=$(python3 -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('openscilab/__init__.py').read()).group(1))")
+          firmware=$(sed -n 's/^pico_set_program_version(openscilab_pico "\(.*\)")$/\1/p' firmware/pico/CMakeLists.txt)
           if [[ "$tag" != "$project" || "$tag" != "$package" || "$tag" != "$firmware" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject.toml ($project), pipilogicanalyzer/__init__.py ($package) and firmware/PiPiLogicAnalyzer/CMakeLists.txt ($firmware)"
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject.toml ($project), openscilab/__init__.py ($package) and firmware/pico/CMakeLists.txt ($firmware)"
             exit 1
           fi
           if ! grep -q "^## \[$tag\]" CHANGELOG.md; then
@@ -111,11 +114,21 @@ jobs:
             platforms="$platforms"',{"os":"macos-15-intel","platform":"macos-x64"}'
           fi
 
+          # The Arduino firmware (phase 2) and the bridge app (phase 3) are built once they exist.
+          arduino=false
+          bridge=false
+          if [[ -f firmware/arduino/platformio.ini ]]; then arduino=true; fi
+          if [[ -f firmware/bridge-android/gradlew ]]; then bridge=true; fi
+
           echo "firmware=$firmware" >> "$GITHUB_OUTPUT"
+          echo "arduino=$arduino" >> "$GITHUB_OUTPUT"
+          echo "bridge=$bridge" >> "$GITHUB_OUTPUT"
           echo "platforms=[$platforms]" >> "$GITHUB_OUTPUT"
           {
             echo "### Build plan"
-            echo "* Firmware: $([[ $firmware == true ]] && echo "built" || echo "reused from the release $RELEASE_TAG (firmware/ unchanged)")"
+            echo "* Pico firmware: $([[ $firmware == true ]] && echo "built" || echo "reused from the release $RELEASE_TAG (firmware/ unchanged)")"
+            echo "* Arduino firmware: $([[ $arduino == true ]] && echo "built" || echo "none yet")"
+            echo "* Bridge app: $([[ $bridge == true ]] && echo "built" || echo "none yet")"
             echo "* Platforms: [$platforms]"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -192,7 +205,7 @@ jobs:
         run: |
           # Without it the SDK downloads and builds picotool again for every image.
           export picotool_DIR="$HOME/.pico-sdk/picotool/$PICOTOOL_VERSION/picotool"
-          firmware/build_all.sh "$BOARD"
+          firmware/build_all.sh --pico "$BOARD"
 
       - name: Upload the images
         uses: actions/upload-artifact@v4
@@ -208,6 +221,82 @@ jobs:
           name: firmware-log-${{ matrix.board }}
           path: firmware/uf2/*.log
           if-no-files-found: ignore
+
+  firmware-host-tests:
+    name: Firmware host tests (Pico)
+    needs: plan
+    if: needs.plan.outputs.firmware == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and run
+        run: |
+          cmake -S firmware/pico/tests -B "$RUNNER_TEMP/pico-tests"
+          cmake --build "$RUNNER_TEMP/pico-tests"
+          ctest --test-dir "$RUNNER_TEMP/pico-tests" --output-on-failure
+
+  firmware-arduino:
+    name: Firmware Arduino
+    needs: plan
+    if: needs.plan.outputs.arduino == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ hashFiles('firmware/arduino/platformio.ini') }}
+
+      - name: Native tests
+        run: |
+          python -m pip install platformio
+          pio test -d firmware/arduino -e native
+
+      - name: Build
+        run: firmware/build_all.sh --arduino
+
+      - name: Upload the images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-arduino
+          path: firmware/arduino-images/*
+          if-no-files-found: error
+
+  bridge-apk:
+    name: Bridge app
+    needs: plan
+    if: needs.plan.outputs.bridge == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: JVM tests
+        working-directory: firmware/bridge-android
+        run: ./gradlew :core:test
+
+      - name: Build
+        run: firmware/build_all.sh --bridge
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-apk
+          path: firmware/apk/openSciLab-bridge.apk
+          if-no-files-found: error
 
   firmware-images:
     name: Firmware images
@@ -256,7 +345,7 @@ jobs:
           else
             version="${version}-dev.${GITHUB_SHA::7}"
           fi
-          echo "ARTIFACT=PiPiLogicAnalyzer-${version}-${PLATFORM}" >> "$GITHUB_ENV"
+          echo "ARTIFACT=openSciLab-${version}-${PLATFORM}" >> "$GITHUB_ENV"
 
       - name: Download the new firmware images
         if: needs.plan.outputs.firmware == 'true'
@@ -288,16 +377,16 @@ jobs:
         run: python packaging/make_icons.py build/icons
 
       - name: Build with PyInstaller
-        run: python -m PyInstaller packaging/pipilogicanalyzer.spec --noconfirm --distpath dist --workpath build/pyinstaller
+        run: python -m PyInstaller packaging/openscilab.spec --noconfirm --distpath dist --workpath build/pyinstaller
 
       - name: Start the packaged application
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           case "$RUNNER_OS" in
-            Windows) executable="dist/PiPiLogicAnalyzer/PiPiLogicAnalyzer.exe" ;;
-            macOS) executable="dist/PiPiLogicAnalyzer.app/Contents/MacOS/PiPiLogicAnalyzer" ;;
-            *) executable="dist/PiPiLogicAnalyzer/PiPiLogicAnalyzer" ;;
+            Windows) executable="dist/openSciLab/openSciLab.exe" ;;
+            macOS) executable="dist/openSciLab.app/Contents/MacOS/openSciLab" ;;
+            *) executable="dist/openSciLab/openSciLab" ;;
           esac
           status=0
           "$executable" --smoke-test smoke-test.txt || status=$?
@@ -307,14 +396,14 @@ jobs:
       - name: Package for Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/PiPiLogicAnalyzer -DestinationPath "dist/$env:ARTIFACT.zip"
+        run: Compress-Archive -Path dist/openSciLab -DestinationPath "dist/$env:ARTIFACT.zip"
 
       - name: Package for macOS
         if: runner.os == 'macOS'
         run: |
           # hdiutil occasionally reports "Resource busy" on the hosted runners
           for attempt in 1 2 3; do
-            hdiutil create -volname PiPiLogicAnalyzer -srcfolder dist/PiPiLogicAnalyzer.app -ov -format UDZO "dist/${ARTIFACT}.dmg" && break
+            hdiutil create -volname openSciLab -srcfolder dist/openSciLab.app -ov -format UDZO "dist/${ARTIFACT}.dmg" && break
             sleep 5
           done
           test -f "dist/${ARTIFACT}.dmg"
@@ -322,8 +411,8 @@ jobs:
       - name: Package for Linux
         if: runner.os == 'Linux'
         run: |
-          packaging/linux/build_appimage.sh dist/PiPiLogicAnalyzer build/icons/pipilogicanalyzer-256.png "dist/${ARTIFACT}.AppImage"
-          tar -C dist -czf "dist/${ARTIFACT}.tar.gz" PiPiLogicAnalyzer
+          packaging/linux/build_appimage.sh dist/openSciLab build/icons/openscilab-256.png "dist/${ARTIFACT}.AppImage"
+          tar -C dist -czf "dist/${ARTIFACT}.tar.gz" openSciLab
 
       - name: Upload the application
         uses: actions/upload-artifact@v4
@@ -338,10 +427,12 @@ jobs:
 
   release:
     name: Publish
-    needs: [plan, app]
+    needs: [plan, app, firmware-arduino, bridge-apk]
     if: >-
       always()
       && needs.app.result == 'success'
+      && needs.firmware-arduino.result != 'failure'
+      && needs.bridge-apk.result != 'failure'
       && github.event_name == 'push'
       && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
@@ -374,7 +465,13 @@ jobs:
           mkdir upload
           find artifacts/app-* -type f -exec cp {} upload/ \;
           cp artifacts/firmware-uf2/*.uf2 upload/
-          (cd artifacts/firmware-uf2 && zip -q ../../upload/PiPiLogicAnalyzer-firmware-uf2.zip ./*.uf2)
+          (cd artifacts/firmware-uf2 && zip -q ../../upload/openSciLab-firmware-pico-uf2.zip ./*.uf2)
+          if [[ -d artifacts/firmware-arduino ]]; then
+            (cd artifacts/firmware-arduino && zip -q ../../upload/openSciLab-firmware-arduino.zip ./*)
+          fi
+          if [[ -f artifacts/bridge-apk/openSciLab-bridge.apk ]]; then
+            cp artifacts/bridge-apk/openSciLab-bridge.apk upload/
+          fi
           cp source/LICENSE upload/LICENSE.txt
           cp source/THIRD_PARTY_NOTICES.md upload/
           (cd upload && sha256sum -- * > SHA256SUMS.txt)
@@ -388,7 +485,7 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Latest build (main, ${GITHUB_SHA::7})" \
-            --notes "Automatic build of the newest commit on main (${GITHUB_SHA}): firmware for every board and the application for Windows, macOS and Linux. Not a tested release."
+            --notes "Automatic build of the newest commit on main (${GITHUB_SHA}): the firmware of the instruments and the application for Windows, macOS and Linux. Not a tested release."
 
       - name: Create the release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -400,6 +497,9 @@ jobs:
             found { print }
           ' source/CHANGELOG.md > release-notes.md
           printf '\n---\nBased on and extending the [LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín Giménez Bernad (gusmanb). Thank you!\n' >> release-notes.md
+          # an alpha, beta or release candidate (0.1.0b1, 1.0.0rc2) is published as a pre-release
+          prerelease=()
+          if [[ "${GITHUB_REF_NAME#v}" =~ (a|b|rc)[0-9]+$ ]]; then prerelease=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" upload/* \
-            --title "PiPiLogicAnalyzer ${GITHUB_REF_NAME#v}" \
-            --notes-file release-notes.md
+            --title "openSciLab ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md "${prerelease[@]}"

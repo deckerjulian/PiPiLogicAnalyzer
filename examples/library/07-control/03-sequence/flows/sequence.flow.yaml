@@ -1,0 +1,19 @@
+flow: Sequence
+description: control.sequence with 'repeat' 3; every 'set' sends a value at its output (here 'led').
+nodes:
+  uno: {type: device.instrument, at: [0, 176]}
+  sequence:
+    type: control.sequence
+    repeat: 3
+    steps: [{set: led, value: 1}, {wait: 200 ms}, {set: led, value: 0}, {wait: 100 ms}]
+    at: [0, 264]
+  pin: {type: gpio.write, pin: D13, at: [272, 360]}
+  monitor: {type: device.monitor, pins: [D13], rate: 50 Hz, duration: 1.2 s, at: [272, 0]}
+  chart: {type: view.strip_chart, title: D13, window: 2 s, at: [544, 16]}
+  finished: {type: view.log, title: Sequence, at: [272, 208]}
+edges:
+  - uno.device -> pin.device
+  - uno.device -> monitor.device
+  - sequence.led -> pin.value
+  - sequence.done -> finished.in
+  - monitor.D13 -> chart.in

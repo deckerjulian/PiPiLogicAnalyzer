@@ -1,0 +1,38 @@
+flow: Two instruments
+description: 'The Uno''s PWM (2 kHz, 30 %) starts; its ''done'' arms the scope''s capture of CH1; a threshold makes the logic level of the 5 V signal.'
+nodes:
+  uno: {type: device.instrument, at: [0, 176]}
+  scope: {type: device.instrument, at: [272, 88]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 2 kHz, duty: 0.3, at: [272, 176]}
+  capture: {type: device.capture, channels: [CH1], rate: 1 MHz, samples: 20000, at: [544, 120]}
+  level: {type: dsp.threshold, threshold: 2.5, hysteresis: 0.5, at: [808, 152]}
+  frequency: {type: measure.frequency, at: [1080, 104]}
+  duty: {type: measure.duty, at: [1080, 208]}
+  high: {type: measure.max, at: [808, 328]}
+  frequency_check:
+    type: report.check
+    name: PWM frequency
+    expected: 2000
+    tolerance: 20
+    unit: Hz
+    at: [1352, 64]
+  duty_check:
+    type: report.check
+    name: PWM duty cycle
+    expected: 0.3
+    tolerance: 0.01
+    at: [1352, 240]
+  show_high: {type: view.number, title: High level, unit: V, at: [1080, 328]}
+  view: {type: view.scope, title: CH1 on D9, at: [808, 0]}
+edges:
+  - uno.device -> pwm.device
+  - scope.device -> capture.device
+  - pwm.done -> capture.arm
+  - capture.CH1 -> level.in
+  - capture.CH1 -> high.in
+  - level.out -> frequency.in
+  - level.out -> duty.in
+  - frequency.out -> frequency_check.in
+  - duty.out -> duty_check.in
+  - high.out -> show_high.in
+  - capture.capture -> view.in

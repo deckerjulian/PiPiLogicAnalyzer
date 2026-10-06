@@ -1,0 +1,6 @@
+project: Setup and hold
+description: How long is the SPI data line (MOSI, D11) stable before and after the rising clock edges
+  (D10)? measure.setup_hold finds the shortest setup and hold time - the margin of the bus.
+devices:
+  la: sim:free
+open: [flows/setup-hold.flow.yaml]

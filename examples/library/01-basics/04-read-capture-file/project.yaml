@@ -1,0 +1,4 @@
+project: Read a capture file
+description: Reads a saved capture (data/demo.lac) when the flow starts, shows it and measures the
+  frequency of its clock channel (CLK) - the capture holds I²C (SCL, SDA), UART (RX) and a clock - a flow can work on recordings as well as on devices.
+open: [flows/read.flow.yaml]

@@ -8,8 +8,8 @@ from typing import Optional
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core.sample_store import RingStore, SampleStore
-from pipilogicanalyzer.driver.base import (
+from openscilab.core.sample_store import RingStore, SampleStore
+from openscilab.driver.base import (
     ACQUISITION_BUFFER,
     ACQUISITION_STREAM,
     CAPABILITY_CONTINUOUS_STREAM,
@@ -19,7 +19,7 @@ from pipilogicanalyzer.driver.base import (
     CaptureLimits,
     CaptureProgressArgs,
 )
-from pipilogicanalyzer.driver.models import (
+from openscilab.driver.models import (
     AnalyzerChannel,
     CaptureSession,
     ConditionKind,
@@ -29,7 +29,7 @@ from pipilogicanalyzer.driver.models import (
     TriggerStage,
     TriggerType,
 )
-from pipilogicanalyzer.driver.software_trigger import (
+from openscilab.driver.software_trigger import (
     NO_TRIGGER_ERROR,
     SoftwareTriggerDriver,
     supports_software_trigger,
@@ -262,6 +262,7 @@ def test_without_software_trigger_the_capture_passes_through():
     driver.add_capture_completed_handler(received.append)
     assert driver.start_capture(session) is CaptureError.NONE
     assert inner.sessions == [session]
+    driver.wait_for_events()  # (the handlers run in the drivers' notifier threads)
     assert received and received[0].session is session and len(session.capture_channels[0].samples) == 1000
 
 

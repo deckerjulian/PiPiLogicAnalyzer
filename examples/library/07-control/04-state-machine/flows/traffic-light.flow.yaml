@@ -1,0 +1,21 @@
+flow: Traffic light
+description: 'control.state_machine; the outputs red, yellow and green come from the ''enter'' values of the states.'
+nodes:
+  uno: {type: device.instrument, at: [0, 104]}
+  light:
+    type: control.state_machine
+    initial: red
+    states: {red: {enter: {red: 1, yellow: 0, green: 0}, 'on': [{after: 1 s, to: red_yellow}]}, red_yellow: {enter: {red: 1, yellow: 1, green: 0}, 'on': [{after: 300 ms, to: green}]}, green: {enter: {red: 0, yellow: 0, green: 1}, 'on': [{after: 1 s, to: yellow}]}, yellow: {enter: {red: 0, yellow: 1, green: 0}, 'on': [{after: 300 ms, to: stop}]}, stop: {enter: {red: 1, yellow: 0, green: 0}, 'on': [{after: 500 ms, to: 'off'}]}, 'off': {enter: {red: 0, yellow: 0, green: 0}}}
+    at: [0, 192]
+  red: {type: gpio.write, pin: D11, at: [272, 0]}
+  yellow: {type: gpio.write, pin: D12, at: [272, 128]}
+  green: {type: gpio.write, pin: D13, at: [272, 264]}
+  states: {type: view.log, title: States, at: [272, 392]}
+edges:
+  - uno.device -> red.device
+  - uno.device -> yellow.device
+  - uno.device -> green.device
+  - light.red -> red.value
+  - light.yellow -> yellow.value
+  - light.green -> green.value
+  - light.state -> states.in

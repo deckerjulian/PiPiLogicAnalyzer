@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Copyright (C) 2026 Julian Decker
 #
-# Part of PiPiLogicAnalyzer.
+# Part of openSciLab.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Wraps the PyInstaller folder into an AppImage.
 #
-#   packaging/linux/build_appimage.sh dist/PiPiLogicAnalyzer build/icons/pipilogicanalyzer-256.png PiPiLogicAnalyzer.AppImage
+#   packaging/linux/build_appimage.sh dist/openSciLab build/icons/openscilab-256.png openSciLab.AppImage
 #
 # appimagetool is downloaded unless APPIMAGETOOL points to it. It runs without FUSE
 # (--appimage-extract-and-run), so it also works in containers and CI runners.
@@ -25,20 +25,20 @@ OUTPUT="$3"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-APPDIR="$WORK/PiPiLogicAnalyzer.AppDir"
+APPDIR="$WORK/openSciLab.AppDir"
 
-mkdir -p "$APPDIR/usr/lib/pipilogicanalyzer" "$APPDIR/usr/share/applications" \
+mkdir -p "$APPDIR/usr/lib/openscilab" "$APPDIR/usr/share/applications" \
     "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-cp -a "$DIST"/. "$APPDIR/usr/lib/pipilogicanalyzer/"
-cp "$HERE/pipilogicanalyzer.desktop" "$APPDIR/pipilogicanalyzer.desktop"
-cp "$HERE/pipilogicanalyzer.desktop" "$APPDIR/usr/share/applications/pipilogicanalyzer.desktop"
-cp "$ICON" "$APPDIR/pipilogicanalyzer.png"
-cp "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/pipilogicanalyzer.png"
+cp -a "$DIST"/. "$APPDIR/usr/lib/openscilab/"
+cp "$HERE/openscilab.desktop" "$APPDIR/openscilab.desktop"
+cp "$HERE/openscilab.desktop" "$APPDIR/usr/share/applications/openscilab.desktop"
+cp "$ICON" "$APPDIR/openscilab.png"
+cp "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscilab.png"
 
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/lib/pipilogicanalyzer/PiPiLogicAnalyzer" "$@"
+exec "$HERE/usr/lib/openscilab/openSciLab" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 

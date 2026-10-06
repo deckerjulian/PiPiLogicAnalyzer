@@ -1,0 +1,15 @@
+flow: Remote control panel
+description: 'The panel binds the slider to heater.value, the switch to fan.value and the button to calibrate.trigger.'
+nodes:
+  station: {type: device.instrument, at: [0, 304]}
+  temperature: {type: remote.receive, channel: temperature, at: [272, 592]}
+  humidity: {type: remote.receive, channel: humidity, at: [272, 456]}
+  heater: {type: remote.set, channel: heater, value: 0, at: [272, 312]}
+  fan: {type: gpio.write, pin: fan, level: 0, at: [272, 168]}
+  calibrate: {type: remote.call, command: calibrate, args: {reference: 21}, at: [272, 0]}
+edges:
+  - station.device -> temperature.device
+  - station.device -> humidity.device
+  - station.device -> heater.device
+  - station.device -> fan.device
+  - station.device -> calibrate.device

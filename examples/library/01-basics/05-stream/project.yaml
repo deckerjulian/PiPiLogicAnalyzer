@@ -1,0 +1,6 @@
+project: Stream
+description: Streams D15 for 200 ms instead of capturing into the device's memory - the blocks arrive
+  while the device records. Every block is measured; the strip chart shows the frequency over time.
+devices:
+  la: sim:free
+open: [flows/stream.flow.yaml]

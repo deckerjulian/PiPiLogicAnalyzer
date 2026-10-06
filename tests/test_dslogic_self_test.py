@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from pipilogicanalyzer.driver.base import CaptureCompletedArgs, CaptureError, SelfTestResult
-from pipilogicanalyzer.driver.dslogic import protocol, self_test
-from pipilogicanalyzer.driver.dslogic.usb import UsbDeviceInfo
-from pipilogicanalyzer.driver.models import TriggerType
+from openscilab.driver.base import CaptureCompletedArgs, CaptureError, SelfTestResult
+from openscilab.driver.dslogic import protocol, self_test
+from openscilab.driver.dslogic.usb import UsbDeviceInfo
+from openscilab.driver.models import TriggerType
 
 
 class SimulatedDSLogic:

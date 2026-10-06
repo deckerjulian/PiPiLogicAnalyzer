@@ -1,0 +1,44 @@
+flow: Frequency and duty cycle
+description: One capture of 10 ms at 20 MHz; the measure nodes work on the single channels.
+nodes:
+  la: {type: device.instrument, at: [0, 280]}
+  capture:
+    type: device.capture
+    channels: [D15, D8]
+    rate: 20 MHz
+    duration: 10 ms
+    at: [272, 280]
+  frequency: {type: measure.frequency, at: [544, 104]}
+  period: {type: measure.period, statistic: mean, at: [544, 216]}
+  duty: {type: measure.duty, at: [544, 344]}
+  width: {type: measure.pulse_width, level: high, at: [544, 456]}
+  clock: {type: measure.frequency, at: [544, 592]}
+  frequency_check:
+    type: report.check
+    name: D15 frequency
+    expected: 1000
+    tolerance: 1
+    unit: Hz
+    at: [808, 0]
+  duty_check: {type: report.check, name: D15 duty cycle, low: 0.49, high: 0.51, at: [808, 344]}
+  clock_check:
+    type: report.check
+    name: D8 clock
+    expected: 1000000
+    tolerance: 1000
+    unit: Hz
+    at: [808, 680]
+  show_period: {type: view.number, title: D15 period, unit: s, at: [808, 176]}
+  show_width: {type: view.number, title: D15 high time, unit: s, at: [808, 512]}
+edges:
+  - la.device -> capture.device
+  - capture.D15 -> frequency.in
+  - capture.D15 -> period.in
+  - capture.D15 -> duty.in
+  - capture.D15 -> width.in
+  - capture.D8 -> clock.in
+  - frequency.out -> frequency_check.in
+  - duty.out -> duty_check.in
+  - clock.out -> clock_check.in
+  - period.out -> show_period.in
+  - width.out -> show_width.in

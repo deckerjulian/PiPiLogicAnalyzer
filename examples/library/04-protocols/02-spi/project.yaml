@@ -1,0 +1,6 @@
+project: SPI
+description: Decodes SPI on D10 (clock), D11 (MOSI) and D12 (chip select, active low) - every word
+  the master sends appears in the table.
+devices:
+  la: sim:free
+open: [flows/spi.flow.yaml]

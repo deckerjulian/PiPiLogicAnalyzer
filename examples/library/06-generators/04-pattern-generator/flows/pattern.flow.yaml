@@ -1,0 +1,31 @@
+flow: Pattern generator
+description: gen.pattern with one SDL track per pin at 1 MHz; 'sync' arms the capture.
+nodes:
+  la: {type: device.instrument, at: [0, 56]}
+  pattern:
+    type: gen.pattern
+    rate: 1 MHz
+    tracks: {D0: '{l1,h1,}50;', D1: '{l2,h2,}25;', D2: l10;h30;l10;h50;, D3: '$1;{<0>,l4,h4,}1;{<1>,l1,h7,}1;b0xA5;h36;'}
+    at: [272, 88]
+  capture:
+    type: device.capture
+    channels: [D0, D1, D2, D3]
+    rate: 4 MHz
+    samples: 400
+    at: [544, 48]
+  view: {type: view.scope, title: Pattern, at: [808, 0]}
+  frequency: {type: measure.frequency, at: [808, 152]}
+  check:
+    type: report.check
+    name: D0 frequency
+    expected: 500000
+    tolerance: 1000
+    unit: Hz
+    at: [1080, 152]
+edges:
+  - la.device -> pattern.device
+  - la.device -> capture.device
+  - pattern.sync -> capture.arm
+  - capture.capture -> view.in
+  - capture.D0 -> frequency.in
+  - frequency.out -> check.in

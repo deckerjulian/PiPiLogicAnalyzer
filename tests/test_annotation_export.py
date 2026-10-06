@@ -8,16 +8,16 @@ import json
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core.annotation_export import (
+from openscilab.core.annotation_export import (
     CSV_HEADER,
     annotation_records,
     export_annotations,
     export_annotations_csv,
     export_annotations_json,
 )
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-from pipilogicanalyzer.sigrok.engine import Annotation, AnnotationSegment
-from pipilogicanalyzer.sigrok.provider import AnnotationGroup, DecoderInstance, SigrokProvider
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.sigrok.engine import Annotation, AnnotationSegment
+from openscilab.sigrok.provider import AnnotationGroup, DecoderInstance, SigrokProvider
 
 
 def session_with_clock() -> CaptureSession:

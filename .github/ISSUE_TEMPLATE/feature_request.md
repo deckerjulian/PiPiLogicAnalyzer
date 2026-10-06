@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: An idea for the application, the firmware or a decoder
+about: An idea for the application, a node, a device, the firmware or a decoder
 labels: enhancement
 ---
 

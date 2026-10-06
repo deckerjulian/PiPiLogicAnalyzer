@@ -1,0 +1,33 @@
+flow: Report with a diagram
+description: 'A sweep of the duty cycle; every step''s reading goes into the table, the table into the report.'
+nodes:
+  uno: {type: device.instrument, at: [0, 184]}
+  sweep: {type: control.sweep, start: 0.1, stop: 0.9, step: 0.2, dwell: 600 ms, at: [0, 272]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, at: [272, 152]}
+  a0: {type: gpio.read, pin: A0, analog: true, at: [272, 304]}
+  table: {type: data.table, columns: [duty, volts], at: [544, 248]}
+  intro:
+    type: report.section
+    title: Setup
+    text: PWM on D9 through a 10 kΩ / 10 µF low pass to A0 of an Arduino Uno.
+    at: [808, 608]
+  values: {type: report.table, title: Readings, at: [808, 320]}
+  diagram:
+    type: report.image
+    title: A0 over the duty cycle
+    x: duty
+    y: volts
+    x_label: Duty cycle
+    y_label: A0 (V)
+    at: [808, 168]
+  report: {type: report.write, path: pwm-report.html, title: PWM and low pass, at: [808, 0]}
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> a0.device
+  - sweep.value -> pwm.duty
+  - sweep.value -> table.duty
+  - sweep.step -> a0.trigger
+  - a0.value -> table.volts
+  - a0.value -> sweep.next
+  - table.table -> values.in
+  - table.table -> diagram.in

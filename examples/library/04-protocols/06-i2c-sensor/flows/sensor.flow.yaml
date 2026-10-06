@@ -1,0 +1,16 @@
+flow: I²C sensor
+description: gen.tx_i2c writes the register number 0 and reads 2 bytes; 'received' is the answer.
+nodes:
+  pico: {type: device.instrument, at: [0, 0]}
+  read:
+    type: gen.tx_i2c
+    pins: [GP3, GP2]
+    address: 72
+    data: [0]
+    read: 2
+    clock: 100 kHz
+    at: [272, 0]
+  answer: {type: view.log, title: Answer of 0x48, at: [544, 40]}
+edges:
+  - pico.device -> read.device
+  - read.received -> answer.in

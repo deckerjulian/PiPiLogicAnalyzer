@@ -1,0 +1,31 @@
+;
+; Copyright (C) 2026 Julian Decker
+;
+; Part of openSciLab.
+;
+; SPDX-License-Identifier: GPL-3.0-or-later
+;
+
+; Pulses on one pin (command 16 PULSE), exact to a cycle of the system clock (clock divider 1).
+;
+; Loaded before the start with the state machine stopped:
+;   X   = number of pulses - 1
+;   ISR = delay of the pulse: a pulse lasts 3 + ISR cycles (TIMING_PULSE_HIGH_CYCLES)
+;   OSR = delay of the gap:   a gap lasts 4 + OSR cycles   (TIMING_PULSE_LOW_CYCLES)
+; The SET pin is the output; a low pulse inverts it with the output override of the GPIO.
+; After the last pulse the program stays at "done" with the pin at its idle level.
+
+.program pulse
+
+pulse_loop:
+    set pins, 1             ; the pulse starts after this cycle
+    mov y, isr
+high:
+    jmp y-- high            ; ISR + 1 cycles
+    set pins, 0             ; the pulse lasted 1 + 1 + ISR + 1 = 3 + ISR cycles
+    mov y, osr
+low:
+    jmp y-- low             ; OSR + 1 cycles
+    jmp x-- pulse_loop      ; the gap lasts 1 + 1 + OSR + 1 + 1 = 4 + OSR cycles
+public done:
+    jmp done

@@ -1,0 +1,192 @@
+{
+  "name": "dho924s",
+  "title": "Simulation: DHO924S",
+  "description": "Oscilloscope with 4 analog channels (12 bit) and 16 logic channels; large captures arrive progressively over the network. CH1: 1 kHz sine with noise, CH2: 10 kHz square, CH3: 500 Hz triangle, CH4: 100 Hz ramp; D0-D15 as sim:free. The generator output GI (25 MHz) is connected to CH1 while it runs, its sync output to D15.",
+  "digital": [
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13",
+    "D14",
+    "D15"
+  ],
+  "analog": [
+    "CH1",
+    "CH2",
+    "CH3",
+    "CH4"
+  ],
+  "max_rate": 625000000,
+  "memory_depth": 31250000,
+  "memory_depth_analog": {
+    "1": 25000000,
+    "2": 25000000,
+    "3": 10000000,
+    "4": 10000000
+  },
+  "stream_bandwidth": 0,
+  "adc_bits": 12,
+  "analog_range": [
+    -5.0,
+    5.0
+  ],
+  "adc_noise": 0.004,
+  "latency": 0.0,
+  "logic_level": 3.3,
+  "capabilities": [
+    "IMMEDIATE_TRIGGER",
+    "THRESHOLD",
+    "AFG"
+  ],
+  "outputs": [
+    {
+      "name": "GI",
+      "kind": "analog",
+      "net": "CH1",
+      "sync": "D15",
+      "voltage_range": [
+        -5.0,
+        5.0
+      ],
+      "resolution": 14,
+      "max_rate": 156250000,
+      "max_points": 16384,
+      "max_frequency": 25000000,
+      "capabilities": [
+        "SWEEP",
+        "BURST",
+        "ARB",
+        "SYNC_OUT"
+      ]
+    }
+  ],
+  "progressive": {
+    "lan_rate": 25000000,
+    "tile": 262144
+  },
+  "circuit": {
+    "sources": {
+      "D0": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 0
+      },
+      "D1": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 1
+      },
+      "D2": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 2
+      },
+      "D3": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 3
+      },
+      "D4": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 4
+      },
+      "D5": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 5
+      },
+      "D6": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 6
+      },
+      "D7": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 7
+      },
+      "D8": {
+        "type": "clock",
+        "frequency": "1 MHz",
+        "phase": 0.5
+      },
+      "D9": {
+        "type": "uart",
+        "text": "openSciLab\n",
+        "baud": 115200
+      },
+      "D10": {
+        "type": "spi",
+        "line": "clk",
+        "frequency": "1 MHz"
+      },
+      "D11": {
+        "type": "spi",
+        "line": "mosi",
+        "frequency": "1 MHz"
+      },
+      "D12": {
+        "type": "spi",
+        "line": "cs",
+        "frequency": "1 MHz"
+      },
+      "D13": {
+        "type": "i2c",
+        "line": "scl",
+        "frequency": "1 MHz"
+      },
+      "D14": {
+        "type": "i2c",
+        "line": "sda",
+        "frequency": "1 MHz"
+      },
+      "D15": {
+        "type": "square",
+        "frequency": "1 kHz"
+      },
+      "CH1": {
+        "type": "sum",
+        "parts": [
+          {
+            "type": "sine",
+            "frequency": "1 kHz",
+            "amplitude": "2 V"
+          },
+          {
+            "type": "analog_noise",
+            "rms": "20 mV",
+            "bandwidth": "100 MHz"
+          }
+        ]
+      },
+      "CH2": {
+        "type": "square",
+        "frequency": "10 kHz"
+      },
+      "CH3": {
+        "type": "triangle",
+        "frequency": "500 Hz",
+        "amplitude": "1.5 V",
+        "offset": "0.5 V"
+      },
+      "CH4": {
+        "type": "ramp",
+        "frequency": "100 Hz",
+        "low": "0 V",
+        "high_level": "3.3 V"
+      }
+    }
+  },
+  "provisional": "Values of the Rigol DHO924S until measured (step 3a)."
+}

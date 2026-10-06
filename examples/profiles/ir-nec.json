@@ -1,0 +1,60 @@
+{
+  "Profiles": [
+    {
+      "Name": "IR remote control (NEC)",
+      "CaptureSettings": {
+        "Frequency": 200000,
+        "PreTriggerSamples": 20000,
+        "PostTriggerSamples": 180000,
+        "TotalSamples": 200000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "IR",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "ir_nec",
+          "label": "IR NEC",
+          "channel_map": {
+            "0": 0
+          },
+          "options": {
+            "polarity": "active-low",
+            "cd_freq": 0,
+            "extended": "no"
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "The output of an IR receiver (TSOP38238 and similar) to CH1. One second: press a button of the remote."
+    }
+  ]
+}

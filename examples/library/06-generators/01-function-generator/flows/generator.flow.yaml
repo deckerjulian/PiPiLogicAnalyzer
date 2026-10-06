@@ -1,0 +1,40 @@
+flow: Function generator
+description: gen.waveform starts with the flow; its 'sync' arms the capture of CH1.
+nodes:
+  scope: {type: device.instrument, at: [0, 112]}
+  sine:
+    type: gen.waveform
+    kind: sine
+    frequency: 2 kHz
+    amplitude: 1 V
+    offset: 0 V
+    at: [272, 136]
+  capture: {type: device.capture, channels: [CH1], rate: 1 MHz, samples: 20000, at: [544, 96]}
+  rms: {type: measure.rms, at: [808, 152]}
+  digital: {type: dsp.threshold, threshold: 0, hysteresis: 0.1, at: [808, 264]}
+  frequency: {type: measure.frequency, at: [1080, 296]}
+  rms_check:
+    type: report.check
+    name: RMS
+    expected: 0.707
+    tolerance: 0.03
+    unit: V
+    at: [1080, 120]
+  frequency_check:
+    type: report.check
+    name: Frequency
+    expected: 2000
+    tolerance: 10
+    unit: Hz
+    at: [1352, 296]
+  view: {type: view.scope, title: CH1, at: [808, 0]}
+edges:
+  - scope.device -> sine.device
+  - scope.device -> capture.device
+  - sine.sync -> capture.arm
+  - capture.CH1 -> rms.in
+  - capture.CH1 -> digital.in
+  - digital.out -> frequency.in
+  - rms.out -> rms_check.in
+  - frequency.out -> frequency_check.in
+  - capture.capture -> view.in

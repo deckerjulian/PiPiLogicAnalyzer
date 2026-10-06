@@ -7,8 +7,8 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import buses
-from pipilogicanalyzer.core.buses import (
+from openscilab.core import buses
+from openscilab.core.buses import (
     bus_runs,
     bus_values,
     format_value,
@@ -17,7 +17,7 @@ from pipilogicanalyzer.core.buses import (
     parse_value,
     symbol_table_text,
 )
-from pipilogicanalyzer.driver.models import (
+from openscilab.driver.models import (
     AnalyzerChannel,
     BusDefinition,
     BusFormat,

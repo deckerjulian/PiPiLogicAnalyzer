@@ -1,0 +1,7 @@
+project: Button
+description: A push button on D2 (simulated, pressed twice, with contact bounce). The stream records
+  it; one counter counts every edge of the bouncing contact, the other one counts after the
+  debounce filter - two presses.
+devices:
+  uno: sim:uno
+open: [flows/button.flow.yaml]

@@ -1,0 +1,14 @@
+flow: First capture
+description: One capture of five channels at 4 MHz; the scope node shows it in a data view.
+nodes:
+  la: {type: device.instrument, at: [0, 0]}
+  capture:
+    type: device.capture
+    channels: [D0, D1, D2, D3, D8]
+    rate: 4 MHz
+    samples: 20000
+    at: [272, 0]
+  scope: {type: view.scope, title: Counter, at: [544, 0]}
+edges:
+  - la.device -> capture.device
+  - capture.capture -> scope.in

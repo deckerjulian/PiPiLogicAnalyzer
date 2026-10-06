@@ -1,0 +1,35 @@
+flow: Replay a capture
+description: 'gen.replay plays the digital channels of a capture on a pattern output (pins: {D9: D3} puts D9 on D3); its sync arms the second capture. Both are decoded; the text of the replay is compared with the original.'
+nodes:
+  la: {type: device.instrument, at: [0, 192]}
+  original: {type: device.capture, channels: [D9], rate: 2 MHz, duration: 3 ms, at: [272, 232]}
+  replay: {type: gen.replay, pins: {D9: D3}, repeat: 0, at: [544, 200]}
+  again: {type: device.capture, channels: [D3], rate: 2 MHz, duration: 3 ms, at: [808, 160]}
+  view: {type: view.scope, title: The replay on D3, at: [1080, 272]}
+  uart_again:
+    type: decode.uart
+    channels: {rx: D3}
+    baudrate: 115200
+    format: ascii
+    at: [1080, 56]
+  text: {type: view.log, title: Text of the replay, at: [1352, 184]}
+  same: {type: control.compare, op: contains, value: openSciLab, at: [1352, 0]}
+  as_number: {type: convert.to_scalar, at: [1616, 0]}
+  check:
+    type: report.check
+    name: The replay holds the text
+    expected: 1
+    tolerance: 0
+    at: [1888, 0]
+edges:
+  - la.device -> original.device
+  - la.device -> replay.device
+  - la.device -> again.device
+  - original.capture -> replay.capture
+  - replay.sync -> again.arm
+  - again.capture -> view.in
+  - again.capture -> uart_again.in
+  - uart_again.text -> text.in
+  - uart_again.text -> same.a
+  - same.result -> as_number.in
+  - as_number.out -> check.in

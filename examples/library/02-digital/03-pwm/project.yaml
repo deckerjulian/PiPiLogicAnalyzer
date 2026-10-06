@@ -1,0 +1,6 @@
+project: PWM
+description: PWM of 1 kHz with a duty cycle of 25 % on D9. A capture of D9 measures frequency and duty
+  cycle; two checks compare them with what was set.
+devices:
+  uno: sim:uno
+open: [flows/pwm.flow.yaml]

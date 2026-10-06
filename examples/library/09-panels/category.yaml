@@ -1,0 +1,3 @@
+title: Panels
+description: Front panels for flows - sliders, switches and buttons send values into the running flow, numbers, LEDs, charts and scopes show its results. Operate shows the panel as it runs, F11 full screen.
+icon: panel

@@ -1,0 +1,7 @@
+project: Multi board
+description: Two Picos captured together as one analyzer with 48 channels (sim:pico*2) - the
+  channels of board 2 are called B2.GP2 and so on. Both boards see a 1 kHz signal on GP12; the flow
+  measures both and the time between their edges.
+devices:
+  pair: sim:pico*2
+open: [flows/multi.flow.yaml]

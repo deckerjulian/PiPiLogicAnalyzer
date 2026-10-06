@@ -1,0 +1,6 @@
+project: Function generator
+description: A 2 kHz sine of 1 V amplitude on the generator output of the simulated oscilloscope (it
+  is connected to CH1). The capture starts with the generator's sync; frequency and RMS are checked.
+devices:
+  scope: sim:dho924s
+open: [flows/generator.flow.yaml]

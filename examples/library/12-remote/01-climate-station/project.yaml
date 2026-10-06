@@ -1,0 +1,9 @@
+project: Climate station
+description: A remote climate station (simulated - a script with openscilab_device on another computer
+  works the same way) sends temperature, humidity and a door contact. The values carry the time they
+  were measured on the station; openSciLab measures the station's clock, so they line up with
+  everything else. Runs until Stop; data/climate.csv gets every value.
+devices:
+  station: remote-sim:climate
+realtime: true  # remote devices run in real time
+open: [flows/climate.flow.yaml]

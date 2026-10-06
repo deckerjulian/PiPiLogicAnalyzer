@@ -1,0 +1,6 @@
+project: Report with a diagram
+description: The voltage at A0 over the duty cycle of D9 as a table and a diagram in an HTML report -
+  measured point by point and written when the flow ends.
+devices:
+  uno: sim:uno
+open: [flows/report.flow.yaml]

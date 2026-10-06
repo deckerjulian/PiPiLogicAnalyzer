@@ -9,12 +9,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.sigrok.engine import PROJECT_DIRECTORY
-from pipilogicanalyzer.sigrok.provider import DecoderInstance, SigrokProvider
-from pipilogicanalyzer.ui.dialogs.decoder_browser import DecoderBrowserDialog
-from pipilogicanalyzer.ui.view_model import CaptureViewModel
-from pipilogicanalyzer.ui.widgets import decoder_manager as manager_module
-from pipilogicanalyzer.ui.widgets.decoder_manager import DecoderManager
+from openscilab.sigrok.engine import PROJECT_DIRECTORY
+from openscilab.sigrok.provider import DecoderInstance, SigrokProvider
+from openscilab.ui.dialogs.decoder_browser import DecoderBrowserDialog
+from openscilab.ui.view_model import CaptureViewModel
+from openscilab.ui.widgets import decoder_manager as manager_module
+from openscilab.ui.widgets.decoder_manager import DecoderManager
 
 from test_ui import make_session
 
@@ -104,7 +104,7 @@ def choose_in_browser(monkeypatch, info) -> None:
 def test_adding_a_stacked_decoder_creates_its_parent_first(manager, decoder_registry, monkeypatch):
     questions = []
     monkeypatch.setattr(
-        "pipilogicanalyzer.ui.messages.confirm", lambda *args, **kwargs: questions.append(args[2]) or True
+        "openscilab.ui.messages.confirm", lambda *args, **kwargs: questions.append(args[2]) or True
     )
     choose_in_browser(monkeypatch, decoder_registry.get("teststack"))
 
@@ -117,7 +117,7 @@ def test_adding_a_stacked_decoder_creates_its_parent_first(manager, decoder_regi
 
 def test_adding_a_stacked_decoder_reuses_an_existing_parent(manager, decoder_registry, monkeypatch):
     parent = manager.provider.add_instance(DecoderInstance(decoder_id="testdec", channel_map={0: 0}))
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.confirm", lambda *args, **kwargs: pytest.fail("asked"))
+    monkeypatch.setattr("openscilab.ui.messages.confirm", lambda *args, **kwargs: pytest.fail("asked"))
     choose_in_browser(monkeypatch, decoder_registry.get("teststack"))
 
     manager.add_decoder()
@@ -127,7 +127,7 @@ def test_adding_a_stacked_decoder_reuses_an_existing_parent(manager, decoder_reg
 
 
 def test_declining_the_parent_adds_nothing(manager, decoder_registry, monkeypatch):
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.confirm", lambda *args, **kwargs: False)
+    monkeypatch.setattr("openscilab.ui.messages.confirm", lambda *args, **kwargs: False)
     choose_in_browser(monkeypatch, decoder_registry.get("teststack"))
 
     manager.add_decoder()

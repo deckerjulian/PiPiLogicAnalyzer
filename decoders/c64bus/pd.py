@@ -1,5 +1,5 @@
 ##
-## This file is part of the PiPiLogicAnalyzer project.
+## This file is part of the openSciLab project.
 ##
 ## C64 / 6502 system bus decoder for sigrok (libsigrokdecode API).
 ##
@@ -42,7 +42,7 @@ C64_MAP = (
 )
 
 # Pin names of the expansion port. The channel names match the names in the
-# profile examples/c64-expansion-port-profile.json exactly, so the channels are
+# profile examples/profiles/c64-expansion-port.json exactly, so the channels are
 # assigned automatically when the decoder is added.
 ADDR_PINS = 'YXWVUTSRPNMLKJHF'   # A0..A15
 DATA_PINS = (21, 20, 19, 18, 17, 16, 15, 14)   # D0..D7
@@ -122,7 +122,7 @@ class Decoder(srd.Decoder):
         {'id': 'regions', 'desc': 'Show memory regions',
          'default': 'yes', 'values': ('yes', 'no')},
         # The 6510 takes the data at the falling PHI2 edge; the first sample after the edge
-        # may already show the next address. Only PiPiLogicAnalyzer can look back one sample,
+        # may already show the next address. Only openSciLab can look back one sample,
         # other hosts read at the edge.
         {'id': 'read', 'desc': 'Read the bus',
          'default': READ_BEFORE_EDGE, 'values': (READ_BEFORE_EDGE, READ_AT_EDGE)},
@@ -243,7 +243,7 @@ class Decoder(srd.Decoder):
                 # Without a hint the Disassembly row would simply be missing.
                 self.put(self.first_cycle_ss, self.last_cycle_es, self.out_ann,
                          [6, ['No disassembly: the program flow could not be followed. The bus '
-                              'changes at the read point; align the boards (Capture > Align boards) '
+                              'changes at the read point; align the boards (Data > Align boards) '
                               'or set a read offset.', 'No disassembly', '?']])
 
     def read_bus(self, peek, ss, edge, es, edge_pins):

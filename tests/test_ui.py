@@ -11,10 +11,9 @@ import pytest
 
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core.regions import SampleRegion
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
-from pipilogicanalyzer.ui.main_window import MainWindow
-from pipilogicanalyzer.ui.view_model import CaptureViewModel
+from openscilab.core.regions import SampleRegion
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.ui.view_model import CaptureViewModel
 
 
 @pytest.fixture(scope="session")
@@ -40,8 +39,8 @@ def make_session(samples: int = 1000) -> CaptureSession:
 
 
 @pytest.fixture
-def window(application):
-    main = MainWindow()
+def window(application, make_dataview):
+    main = make_dataview()
     main.resize(1200, 800)
     main.load_session(make_session())
     yield main
@@ -151,7 +150,7 @@ def test_insert_samples_shifts_the_regions(window):
 
 
 def test_shifting_channels_left_fills_with_the_selected_level(window, monkeypatch):
-    from pipilogicanalyzer.ui.dialogs import shift_dialog
+    from openscilab.ui.dialogs import shift_dialog
 
     class FakeDialog:
         def __init__(self, *args, **kwargs):
@@ -163,7 +162,7 @@ def test_shifting_channels_left_fills_with_the_selected_level(window, monkeypatc
         def exec(self):
             return True
 
-    monkeypatch.setattr("pipilogicanalyzer.ui.main_window.ShiftChannelsDialog", FakeDialog)
+    monkeypatch.setattr("openscilab.ui.documents.dataview.ShiftChannelsDialog", FakeDialog)
     before = window.model.session.capture_channels[0].samples.copy()
     window.shift_channels()
     after = window.model.session.capture_channels[0].samples
@@ -194,7 +193,7 @@ def test_zoom_slider_roundtrip(window):
 def test_saving_and_reopening_a_capture(window, tmp_path, monkeypatch):
     path = str(tmp_path / "capture.lac")
     monkeypatch.setattr(
-        "pipilogicanalyzer.ui.main_window.QFileDialog.getSaveFileName", lambda *a, **k: (path, "")
+        "openscilab.ui.documents.dataview.QFileDialog.getSaveFileName", lambda *a, **k: (path, "")
     )
     window.save_capture()
     assert os.path.exists(path)
@@ -212,19 +211,19 @@ def test_keyboard_navigation_actions_exist(window):
     assert {"Ctrl+Left", "Ctrl+Right", "Ctrl+Up", "Ctrl+Down", "Shift+Left", "Shift+Right"} <= shortcuts
 
 
-def test_forget_known_devices_without_any(window, monkeypatch):
+def test_forget_known_devices_without_any(shell, monkeypatch):
     messages = []
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.info", lambda *args, **kwargs: messages.append(args))
-    window.forget_known_devices()
+    monkeypatch.setattr("openscilab.ui.messages.info", lambda *args, **kwargs: messages.append(args))
+    shell.forget_known_devices()
     assert messages
 
 
-def test_forget_known_devices_clears_the_file(window, monkeypatch):
-    from pipilogicanalyzer.core import settings
+def test_forget_known_devices_clears_the_file(shell, monkeypatch):
+    from openscilab.core import settings
 
     settings.persist_settings("known-devices.json", [{"serial_numbers": ["a", "b"]}])
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.confirm", lambda *args, **kwargs: True)
-    window.forget_known_devices()
+    monkeypatch.setattr("openscilab.ui.messages.confirm", lambda *args, **kwargs: True)
+    assert shell.forget_known_devices()
     assert settings.get_settings("known-devices.json") == []
 
 
@@ -232,7 +231,7 @@ def test_export_writes_the_selected_format(window, tmp_path, monkeypatch):
     for kind, extension in (("csv", ".csv"), ("vcd", ".vcd")):
         path = str(tmp_path / f"export{extension}")
         monkeypatch.setattr(
-            "pipilogicanalyzer.ui.main_window.QFileDialog.getSaveFileName",
+            "openscilab.ui.documents.dataview.QFileDialog.getSaveFileName",
             lambda *a, **k: (path, ""),
         )
         window.export_capture(kind)
@@ -241,7 +240,7 @@ def test_export_writes_the_selected_format(window, tmp_path, monkeypatch):
 
 def test_create_region_from_a_selection(window, monkeypatch):
     monkeypatch.setattr(
-        "pipilogicanalyzer.ui.main_window.RegionDialog",
+        "openscilab.ui.documents.dataview.RegionDialog",
         lambda region, parent=None: type("D", (), {"exec": lambda self: True})(),
     )
     window.create_region(10, 50)
@@ -264,39 +263,46 @@ def test_channels_with_identical_metadata_are_distinguished(window):
 
 
 def test_window_geometry_is_restored(application):
-    from pipilogicanalyzer.core import settings
-    from pipilogicanalyzer.ui.main_window import WINDOW_STATE_FILE
+    from openscilab.core import settings
+    from openscilab.ui.shell.main_window import SHELL_STATE_FILE, ShellWindow
 
-    first = MainWindow()
+    first = ShellWindow()
     try:
         first.resize(1111, 777)
-        first._save_window_state()
+        first.save_state()
     finally:
-        first.close()
+        first.force_close()
 
-    assert settings.get_settings(WINDOW_STATE_FILE)["width"] == 1111
+    assert settings.get_settings(SHELL_STATE_FILE)["width"] == 1111
 
-    second = MainWindow()
+    second = ShellWindow()
     try:
         assert second.size().width() == 1111
         assert second.size().height() == 777
     finally:
-        second.close()
+        second.force_close()
 
 
-def test_the_help_menu_links_to_both_wikis(window, monkeypatch):
-    from PySide6.QtGui import QAction
+def test_the_analyzer_dock_layout_is_restored(make_dataview):
+    first = make_dataview()
+    first.listing_dock.setVisible(True)
+    first._save_window_state()
 
-    from pipilogicanalyzer.ui import main_window as main_window_module
+    second = make_dataview()
+    assert not second.listing_dock.isHidden()
+
+
+def test_the_help_menu_links_to_both_wikis(shell, monkeypatch):
+    from openscilab.ui.shell import main_window as main_window_module
 
     opened = []
     monkeypatch.setattr(main_window_module.webbrowser, "open", lambda url: opened.append(url))
 
-    actions = {action.text().replace("&", ""): action for action in window.findChildren(QAction)}
+    actions = {action.text().replace("&", ""): action for action in shell.help_menu.actions()}
     actions["Online documentation"].trigger()
     actions["Online documentation of the original software (gusmanb)"].trigger()
 
     assert opened == [
-        "https://github.com/deckerjulian/PiPiLogicAnalyzer/wiki",
+        "https://github.com/deckerjulian/openSciLab/wiki",
         "https://github.com/gusmanb/logicanalyzer/wiki",
     ]

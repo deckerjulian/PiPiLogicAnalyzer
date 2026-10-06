@@ -1,0 +1,133 @@
+{
+  "Profiles": [
+    {
+      "Name": "Parallel bus, 8 bit with clock",
+      "CaptureSettings": {
+        "Frequency": 10000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "CLK",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 2",
+            "ChannelNumber": 1,
+            "ChannelName": "D0",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 3",
+            "ChannelNumber": 2,
+            "ChannelName": "D1",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 4",
+            "ChannelNumber": 3,
+            "ChannelName": "D2",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 5",
+            "ChannelNumber": 4,
+            "ChannelName": "D3",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 6",
+            "ChannelNumber": 5,
+            "ChannelName": "D4",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 7",
+            "ChannelNumber": 6,
+            "ChannelName": "D5",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 8",
+            "ChannelNumber": 7,
+            "ChannelName": "D6",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 9",
+            "ChannelNumber": 8,
+            "ChannelName": "D7",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": false,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "parallel",
+          "label": "Parallel",
+          "channel_map": {
+            "0": 0,
+            "1": 1,
+            "2": 2,
+            "3": 3,
+            "4": 4,
+            "5": 5,
+            "6": 6,
+            "7": 7,
+            "8": 8
+          },
+          "options": {
+            "clock_edge": "rising",
+            "reset_polarity": "low-active",
+            "wordsize": 0,
+            "endianness": "little"
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "The clock (or strobe) to CH1, D0-D7 to CH2-CH9. Every rising clock edge gives a word."
+    }
+  ]
+}

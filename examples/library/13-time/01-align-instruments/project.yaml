@@ -1,0 +1,17 @@
+project: Align instruments
+description: Two logic analyzers see the same signal at different times - one is a simulator that knows
+  its time, the other a Pico behind (emulated) USB whose samples are only known to about a millisecond.
+  timing.sync drives a sync signal on D7 of an Uno, wired to both; timing.align matches the edges and
+  places the Pico's samples on the time of the reference to a few microseconds - with hardware, a wire
+  from a GPIO to a channel of every instrument.
+devices:
+  uno: sim:uno
+  la: sim:free
+  pico: sim:pico
+simulation:
+  wiring:
+    # the sync signal (D7 of the Uno) on D5 of the reference and GP15 of the Pico
+    la: [{from: "uno:D7", to: D5}]
+    pico: [{from: "uno:D7", to: GP15}]
+realtime: true
+open: [flows/align.flow.yaml]

@@ -13,14 +13,14 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core import capture_io, settings
-from pipilogicanalyzer.driver.base import (
+from openscilab.core import capture_io, settings
+from openscilab.driver.base import (
     ACQUISITION_BUFFER,
     ACQUISITION_STREAM,
     AnalyzerDriverBase,
     CaptureError,
 )
-from pipilogicanalyzer.driver.models import (
+from openscilab.driver.models import (
     AnalyzerChannel,
     BusDefinition,
     CaptureSession,
@@ -31,7 +31,6 @@ from pipilogicanalyzer.driver.models import (
     TriggerStage,
     TriggerType,
 )
-from pipilogicanalyzer.ui.main_window import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -50,8 +49,8 @@ def make_session(samples: int = 2000) -> CaptureSession:
 
 
 @pytest.fixture
-def window(application):
-    main = MainWindow()
+def window(application, make_dataview):
+    main = make_dataview()
     main.resize(1400, 900)
     main.load_session(make_session())
     yield main
@@ -179,7 +178,7 @@ def test_buses_are_drawn_and_listed(window, application):
 
 
 def test_the_bus_dialog_reads_a_symbol_table(application):
-    from pipilogicanalyzer.ui.dialogs.bus_dialog import BusDialog
+    from openscilab.ui.dialogs.bus_dialog import BusDialog
 
     dialog = BusDialog(make_session().capture_channels)
     for row in range(2):
@@ -203,7 +202,7 @@ def test_markers_are_listed_and_removed(window):
 
 # ------------------------------------------------- charts, compare, state
 def test_charts_show_values_and_histograms(window):
-    from pipilogicanalyzer.ui.dialogs.chart_dialog import ChartDialog
+    from openscilab.ui.dialogs.chart_dialog import ChartDialog
 
     window.model.set_buses([BusDefinition("NIBBLE", [0, 1, 2, 3])])
     dialog = ChartDialog(window.model, window)
@@ -216,7 +215,7 @@ def test_charts_show_values_and_histograms(window):
 
 
 def test_compare_marks_the_differences(window, tmp_path):
-    from pipilogicanalyzer.ui.dialogs.compare_dialog import CompareDialog
+    from openscilab.ui.dialogs.compare_dialog import CompareDialog
 
     reference = make_session()
     reference.capture_channels[3].samples = reference.capture_channels[3].samples.copy()
@@ -236,7 +235,7 @@ def test_compare_marks_the_differences(window, tmp_path):
 
 
 def test_state_analysis_resamples_on_a_clock(window, monkeypatch):
-    from pipilogicanalyzer.ui.dialogs import state_dialog
+    from openscilab.ui.dialogs import state_dialog
 
     class Accepting(state_dialog.StateDialog):
         def exec(self):
@@ -262,26 +261,35 @@ def test_state_analysis_resamples_on_a_clock(window, monkeypatch):
 
 # --------------------------------------------------- toolbar capture settings
 def test_the_toolbar_starts_a_capture_with_its_settings(window, monkeypatch):
+    """The quick settings of the device card capture into the data view."""
+    from openscilab.core.hub import Hub
+    from openscilab.core.instrument import Instrument
+    from openscilab.ui.documents.device import DeviceDocument
+
     driver = StreamingDriver()
-    window.driver = driver
-    window.quick_capture.set_driver(driver)
-    window._update_actions()
-    bar = window.quick_capture
+    instrument = Instrument.from_driver(driver, name="fake")
+    hub = Hub()
+    hub.add(instrument)
+    card = DeviceDocument(instrument, hub)
+    window.use_instrument(instrument)
+    bar = window.capture_controls.quick_capture  # the data view captures
     bar.rate_combo.setCurrentIndex(bar.rate_combo.findData(10_000_000))
     bar.samples_combo.setCurrentIndex(bar.samples_combo.findData(100_000))
     stored = capture_io.session_from_dict(settings.get_settings("capture-settings-fake-stream.json"))
     assert stored.frequency == 10_000_000
     assert stored.pre_trigger_samples + stored.post_trigger_samples == 100_000
 
-    window.quick_start_capture()
+    assert window.capture()
     started = driver.sessions[-1]
     assert started.frequency == 10_000_000 and len(started.capture_channels) == 16
-    window.driver = None
+    assert window._running_capture is started  # its result goes to the data view
+    window.detach_source(window.source)
+    card.shutdown()
 
 
 # ------------------------------------------------------- trigger sequences
 def test_the_capture_dialog_builds_a_software_sequence(application):
-    from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+    from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
     dialog = CaptureDialog(StreamingDriver(), persist=False)
     assert not dialog.sequence_radio.isHidden() and not dialog.software_box.isHidden()
@@ -308,8 +316,8 @@ def test_the_capture_dialog_builds_a_software_sequence(application):
 
 
 def test_a_device_without_streams_or_sequences_offers_none(application):
-    from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
-    from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+    from openscilab.driver.emulated import EmulatedAnalyzerDriver
+    from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
     class Buffered(EmulatedAnalyzerDriver):
         @property
@@ -322,7 +330,7 @@ def test_a_device_without_streams_or_sequences_offers_none(application):
 
 # ---------------------------------------------------------------- exports
 def test_sigrok_sessions_are_exported_and_opened(window, tmp_path, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as module
+    from openscilab.ui.documents import dataview as module
 
     path = str(tmp_path / "capture.sr")
     monkeypatch.setattr(module.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (path, ""))

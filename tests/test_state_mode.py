@@ -8,8 +8,8 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core.state_mode import resample_on_clock
-from pipilogicanalyzer.driver.models import AnalyzerChannel, BusDefinition, CaptureSession, EdgeKind
+from openscilab.core.state_mode import resample_on_clock
+from openscilab.driver.models import AnalyzerChannel, BusDefinition, CaptureSession, EdgeKind
 
 CLOCK = [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1]  # rising at 2, 6, 10; falling at 4, 8
 DATA = [0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1]
@@ -119,7 +119,7 @@ def test_large_capture_is_fast():
 # ------------------------------------------------------------ suggested read point
 def test_the_read_point_is_where_the_data_is_stable():
     """Data changing with the rising clock edge is read at the falling one."""
-    from pipilogicanalyzer.core.state_mode import suggest_sampling
+    from openscilab.core.state_mode import suggest_sampling
 
     clock = np.tile(np.array([0] * 10 + [1] * 10, np.uint8), 50)
     rng = np.random.default_rng(3)
@@ -143,17 +143,17 @@ def test_c64_states_match_the_bus_cycles_of_the_decoder():
     """Resampled on PHI2 as suggested, every state holds the address and data of its bus cycle."""
     import re
 
-    from pipilogicanalyzer.core import capture_io
-    from pipilogicanalyzer.core.profiles import read_profiles_file
-    from pipilogicanalyzer.core.state_mode import suggest_sampling
-    from pipilogicanalyzer.sigrok.engine import DecoderRegistry
-    from pipilogicanalyzer.sigrok.provider import SigrokProvider
+    from openscilab.core import capture_io
+    from openscilab.core.profiles import read_profiles_file
+    from openscilab.core.state_mode import suggest_sampling
+    from openscilab.sigrok.engine import DecoderRegistry
+    from openscilab.sigrok.provider import SigrokProvider
 
     session = capture_io.load_capture(DEMO).session
     registry = DecoderRegistry()
     registry.load()
     provider = SigrokProvider(registry)
-    provider.load_configuration(read_profiles_file(DEMO.replace("c64-demo.lac", "c64-expansion-port-profile.json"))[0].decoder_configuration)
+    provider.load_configuration(read_profiles_file(DEMO.replace("c64-demo.lac", os.path.join("profiles", "c64-expansion-port.json")))[0].decoder_configuration)
     (group,) = [item for item in provider.run(session) if item.instance.decoder_id == "c64bus"]
     cycles = next(row for row in group.annotations if row.name == "Bus cycles").segments
     reference = []

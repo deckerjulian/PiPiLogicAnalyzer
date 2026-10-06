@@ -1,0 +1,7 @@
+project: Flow as a Python script
+description: The same kind of flow written in Python with the flow DSL - devices, nodes and wires as
+  code (flows/counter.py). The application opens it as a graph; on the command line it runs with
+  "python flows/counter.py" or "openscilab run flows/counter.py --fast".
+devices:
+  la: sim:free
+open: [flows/counter.py]

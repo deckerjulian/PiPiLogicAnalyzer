@@ -1,0 +1,22 @@
+flow: Save a capture
+description: 'One capture, three files in data/ - the extension chooses the format.'
+nodes:
+  la: {type: device.instrument, at: [0, 112]}
+  capture:
+    type: device.capture
+    channels: [D10, D11, D12]
+    rate: 8 MHz
+    samples: 8000
+    at: [272, 112]
+  lac: {type: data.file, path: spi.lac, at: [544, 0]}
+  vcd: {type: data.file, path: spi.vcd, at: [544, 112]}
+  csv: {type: data.file, path: spi.csv, at: [544, 224]}
+  log: {type: view.log, title: Files, at: [808, 112]}
+edges:
+  - la.device -> capture.device
+  - capture.capture -> lac.in
+  - capture.capture -> vcd.in
+  - capture.capture -> csv.in
+  - lac.written -> log.in
+  - vcd.written -> log.in
+  - csv.written -> log.in

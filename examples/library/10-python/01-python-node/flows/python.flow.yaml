@@ -1,0 +1,33 @@
+flow: Python node
+description: 'control.python with async def run(ctx) (a source) and with def on_input(ctx, port, value) (a processing step).'
+nodes:
+  source:
+    type: control.python
+    outputs: [value]
+    code: |
+      async def run(ctx):
+          for step in range(100):
+              t = step * 0.02
+              value = np.exp(-t) * np.sin(2 * np.pi * 2 * t)
+              ctx.emit("value", signals.Scalar(name="value", unit="V", value=float(value), at=ctx.now()))
+              await ctx.sleep(0.02)
+    at: [0, 96]
+  smooth:
+    type: control.python
+    inputs: [x]
+    outputs: [average]
+    code: |
+      recent = []
+
+      def on_input(ctx, port, value):
+          recent.append(float(value.value))
+          del recent[:-5]
+          ctx.emit("average", signals.Scalar(name="average", unit="V", value=sum(recent) / len(recent),
+                                             at=ctx.now()))
+    at: [272, 0]
+  raw: {type: view.strip_chart, title: Damped oscillation, window: 3 s, at: [272, 184]}
+  averaged: {type: view.strip_chart, title: Moving average, window: 3 s, at: [544, 0]}
+edges:
+  - source.value -> smooth.x
+  - source.value -> raw.in
+  - smooth.average -> averaged.in

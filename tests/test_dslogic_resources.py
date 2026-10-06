@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from pipilogicanalyzer.driver.dslogic import resources
+from openscilab.driver.dslogic import resources
 
 
 def test_the_chosen_folder_comes_first(tmp_path, monkeypatch):

@@ -1,0 +1,35 @@
+flow: Test bench
+description: 'The device sends ''openSciLab'' over UART on D9 and a 1 kHz clock on D15; both are checked, the report lists the results when the flow ends.'
+nodes:
+  dut: {type: device.instrument, at: [0, 176]}
+  uart_capture:
+    type: device.capture
+    channels: [D9]
+    rate: 4 MHz
+    duration: 2.5 ms
+    at: [272, 208]
+  uart: {type: decode.uart, channels: {rx: D9}, baudrate: 115200, format: ascii, at: [544, 352]}
+  uart_check: {type: control.compare, op: contains, value: openSciLab, at: [808, 392]}
+  clock_capture: {type: device.capture, channels: [D15], rate: 1 MHz, samples: 20000, at: [544, 104]}
+  frequency: {type: measure.frequency, at: [808, 168]}
+  clock_check:
+    type: report.check
+    name: Clock on D15
+    expected: 1000
+    tolerance: 1
+    unit: Hz
+    at: [1080, 168]
+  summary:
+    type: report.section
+    title: Device under test
+    text: UART on D9 and the clock on D15.
+    at: [1080, 552]
+  report: {type: report.write, path: test-report.html, title: Test bench, at: [1080, 0]}
+edges:
+  - dut.device -> uart_capture.device
+  - dut.device -> clock_capture.device
+  - uart_capture.capture -> uart.in
+  - uart.text -> uart_check.a
+  - uart_capture.done -> clock_capture.arm
+  - clock_capture.D15 -> frequency.in
+  - frequency.out -> clock_check.in

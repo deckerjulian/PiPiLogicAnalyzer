@@ -1,0 +1,20 @@
+flow: Climate station
+description: remote.receive hands on every value of an input with its time on the station (converted with the measured clock).
+nodes:
+  station: {type: device.instrument, at: [0, 240]}
+  temperature: {type: remote.receive, channel: temperature, at: [272, 112]}
+  humidity: {type: remote.receive, channel: humidity, at: [272, 240]}
+  door: {type: remote.receive, channel: door, at: [272, 376]}
+  temperature_chart: {type: view.strip_chart, title: Temperature, window: 60 s, at: [544, 0]}
+  humidity_chart: {type: view.strip_chart, title: Humidity, window: 60 s, at: [544, 280]}
+  door_open: {type: view.led, title: Door open, at: [544, 448]}
+  log: {type: data.logger, path: climate.csv, at: [544, 168]}
+edges:
+  - station.device -> temperature.device
+  - station.device -> humidity.device
+  - station.device -> door.device
+  - temperature.out -> temperature_chart.in
+  - humidity.out -> humidity_chart.in
+  - door.out -> door_open.in
+  - temperature.out -> log.in
+  - humidity.out -> log.in

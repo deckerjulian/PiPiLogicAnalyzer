@@ -1,0 +1,20 @@
+flow: Long-term logger
+description: The monitor reads A0 and D2 ten times a second; every report becomes a line of data/log.csv and a point of the strip chart. The PWM of D9 sets the voltage at A0.
+nodes:
+  uno: {type: device.instrument, at: [0, 120]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, duty: 0.4, at: [272, 240]}
+  monitor:
+    type: device.monitor
+    pins: [D2]
+    analog: [A0]
+    rate: 10 Hz
+    duration: 0
+    at: [272, 0]
+  log: {type: data.logger, path: log.csv, at: [544, 0]}
+  chart: {type: view.strip_chart, title: A0, window: 60 s, at: [544, 112]}
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> monitor.device
+  - monitor.A0 -> log.in
+  - monitor.D2 -> log.in
+  - monitor.A0 -> chart.in

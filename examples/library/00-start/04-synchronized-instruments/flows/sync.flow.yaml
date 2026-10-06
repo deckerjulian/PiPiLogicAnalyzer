@@ -1,0 +1,28 @@
+flow: Synchronized instruments
+description: 'timing.sync drives GP16; the logic analyzer records it on GP17, the box on P0.7 along with AI0. timing.align fits offset and drift (drift auto: none when the device card says the sample clock is shared) and moves AI0 onto the time of the logic analyzer. The device cards (Timing) show the method and the accuracy.'
+nodes:
+  logic: {type: device.instrument, at: [0, 448]}
+  daq: {type: device.instrument, at: [0, 64]}
+  sync: {type: timing.sync, pin: GP16, duration: 9 s, at: [272, 560]}
+  reference: {type: device.stream, channels: [GP17], rate: 100 kHz, duration: 10 s, at: [272, 336]}
+  recording:
+    type: device.stream
+    channels: [P0.7, AI0]
+    rate: 10 kHz
+    duration: 10 s
+    at: [272, 96]
+  align: {type: timing.align, at: [544, 144]}
+  offset: {type: view.number, title: Correction, unit: s, at: [808, 152]}
+  accuracy: {type: view.number, title: Accuracy, unit: s, at: [808, 328]}
+  aligned: {type: view.scope, title: AI0 on the logic analyzer's time, at: [808, 0]}
+edges:
+  - logic.device -> sync.device
+  - logic.device -> reference.device
+  - daq.device -> recording.device
+  - daq.device -> align.device
+  - reference.GP17 -> align.reference
+  - recording.P0.7 -> align.signal
+  - recording.AI0 -> align.in
+  - align.offset -> offset.in
+  - align.uncertainty -> accuracy.in
+  - align.out -> aligned.in

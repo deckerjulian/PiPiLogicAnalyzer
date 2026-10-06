@@ -1,0 +1,13 @@
+flow: Spectrum
+description: 'dsp.fft (Hann window, dB) of 16384 samples at 1 MHz.'
+nodes:
+  scope: {type: device.instrument, at: [0, 16]}
+  capture: {type: device.capture, channels: [CH2], rate: 1 MHz, samples: 16384, at: [272, 16]}
+  fft: {type: dsp.fft, window: hann, scale: dB, at: [544, 80]}
+  spectrum: {type: view.spectrum, title: Spectrum of CH2, at: [808, 152]}
+  table: {type: view.table, title: FFT bins, at: [808, 0]}
+edges:
+  - scope.device -> capture.device
+  - capture.CH2 -> fft.in
+  - fft.out -> spectrum.in
+  - fft.out -> table.in

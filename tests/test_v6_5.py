@@ -11,15 +11,15 @@ import struct
 import pytest
 from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
 
-from pipilogicanalyzer.core.formatting import to_inferred_frequency
-from pipilogicanalyzer.core.profiles import ProfileStore
-from pipilogicanalyzer.core.settings import settings_directory
-from pipilogicanalyzer.driver.pico import protocol
-from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
-from pipilogicanalyzer.driver.base import CaptureError, CaptureMode
-from pipilogicanalyzer.driver.models import AnalyzerChannel
-from pipilogicanalyzer.sigrok import engine
-from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+from openscilab.core.formatting import to_inferred_frequency
+from openscilab.core.profiles import ProfileStore
+from openscilab.core.settings import settings_directory
+from openscilab.driver.pico import protocol
+from openscilab.driver.pico.analyzer import PicoDriver
+from openscilab.driver.base import CaptureError, CaptureMode
+from openscilab.driver.models import AnalyzerChannel
+from openscilab.sigrok import engine
+from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
 from test_capture_dialog import FakeDriver, select
 from test_driver import FakeTransport, make_session
@@ -55,9 +55,9 @@ def driver_v65(monkeypatch):
     transport = FakeTransport(channels=32)
     transport._responses[0] = "LOGIC_ANALYZER_V6_5"
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
-    instance = PiPiLogicAnalyzerDriver("/dev/fake")
+    instance = PicoDriver("/dev/fake")
     instance.test_transport = transport  # type: ignore[attr-defined]
     return instance
 
@@ -235,14 +235,13 @@ def test_profile_saved_in_the_dialog_can_be_applied(application, quiet, monkeypa
     assert dialog.frequency_box.value() == 5_000_000
 
 
-def test_preview_visibility_is_restored(application):
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_preview_visibility_is_restored(application, make_dataview):
 
-    first = MainWindow()
+    first = make_dataview()
     first.action_toggle_preview.setChecked(False)
     first.close()
 
-    second = MainWindow()
+    second = make_dataview()
     try:
         assert not second.action_toggle_preview.isChecked()
         assert second.previewer.isHidden()

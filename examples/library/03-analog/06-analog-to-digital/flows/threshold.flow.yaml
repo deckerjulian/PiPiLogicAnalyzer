@@ -1,0 +1,25 @@
+flow: Analog to digital
+description: dsp.threshold at 0.5 V (the middle of the triangle from -1 V to 2 V) with 0.2 V hysteresis; measure.frequency and measure.duty on the result.
+nodes:
+  scope: {type: device.instrument, at: [0, 80]}
+  capture: {type: device.capture, channels: [CH3], rate: 200 kHz, samples: 40000, at: [272, 80]}
+  threshold: {type: dsp.threshold, threshold: 0.5, hysteresis: 0.2, at: [544, 144]}
+  frequency: {type: measure.frequency, at: [808, 32]}
+  duty: {type: measure.duty, at: [808, 144]}
+  check:
+    type: report.check
+    name: Frequency of CH3
+    expected: 500
+    tolerance: 5
+    unit: Hz
+    at: [1080, 0]
+  show_duty: {type: view.number, title: Duty cycle, at: [1080, 176]}
+  view: {type: view.scope, title: CH3 and its logic level, at: [808, 256]}
+edges:
+  - scope.device -> capture.device
+  - capture.CH3 -> threshold.in
+  - threshold.out -> frequency.in
+  - threshold.out -> duty.in
+  - frequency.out -> check.in
+  - duty.out -> show_duty.in
+  - threshold.out -> view.in

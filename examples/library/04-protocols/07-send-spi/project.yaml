@@ -1,0 +1,8 @@
+project: Send SPI
+description: gen.tx_spi sends three bytes as SPI (mode 0, MSB first, 100 kHz). The simulated analyzer has no
+  SPI of its own, so the frames play as a pattern on its pattern generator (D0-D7, looped back to the
+  inputs) - CS on D0, SCK on D1, MOSI on D2. A capture of the same pins waits for CS to go low, the SPI
+  decoder reads the bytes back. (A device with its own SPI, TX_SPI, sends them itself.)
+devices:
+  la: sim:free
+open: [flows/send.flow.yaml]

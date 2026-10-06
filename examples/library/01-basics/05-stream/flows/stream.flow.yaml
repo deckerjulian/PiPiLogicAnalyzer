@@ -1,0 +1,15 @@
+flow: Stream
+description: A 200 ms stream of D15 at 1 MHz; the frequency of every block goes to a strip chart.
+nodes:
+  la: {type: device.instrument, at: [0, 48]}
+  stream: {type: device.stream, channels: [D15], rate: 1 MHz, duration: 200 ms, at: [272, 48]}
+  frequency: {type: measure.frequency, at: [544, 32]}
+  chart: {type: view.strip_chart, title: Frequency of D15, window: 1 s, at: [808, 0]}
+  count: {type: measure.count, edge: rising, at: [544, 136]}
+  edges_seen: {type: view.number, title: Rising edges, at: [808, 168]}
+edges:
+  - la.device -> stream.device
+  - stream.D15 -> frequency.in
+  - frequency.out -> chart.in
+  - stream.D15 -> count.in
+  - count.out -> edges_seen.in

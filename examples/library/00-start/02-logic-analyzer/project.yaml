@@ -1,0 +1,7 @@
+project: Logic Analyzer
+description: A data view that captures with a connected device - settings, capture, decode protocols,
+  measure and save. With several devices connected it asks which one; without one it shows the
+  device list (or open a capture file).
+icon: channels
+# "data": a data view with the connected device that captures (no file of the project)
+open: [data]

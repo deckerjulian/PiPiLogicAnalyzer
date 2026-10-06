@@ -1,0 +1,18 @@
+flow: Pico ADC
+description: device.monitor with the analog inputs; each one goes to the strip chart.
+nodes:
+  pico: {type: device.instrument, at: [0, 128]}
+  monitor:
+    type: device.monitor
+    analog: [GP26, GP27, GP28]
+    rate: 200 Hz
+    duration: 1 s
+    at: [272, 128]
+  chart: {type: view.strip_chart, title: GP26, window: 1 s, at: [544, 0]}
+  chart27: {type: view.strip_chart, title: GP27, window: 1 s, at: [544, 168]}
+  dc: {type: view.number, title: GP28, unit: V, digits: 3, at: [544, 336]}
+edges:
+  - pico.device -> monitor.device
+  - monitor.GP26 -> chart.in
+  - monitor.GP27 -> chart27.in
+  - monitor.GP28 -> dc.in

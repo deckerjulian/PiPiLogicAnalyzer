@@ -1,0 +1,26 @@
+flow: Align instruments
+description: 'The Pico''s stream of GP15 goes to timing.align with the reference''s stream of D5; from the first fit on its samples (and what is wired to ''in'') are on the reference''s time. The device card of the Pico shows the method (sync signal) and the accuracy.'
+nodes:
+  uno: {type: device.instrument, at: [0, 0]}
+  la: {type: device.instrument, at: [0, 144]}
+  pico: {type: device.instrument, at: [0, 344]}
+  sync: {type: timing.sync, pin: D7, duration: 1.8 s, at: [272, 0]}
+  reference: {type: device.stream, channels: [D5], rate: 100 kHz, duration: 2 s, at: [272, 144]}
+  recording: {type: device.stream, channels: [GP15], rate: 100 kHz, duration: 2 s, at: [272, 376]}
+  align: {type: timing.align, at: [544, 296]}
+  offset: {type: view.number, title: Correction, unit: s, at: [808, 232]}
+  accuracy: {type: view.number, title: Accuracy, unit: s, at: [808, 568]}
+  accuracy_check: {type: report.check, name: Accuracy, high: 0.0002, unit: s, at: [808, 408]}
+  aligned: {type: view.scope, title: GP15 on the reference's time, at: [808, 80]}
+edges:
+  - uno.device -> sync.device
+  - la.device -> reference.device
+  - pico.device -> recording.device
+  - pico.device -> align.device
+  - reference.D5 -> align.reference
+  - recording.GP15 -> align.signal
+  - recording.GP15 -> align.in
+  - align.offset -> offset.in
+  - align.uncertainty -> accuracy.in
+  - align.uncertainty -> accuracy_check.in
+  - align.out -> aligned.in

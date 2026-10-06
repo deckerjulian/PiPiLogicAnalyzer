@@ -1,0 +1,8 @@
+project: State mode
+description: A capture clocked by the device under test - one sample on each rising edge of the clock on
+  D8 instead of at a fixed rate. The simulated analyzer counts on D0-D7 with that clock, so every state
+  is the next count; the pattern trigger 1111 starts at the count 15. convert.state_bit takes one
+  channel of the states, its edges are counted.
+devices:
+  la: sim:free
+open: [flows/states.flow.yaml]

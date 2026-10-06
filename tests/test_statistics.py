@@ -7,14 +7,14 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core.statistics import (
+from openscilab.core.statistics import (
     bus_value_counts,
     channel_statistics,
     histogram,
     pulse_widths,
     setup_hold,
 )
-from pipilogicanalyzer.driver.models import EdgeKind
+from openscilab.driver.models import EdgeKind
 
 
 def wave(*runs: tuple[int, int]) -> np.ndarray:

@@ -1,0 +1,10 @@
+project: Data acquisition
+description: Records analog inputs of a measuring box until Stop - a strip chart per input, every block
+  into data/recording.lac (opens in a data view) - and sets an analog output from the panel. The box is
+  the simulated USB DAQ (sim:daq, AO0 wired to AI2); put the address of yours into project.yaml or
+  choose it in the device list, and the channels into the stream node.
+icon: chart
+devices:
+  daq: sim:daq
+realtime: true
+open: [panels/daq.panel.yaml, flows/daq.flow.yaml]

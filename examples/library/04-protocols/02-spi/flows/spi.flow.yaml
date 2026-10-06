@@ -1,0 +1,28 @@
+flow: SPI
+description: 'decode.spi with clk, mosi and cs; mode 0, 8 bit words, MSB first.'
+nodes:
+  la: {type: device.instrument, at: [0, 160]}
+  capture:
+    type: device.capture
+    channels: [D10, D11, D12]
+    rate: 16 MHz
+    samples: 64000
+    at: [272, 160]
+  spi:
+    type: decode.spi
+    channels: {clk: D10, mosi: D11, cs: D12}
+    cpol: 0
+    cpha: 0
+    wordsize: 8
+    at: [544, 48]
+  words: {type: view.table, title: SPI words, at: [808, 112]}
+  count: {type: measure.count, at: [808, 0]}
+  show: {type: view.number, title: Annotations, at: [1080, 0]}
+  scope: {type: view.scope, title: SPI, at: [544, 280]}
+edges:
+  - la.device -> capture.device
+  - capture.capture -> spi.in
+  - capture.capture -> scope.in
+  - spi.table -> words.in
+  - spi.events -> count.in
+  - count.out -> show.in

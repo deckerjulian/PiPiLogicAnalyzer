@@ -1,0 +1,30 @@
+flow: Subflow
+description: 'The subflow has an input ''signal'' and the outputs ''duty'' and ''ok''; inside, measure.duty and control.limit do the work.'
+nodes:
+  la: {type: device.instrument, at: [0, 96]}
+  capture: {type: device.capture, channels: [D8, D15], rate: 20 MHz, duration: 3 ms, at: [272, 96]}
+  clock: {type: subflow.duty_check, at: [544, 96]}
+  slow: {type: subflow.duty_check, at: [544, 240]}
+  clock_ok: {type: view.led, title: D8 duty cycle 45-55 %, at: [808, 152]}
+  slow_ok: {type: view.led, title: D15 duty cycle 45-55 %, at: [808, 312]}
+  clock_duty: {type: view.number, title: D8 duty cycle, at: [808, 0]}
+edges:
+  - la.device -> capture.device
+  - capture.D8 -> clock.signal
+  - capture.D15 -> slow.signal
+  - clock.ok -> clock_ok.in
+  - slow.ok -> slow_ok.in
+  - clock.duty -> clock_duty.in
+subflows:
+  duty_check:
+    flow: Duty cycle check
+    inputs:
+      signal: duty.in
+    outputs:
+      duty: duty.out
+      ok: limit.ok
+    nodes:
+      duty: {type: measure.duty}
+      limit: {type: control.limit, low: 0.45, high: 0.55}
+    edges:
+      - duty.out -> limit.in

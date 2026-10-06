@@ -1,0 +1,60 @@
+{
+  "Profiles": [
+    {
+      "Name": "CAN 500 kbit/s",
+      "CaptureSettings": {
+        "Frequency": 4000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "CAN RX",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "can",
+          "label": "CAN",
+          "channel_map": {
+            "0": 0
+          },
+          "options": {
+            "nominal_bitrate": 500000,
+            "fast_bitrate": 2000000,
+            "sample_point": 70.0
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "The RXD pin of the CAN transceiver to CH1, not CAN-H/CAN-L. Other rates: edit the bitrate of the decoder."
+    }
+  ]
+}

@@ -1,0 +1,511 @@
+{
+  "name": "pico",
+  "title": "Simulation: Pico",
+  "description": "Raspberry Pi Pico with the openSciLab firmware 8: 24 channels (GP2-GP22, GP26-GP28), 100 MHz, 128 KiB of samples, GPIO and PWM on every channel pin, ADC on GP26-GP28 (12 bit, 3.3 V), a pattern generator on consecutive pins from GP2 (up to GP22). Signals: a counter on GP2-GP9 (1 MHz, clock on GP10), UART on GP11, 1 kHz on GP12, a sine on GP26, a triangle on GP27, 1.2 V on GP28.",
+  "provisional": "Values of the Pico firmware 8 (phase 1) until measured (step 1g).",
+  "digital": [
+    "GP2",
+    "GP3",
+    "GP4",
+    "GP5",
+    "GP6",
+    "GP7",
+    "GP8",
+    "GP9",
+    "GP10",
+    "GP11",
+    "GP12",
+    "GP13",
+    "GP14",
+    "GP15",
+    "GP16",
+    "GP17",
+    "GP18",
+    "GP19",
+    "GP20",
+    "GP21",
+    "GP22",
+    "GP26",
+    "GP27",
+    "GP28"
+  ],
+  "analog": [
+    "GP26",
+    "GP27",
+    "GP28"
+  ],
+  "pins": [
+    {
+      "name": "GP0",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ],
+      "reserved": "trigger output of a multi-board set"
+    },
+    {
+      "name": "GP1",
+      "caps": [
+        "DIN"
+      ],
+      "reserved": "trigger input of a multi-board set"
+    },
+    {
+      "name": "GP2",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP3",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP4",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP5",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP6",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP7",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP8",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP9",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP10",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP11",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP12",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP13",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP14",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP15",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP16",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP17",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP18",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP19",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP20",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP21",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP22",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "GP26",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ],
+      "analog_channel": 0
+    },
+    {
+      "name": "GP27",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ],
+      "analog_channel": 1
+    },
+    {
+      "name": "GP28",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PULLDOWN",
+        "PWM",
+        "CLOCK"
+      ],
+      "analog_channel": 2
+    }
+  ],
+  "max_rate": 100000000,
+  "memory_depth": 131072,
+  "memory_depth_digital": {
+    "8": 131072,
+    "16": 65536,
+    "24": 32768
+  },
+  "stream_bandwidth": 800000,
+  "adc_bits": 12,
+  "analog_range": [
+    0.0,
+    3.3
+  ],
+  "adc_noise": 0.004,
+  "logic_level": 3.3,
+  "latency": 0.0005,
+  "gpio_latency": 0.0005,
+  "usb": {
+    "frame": 0.001,
+    "latency": 0.0012,
+    "jitter": 0.0004,
+    "ring": 131072
+  },
+  "watchdog": 1.0,
+  "monitor_rate": 1000,
+  "capabilities": [
+    "GPIO",
+    "PWM",
+    "MONITOR",
+    "IMMEDIATE_TRIGGER",
+    "CONTINUOUS_STREAM",
+    "STATE_MODE",
+    "STREAM_STATE",
+    "PATTERN_GEN=100000000,24",
+    "ANALOG=3",
+    "GEN_SQUARE",
+    "TX_UART",
+    "TX_SPI",
+    "TX_I2C"
+  ],
+  "clock_pins": [
+    "GP2",
+    "GP3",
+    "GP4",
+    "GP5",
+    "GP6",
+    "GP7",
+    "GP8",
+    "GP9",
+    "GP10",
+    "GP11",
+    "GP12",
+    "GP13",
+    "GP14",
+    "GP15",
+    "GP16",
+    "GP17",
+    "GP18",
+    "GP19",
+    "GP20",
+    "GP21",
+    "GP22",
+    "GP26",
+    "GP27",
+    "GP28"
+  ],
+  "outputs": [
+    {
+      "name": "PATTERN",
+      "kind": "pattern",
+      "pins": [
+        "GP2",
+        "GP3",
+        "GP4",
+        "GP5",
+        "GP6",
+        "GP7",
+        "GP8",
+        "GP9",
+        "GP10",
+        "GP11",
+        "GP12",
+        "GP13",
+        "GP14",
+        "GP15",
+        "GP16",
+        "GP17",
+        "GP18",
+        "GP19",
+        "GP20",
+        "GP21",
+        "GP22"
+      ],
+      "max_rate": 100000000,
+      "max_points": 65536
+    },
+    {
+      "name": "SQUARE",
+      "kind": "square",
+      "net": "GP22",
+      "pins": [
+        "GP22"
+      ],
+      "voltage_range": [
+        0.0,
+        3.3
+      ],
+      "max_frequency": 25000000
+    }
+  ],
+  "circuit": {
+    "sources": {
+      "GP2": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 0
+      },
+      "GP3": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 1
+      },
+      "GP4": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 2
+      },
+      "GP5": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 3
+      },
+      "GP6": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 4
+      },
+      "GP7": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 5
+      },
+      "GP8": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 6
+      },
+      "GP9": {
+        "type": "counter",
+        "frequency": "1 MHz",
+        "bit": 7
+      },
+      "GP10": {
+        "type": "clock",
+        "frequency": "1 MHz",
+        "phase": 0.5
+      },
+      "GP11": {
+        "type": "uart",
+        "text": "openSciLab Pico\n",
+        "baud": 115200
+      },
+      "GP12": {
+        "type": "square",
+        "frequency": "1 kHz"
+      },
+      "GP26": {
+        "type": "sine",
+        "frequency": "100 Hz",
+        "amplitude": "1 V",
+        "offset": "1.65 V"
+      },
+      "GP27": {
+        "type": "triangle",
+        "frequency": "50 Hz",
+        "amplitude": "1.5 V",
+        "offset": "1.65 V"
+      },
+      "GP28": {
+        "type": "constant",
+        "level": 1.2
+      }
+    }
+  },
+  "i2c_devices": {
+    "0x48": "1900"
+  }
+}

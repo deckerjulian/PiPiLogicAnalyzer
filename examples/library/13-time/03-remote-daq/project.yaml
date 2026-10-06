@@ -1,0 +1,17 @@
+project: Remote DAQ
+description: A measuring box behind USB on another computer (as a NI DAQ with a Raspberry Pi) records
+  openSciLab's sync signal on a digital line of its own. remote.sync matches its edges with those of a
+  logic analyzer; from then on the DAQ's samples are converted onto the analyzer's time, with the
+  precision of the DAQ's sample rate. The simulated DAQ has a clock of its own (drift), blocks that
+  arrive in USB frames and an emulated network; remote-sim:daq?shared_clock=1 shares the sample clock.
+devices:
+  uno: sim:uno
+  la: sim:free
+  daq: remote-sim:daq
+simulation:
+  wiring:
+    la: [{from: "uno:D7", to: D5}]
+    # the DAQ's digital line SYNC_IN records the sync signal too
+    daq: [{from: "uno:D7", to: SYNC_IN}]
+realtime: true
+open: [flows/daq.flow.yaml]

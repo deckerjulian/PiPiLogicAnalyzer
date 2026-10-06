@@ -1,0 +1,21 @@
+flow: Arbitrary waveform
+description: gen.arbitrary with a formula; the capture starts with the generator's sync.
+nodes:
+  scope: {type: device.instrument, at: [0, 56]}
+  curve:
+    type: gen.arbitrary
+    formula: sin(2*pi*x) + 0.3*sin(6*pi*x)
+    frequency: 1 kHz
+    points: 1024
+    at: [272, 88]
+  capture: {type: device.capture, channels: [CH1], rate: 1 MHz, samples: 5000, at: [544, 48]}
+  view: {type: view.scope, title: Arbitrary waveform on CH1, at: [808, 0]}
+  peak: {type: measure.peak_to_peak, at: [808, 152]}
+  show: {type: view.number, title: Peak to peak, unit: V, at: [1080, 152]}
+edges:
+  - scope.device -> curve.device
+  - scope.device -> capture.device
+  - curve.sync -> capture.arm
+  - capture.capture -> view.in
+  - capture.CH1 -> peak.in
+  - peak.out -> show.in

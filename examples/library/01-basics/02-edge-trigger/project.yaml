@@ -1,0 +1,6 @@
+project: Edge trigger
+description: Waits for a rising edge of the 1 kHz signal on D15 and keeps a quarter of the samples
+  from before the trigger. Change the edge or the source channel in the inspector of 'capture'.
+devices:
+  la: sim:free
+open: [flows/trigger.flow.yaml]

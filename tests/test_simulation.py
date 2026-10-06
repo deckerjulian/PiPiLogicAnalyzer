@@ -9,17 +9,17 @@ import subprocess
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import simulation
-from pipilogicanalyzer.core.simulation import MESSAGE, SimulationPattern
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
-from pipilogicanalyzer.sigrok.engine import PROJECT_DIRECTORY
+from openscilab.core import simulation
+from openscilab.core.simulation import MESSAGE, SimulationPattern
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.sigrok.engine import PROJECT_DIRECTORY
 
-FIRMWARE = os.path.join(PROJECT_DIRECTORY, "firmware", "PiPiLogicAnalyzer")
+FIRMWARE = os.path.join(PROJECT_DIRECTORY, "firmware", "pico")
 
 HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
-#include "PiPiLogicAnalyzer_Simulation.h"
+#include "simulation.h"
 
 int main(int argc, char** argv)
 {
@@ -48,7 +48,7 @@ def firmware_generator(tmp_path_factory):
     subprocess.run(
         [
             compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", FIRMWARE,
-            str(source), os.path.join(FIRMWARE, "PiPiLogicAnalyzer_Simulation.c"), "-o", str(binary),
+            str(source), os.path.join(FIRMWARE, "simulation.c"), "-o", str(binary),
         ],
         check=True,
         capture_output=True,
@@ -94,8 +94,8 @@ REAL_DECODERS = all(
 
 @pytest.mark.skipif(not REAL_DECODERS, reason="the sigrok decoders are not installed in ./decoders")
 def test_protocol_pattern_is_decoded_by_the_sigrok_decoders():
-    from pipilogicanalyzer.sigrok.engine import DecoderRegistry
-    from pipilogicanalyzer.sigrok.provider import SigrokProvider
+    from openscilab.sigrok.engine import DecoderRegistry
+    from openscilab.sigrok.provider import SigrokProvider
 
     registry = DecoderRegistry()
     registry.load()
@@ -134,6 +134,6 @@ def test_protocol_pattern_is_decoded_by_the_sigrok_decoders():
         return [segment.values[-1] for segment in sorted(segments, key=lambda item: item.first_sample)]
 
     hex_message = " ".join(f"{byte:02X}" for byte in MESSAGE)
-    assert "PiPiLogicAnalyzer" in "".join(values("uart", "rx-data"))
+    assert "openSciLab" in "".join(values("uart", "rx-data"))
     assert hex_message in " ".join(values("spi", "mosi-data"))
     assert hex_message in " ".join(values("i2c", "data-write"))

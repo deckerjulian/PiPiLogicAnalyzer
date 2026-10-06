@@ -13,21 +13,21 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core import simulation
-from pipilogicanalyzer.core.simulation import SimulationPattern
-from pipilogicanalyzer.driver.pico import protocol
-from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
-from pipilogicanalyzer.driver.base import (
+from openscilab.core import simulation
+from openscilab.core.simulation import SimulationPattern
+from openscilab.driver.pico import protocol
+from openscilab.driver.pico.analyzer import PicoDriver
+from openscilab.driver.base import (
     CaptureError,
     CaptureMode,
     SelfTestResult,
     UnsupportedFeatureError,
 )
-from pipilogicanalyzer.driver.pico.protocol import parse_self_test_line
-from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
-from pipilogicanalyzer.ui.dialogs.board_test_dialog import BoardTestDialog
-from pipilogicanalyzer.ui.dialogs.simulation_dialog import SimulationDialog
+from openscilab.driver.pico.protocol import parse_self_test_line
+from openscilab.driver.emulated import EmulatedAnalyzerDriver
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.ui.dialogs.board_test_dialog import BoardTestDialog
+from openscilab.ui.dialogs.simulation_dialog import SimulationDialog
 
 from test_driver import FakeTransport
 
@@ -36,9 +36,9 @@ from test_driver import FakeTransport
 def device(monkeypatch):
     transport = FakeTransport()
     monkeypatch.setattr(
-        "pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
+        "openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport
     )
-    driver = PiPiLogicAnalyzerDriver("/dev/fake")
+    driver = PicoDriver("/dev/fake")
     driver.test_transport = transport  # type: ignore[attr-defined]
     return driver
 
@@ -210,9 +210,8 @@ def test_simulation_dialog_builds_the_session(application):
     assert not dialog.add_decoders and not dialog.decoders_box.isEnabled()
 
 
-def test_main_window_simulates_without_a_board(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as main_window_module
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_main_window_simulates_without_a_board(application, monkeypatch, make_dataview):
+    from openscilab.ui.documents import dataview as main_window_module
 
     class AcceptingDialog(SimulationDialog):
         def exec(self):
@@ -222,8 +221,8 @@ def test_main_window_simulates_without_a_board(application, monkeypatch):
             return True
 
     monkeypatch.setattr(main_window_module, "SimulationDialog", AcceptingDialog)
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.error", lambda *args, **kwargs: pytest.fail(str(args)))
-    window = MainWindow()
+    monkeypatch.setattr("openscilab.ui.messages.error", lambda *args, **kwargs: pytest.fail(str(args)))
+    window = make_dataview()
     try:
         window.simulated_capture()
         deadline = time.monotonic() + 10
@@ -241,7 +240,7 @@ def test_main_window_simulates_without_a_board(application, monkeypatch):
 
 
 def test_the_device_information_holds_the_self_test(application):
-    from pipilogicanalyzer.ui.dialogs.device_dialogs import DeviceInfoDialog
+    from openscilab.ui.dialogs.device_dialogs import DeviceInfoDialog
 
     emulated = DeviceInfoDialog(FakeTestDriver([SelfTestResult("RAM", "OK")]))
     assert emulated.self_test is None and emulated.tabs.count() == 2  # nothing to test
@@ -267,9 +266,10 @@ def test_the_device_information_holds_the_self_test(application):
     assert dialog.tabs.tabText(dialog.tabs.currentIndex()) == "Capture limits"
 
 
-def test_the_self_test_menu_opens_the_device_information(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as module
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_the_self_test_menu_opens_the_device_information(application, monkeypatch, make_dataview):
+    from openscilab.core.instrument import Instrument
+    from openscilab.ui.devices.capture import CaptureController
+    from openscilab.ui.dialogs import device_dialogs
 
     opened = []
 
@@ -280,12 +280,11 @@ def test_the_self_test_menu_opens_the_device_information(application, monkeypatc
         def exec(self):
             return 0
 
-    monkeypatch.setattr(module, "DeviceInfoDialog", RecordingDialog)
-    window = MainWindow()
+    monkeypatch.setattr(device_dialogs, "DeviceInfoDialog", RecordingDialog)
+    controller = CaptureController(Instrument.from_driver(EmulatedAnalyzerDriver(1), name="board"))
     try:
-        window.driver = EmulatedAnalyzerDriver(1)
-        window.run_board_test()
-        window.show_device_info()
+        controller.run_board_test()
+        controller.show_device_info()
         assert opened == ["self-test", "overview"]
     finally:
-        window.close()
+        controller.close()

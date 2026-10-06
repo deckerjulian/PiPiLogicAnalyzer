@@ -1,0 +1,19 @@
+flow: Measurement panel
+description: The button of the panel arms the capture (without the panel the flow captures once).
+nodes:
+  la: {type: device.instrument, at: [0, 0]}
+  capture: {type: device.capture, channels: [D15, D8], rate: 10 MHz, duration: 5 ms, at: [272, 0]}
+  frequency: {type: measure.frequency, at: [544, 8]}
+  duty: {type: measure.duty, at: [544, 112]}
+  check:
+    type: report.check
+    name: Frequency
+    expected: 1000
+    tolerance: 1
+    unit: Hz
+    at: [808, 8]
+edges:
+  - la.device -> capture.device
+  - capture.D15 -> frequency.in
+  - capture.D15 -> duty.in
+  - frequency.out -> check.in

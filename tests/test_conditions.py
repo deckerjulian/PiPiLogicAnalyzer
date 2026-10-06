@@ -7,9 +7,9 @@ import random
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import conditions
-from pipilogicanalyzer.core.conditions import condition_events
-from pipilogicanalyzer.driver.models import ConditionKind, EdgeKind, TriggerCondition
+from openscilab.core import conditions
+from openscilab.core.conditions import condition_events
+from openscilab.driver.models import ConditionKind, EdgeKind, TriggerCondition
 
 #: 1 GHz: one sample is one nanosecond
 RATE = 1_000_000_000

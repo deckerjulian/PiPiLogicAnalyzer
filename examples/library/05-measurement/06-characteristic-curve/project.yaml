@@ -1,0 +1,12 @@
+project: Characteristic curve
+description: Sweeps the PWM duty cycle of D9 of an Arduino Uno; an oscilloscope measures the voltage
+  behind the RC low pass at A0, its mean per step makes the curve. A panel starts it, a report shows
+  the curve and checks its slope. Both instruments are simulated.
+devices:
+  uno: sim:uno
+  scope: sim:dho924s
+simulation:
+  wiring:
+    # the probe of CH1 on A0 of the Uno
+    scope: [{from: "uno:A0", to: CH1}]
+open: [panels/curve.panel.yaml, flows/curve.flow.yaml]

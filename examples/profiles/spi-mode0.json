@@ -1,0 +1,89 @@
+{
+  "Profiles": [
+    {
+      "Name": "SPI mode 0",
+      "CaptureSettings": {
+        "Frequency": 20000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "CLK",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 2",
+            "ChannelNumber": 1,
+            "ChannelName": "MOSI",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 3",
+            "ChannelNumber": 2,
+            "ChannelName": "MISO",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 4",
+            "ChannelNumber": 3,
+            "ChannelName": "CS",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 3,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "spi",
+          "label": "SPI",
+          "channel_map": {
+            "0": 0,
+            "2": 1,
+            "1": 2,
+            "3": 3
+          },
+          "options": {
+            "cs_polarity": "active-low",
+            "cpol": 0,
+            "cpha": 0,
+            "bitorder": "msb-first",
+            "wordsize": 8
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "CLK to CH1, MOSI to CH2, MISO to CH3, CS to CH4. For clocks up to about 4 MHz; other modes: edit CPOL/CPHA of the decoder. The capture starts when CS goes low."
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+project: Blink
+description: The "Blink" of the Arduino IDE as a flow - a timer toggles D13 eight times; the monitor
+  reads the pin back and the LED view shows it.
+devices:
+  uno: sim:uno
+open: [flows/blink.flow.yaml]

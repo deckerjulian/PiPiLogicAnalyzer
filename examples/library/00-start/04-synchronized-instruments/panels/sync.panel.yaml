@@ -1,0 +1,7 @@
+panel: Synchronized instruments
+flow: ../flows/sync.flow.yaml
+columns: 4
+widgets:
+  offset: {kind: number, bind: align.offset, title: Correction of the box, columns: 2, unit: s, digits: 4}
+  accuracy: {kind: number, bind: align.uncertainty, title: Accuracy, column: 2, columns: 2, unit: s, digits: 3}
+  edges: {kind: number, bind: align.edges, title: Matched edges, row: 1, columns: 2}

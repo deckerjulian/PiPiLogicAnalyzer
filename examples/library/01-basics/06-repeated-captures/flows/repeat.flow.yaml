@@ -1,0 +1,17 @@
+flow: Repeated captures
+description: control.timer ticks five times; every tick arms a capture of D15 and D8.
+nodes:
+  la: {type: device.instrument, at: [0, 0]}
+  timer: {type: control.timer, interval: 200 ms, count: 5, at: [0, 88]}
+  capture: {type: device.capture, channels: [D15, D8], rate: 2 MHz, samples: 8000, at: [272, 32]}
+  frequency: {type: measure.frequency, at: [544, 40]}
+  duty: {type: measure.duty, at: [544, 152]}
+  chart: {type: view.strip_chart, title: Frequency of D15, window: 2 s, at: [808, 8]}
+  show: {type: view.number, title: Duty cycle of D15, at: [808, 176]}
+edges:
+  - la.device -> capture.device
+  - timer.tick -> capture.arm
+  - capture.D15 -> frequency.in
+  - capture.D15 -> duty.in
+  - frequency.out -> chart.in
+  - duty.out -> show.in

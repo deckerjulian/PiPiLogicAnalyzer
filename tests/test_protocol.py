@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from pipilogicanalyzer.driver.pico import protocol
+from openscilab.driver.pico import protocol
 
 
 def test_frame_escapes_reserved_bytes():

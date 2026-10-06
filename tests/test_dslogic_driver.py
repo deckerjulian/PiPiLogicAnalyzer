@@ -9,18 +9,18 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver.base import (
+from openscilab.driver.base import (
     ACQUISITION_STREAM,
     CAPABILITY_IMMEDIATE_TRIGGER,
     AnalyzerDriverType,
     CaptureError,
     DeviceConnectionError,
 )
-from pipilogicanalyzer.driver.dslogic import BitstreamMissingError, DSLogicDriver, protocol
-from pipilogicanalyzer.driver.dslogic.driver import FirmwareMissingError, prepare
-from pipilogicanalyzer.driver.dslogic.resources import ResourceError
-from pipilogicanalyzer.driver.dslogic.usb import UsbDevice, UsbDeviceInfo, UsbTimeout
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.driver.dslogic import BitstreamMissingError, DSLogicDriver, protocol
+from openscilab.driver.dslogic.driver import FirmwareMissingError, prepare
+from openscilab.driver.dslogic.resources import ResourceError
+from openscilab.driver.dslogic.usb import UsbDevice, UsbDeviceInfo, UsbTimeout
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 
 
 class FakeDSLogic(UsbDevice):
@@ -359,7 +359,7 @@ def stream_data(samples: int):
 
 
 def test_a_stream_reports_its_samples_while_it_runs(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import driver as module
+    from openscilab.driver.dslogic import driver as module
 
     monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
     device = FakeDSLogic(info())
@@ -392,7 +392,7 @@ def test_a_buffer_capture_reports_no_progress():
 
 
 def test_stopping_a_stream_keeps_the_samples_received(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import driver as module
+    from openscilab.driver.dslogic import driver as module
 
     monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
     device = FakeDSLogic(info())
@@ -416,8 +416,8 @@ def test_stopping_a_stream_keeps_the_samples_received(monkeypatch):
 
 
 def test_the_ring_store_keeps_the_latest_samples():
-    from pipilogicanalyzer.core.sample_store import RingStore
-    from pipilogicanalyzer.driver.dslogic.driver import _add_transfer
+    from openscilab.core.sample_store import RingStore
+    from openscilab.driver.dslogic.driver import _add_transfer
 
     rng = np.random.default_rng(5)
     channels = [0, 3]
@@ -452,7 +452,7 @@ def test_an_endless_stream_needs_the_stream_mode():
 
 
 def test_an_endless_stream_runs_until_stopped_and_keeps_its_end(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import driver as module
+    from openscilab.driver.dslogic import driver as module
 
     monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
     device = FakeDSLogic(info())

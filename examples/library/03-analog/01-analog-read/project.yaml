@@ -1,0 +1,6 @@
+project: Analog read
+description: Like "AnalogReadSerial" - a timer reads A0 ten times a second. PWM on D9 charges the RC
+  low pass in front of A0, so the voltage rises towards 3 V (60 % of 5 V).
+devices:
+  uno: sim:uno
+open: [flows/read.flow.yaml]

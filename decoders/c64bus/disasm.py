@@ -1,5 +1,5 @@
 ##
-## This file is part of the PiPiLogicAnalyzer project.
+## This file is part of the openSciLab project.
 ##
 ## 6502/6510 disassembler for bus captures without a SYNC signal.
 ##

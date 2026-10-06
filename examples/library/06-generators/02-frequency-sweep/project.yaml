@@ -1,0 +1,6 @@
+project: Frequency sweep
+description: The generator steps through 1, 2, 5 and 10 kHz; for every step the scope captures CH1
+  and measures the frequency. The table and the XY chart compare set and measured frequency.
+devices:
+  scope: sim:dho924s
+open: [flows/sweep.flow.yaml]

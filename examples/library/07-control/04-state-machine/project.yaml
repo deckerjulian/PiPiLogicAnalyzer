@@ -1,0 +1,7 @@
+project: Traffic light
+description: A state machine drives a traffic light on D11 (red), D12 (yellow) and D13 (green) -
+  red, red and yellow, green, yellow, red, then off. Every state says what its outputs are and when
+  it goes on.
+devices:
+  uno: sim:uno
+open: [flows/traffic-light.flow.yaml]

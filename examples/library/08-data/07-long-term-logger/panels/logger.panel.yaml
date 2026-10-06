@@ -1,0 +1,8 @@
+panel: Long-term logger
+flow: ../flows/logger.flow.yaml
+columns: 4
+widgets:
+  duty: {kind: slider, bind: pwm.duty, title: PWM of D9, min: 0, max: 1, step: 0.05, value: 0.4}
+  volts: {kind: number, bind: monitor.A0, title: A0, column: 2, unit: V}
+  button: {kind: led, bind: monitor.D2, title: Button D2, column: 3, threshold: 0.5}
+  chart: {kind: chart, bind: monitor.A0, title: A0 over time, row: 1, columns: 4, rows: 3, unit: V}

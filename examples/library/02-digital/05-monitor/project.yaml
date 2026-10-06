@@ -1,0 +1,7 @@
+project: Monitor
+description: The monitor reads pins and analog inputs again and again (here 20 times a second) - the
+  way to watch slow signals. PWM on D9 charges the RC low pass at A0; the strip chart shows the
+  voltage rising, the LED shows D3.
+devices:
+  uno: sim:uno
+open: [flows/monitor.flow.yaml]

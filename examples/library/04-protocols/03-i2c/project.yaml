@@ -1,0 +1,6 @@
+project: I²C
+description: Decodes I²C on D13 (SCL) and D14 (SDA) - start and stop conditions, the address, reads
+  and writes and every data byte with its acknowledge.
+devices:
+  la: sim:free
+open: [flows/i2c.flow.yaml]

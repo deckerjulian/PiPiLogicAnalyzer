@@ -7,8 +7,8 @@ import struct
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver.dslogic import protocol
-from pipilogicanalyzer.driver.dslogic.protocol import AcquisitionMode, CaptureSetup, TriggerSpec
+from openscilab.driver.dslogic import protocol
+from openscilab.driver.dslogic.protocol import AcquisitionMode, CaptureSetup, TriggerSpec
 
 PLUS = protocol.PROFILES[0x0020]
 U3PRO16 = protocol.PROFILES[0x002A]

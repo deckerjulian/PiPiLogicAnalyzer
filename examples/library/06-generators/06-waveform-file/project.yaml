@@ -1,0 +1,7 @@
+project: Waveform file
+description: A waveform kept as a file (waveforms/triangle.wave.yaml, made and edited in the waveform
+  document) played by gen.output on the generator of the oscilloscope; its sync starts the capture
+  of CH1, which measures the frequency and the peak-to-peak voltage of the triangle.
+devices:
+  scope: sim:dho924s
+open: [flows/play.flow.yaml, waveforms/triangle.wave.yaml]

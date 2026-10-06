@@ -8,14 +8,14 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import conditions
-from pipilogicanalyzer.core.trigger_engine import (
+from openscilab.core import conditions
+from openscilab.core.trigger_engine import (
     SequenceMatcher,
     find_sequence,
     session_trigger_sequence,
     validate_sequence,
 )
-from pipilogicanalyzer.driver.models import (
+from openscilab.driver.models import (
     AnalyzerChannel,
     CaptureSession,
     ConditionKind,
@@ -151,7 +151,7 @@ def test_small_blocks_give_the_same_result(seed, monkeypatch):
     sequence = random_sequence(rng, 2)
     whole = find_sequence(channels, sequence, RATE).tolist()
     monkeypatch.setattr(conditions, "EVENT_BLOCK", rng.randint(1, 40))
-    monkeypatch.setattr("pipilogicanalyzer.core.trigger_engine.EVENT_BLOCK", conditions.EVENT_BLOCK)
+    monkeypatch.setattr("openscilab.core.trigger_engine.EVENT_BLOCK", conditions.EVENT_BLOCK)
     assert find_sequence(channels, sequence, RATE).tolist() == whole
 
 

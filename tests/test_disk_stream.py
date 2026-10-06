@@ -11,12 +11,12 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.core import analysis, sample_store
-from pipilogicanalyzer.core.analysis import ChannelTransitions
-from pipilogicanalyzer.core.sample_store import DiskAllocator, RingStore, SampleStore, is_on_disk
-from pipilogicanalyzer.driver import base
-from pipilogicanalyzer.driver.base import ACQUISITION_STREAM, CaptureError
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.core import analysis, sample_store
+from openscilab.core.analysis import ChannelTransitions
+from openscilab.core.sample_store import DiskAllocator, RingStore, SampleStore, is_on_disk
+from openscilab.driver import base
+from openscilab.driver.base import ACQUISITION_STREAM, CaptureError
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 
 from test_dslogic_driver import FakeDSLogic, header, info, open_driver, session, stream_data
 
@@ -81,7 +81,7 @@ def test_stream_limits_follow_the_disk():
 
 
 def test_a_dslogic_stream_to_disk(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import driver as module
+    from openscilab.driver.dslogic import driver as module
 
     monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
     device = FakeDSLogic(info())
@@ -106,13 +106,13 @@ def test_a_dslogic_stream_to_disk(monkeypatch):
 
 def test_a_pico_stream_to_disk(monkeypatch):
     import test_pico_stream as pico_tests
-    from pipilogicanalyzer.driver.pico import analyzer
-    from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
+    from openscilab.driver.pico import analyzer
+    from openscilab.driver.pico.analyzer import PicoDriver
 
     transport = pico_tests.StreamingTransport()
     transport.queue_response("CAPS:SELFTEST,DEVICEINFO,STREAM=800000")
     monkeypatch.setattr(analyzer, "SerialTransport", lambda *args, **kwargs: transport)
-    driver = PiPiLogicAnalyzerDriver("/dev/fake")
+    driver = PicoDriver("/dev/fake")
     driver.capabilities()
     words = np.arange(2000) & 0xFF
     transport.queue_response("STREAM_STARTED:0,1,2")
@@ -125,7 +125,7 @@ def test_a_pico_stream_to_disk(monkeypatch):
 
 
 def test_the_dialog_records_a_stream_to_disk(application):
-    from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+    from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
     driver = open_driver(FakeDSLogic(info(0x002D)))
     dialog = CaptureDialog(driver)
@@ -163,13 +163,13 @@ def test_clone_settings_does_not_copy_the_samples():
     assert capture.capture_channels[0].samples is samples
 
 
-def test_the_main_window_keeps_the_live_index_and_refuses_to_save_huge_captures(application, monkeypatch):
-    from pipilogicanalyzer.ui import main_window as module
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_the_main_window_keeps_the_live_index_and_saves_huge_captures(application, monkeypatch, make_dataview,
+                                                                    tmp_path):
+    from openscilab.ui.documents import dataview as module
 
     warnings = []
     monkeypatch.setattr(module.messages, "warning", lambda *args, **kwargs: warnings.append(args))
-    window = MainWindow()
+    window = make_dataview()
     try:
         model = window.model
         live = CaptureSession(frequency=1000, post_trigger_samples=1000)
@@ -184,16 +184,27 @@ def test_the_main_window_keeps_the_live_index_and_refuses_to_save_huge_captures(
         assert model.transitions[0] is index and index.sample_count == 1000 and not model.is_live
         assert model.on_disk
 
+        # A capture too large for memory is saved all the same (packed, block by block) and
+        # comes back from the file on disk again; only writing it as text is refused.
         monkeypatch.setattr(module, "MAX_SAMPLE_BYTES", 500)
-        window.save_capture_as()
+        monkeypatch.setattr(module.capture_io, "DISK_LOAD_BYTES", 500)
+        monkeypatch.setattr(module.capture_io, "PACK_BLOCK", 64)  # several blocks
+        path = str(tmp_path / "huge.lac")
+        window._write_capture(path)
+        assert warnings == [] and os.path.getsize(path) < 3000
+        loaded = module.capture_io.load_capture(path).session.capture_channels[0].samples
+        assert is_on_disk(loaded) and np.array_equal(loaded, data)
+
         window.export_capture("csv")
+        window._write_capture(str(tmp_path / "original.lac"), compatible=True)
         assert len(warnings) == 2 and "too many" in warnings[0][2]
+        assert not os.path.exists(tmp_path / "original.lac")
     finally:
         window.close()
 
 
 def test_a_stream_to_disk_stops_when_the_disk_fills(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import driver as module
+    from openscilab.driver.dslogic import driver as module
 
     monkeypatch.setattr(module, "PROGRESS_INTERVAL", 0)
     monkeypatch.setattr(base.DiskWatch.__init__, "__defaults__", (0.01, None))

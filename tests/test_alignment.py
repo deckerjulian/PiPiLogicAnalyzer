@@ -9,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import alignment
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.core import alignment
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
 
 PERIOD = 20  # samples per clock cycle (a C64 cycle at 20 MHz)
 CYCLES = 2000
@@ -142,7 +142,7 @@ def test_every_available_method_is_offered():
 def test_the_align_dialog_offers_the_methods_and_leaving_unchanged():
     from PySide6.QtWidgets import QApplication
 
-    from pipilogicanalyzer.ui.dialogs.align_dialog import AlignDialog
+    from openscilab.ui.dialogs.align_dialog import AlignDialog
 
     QApplication.instance() or QApplication([])
     session, _address = capture(offset=-3)
@@ -178,17 +178,16 @@ class Chooser:
         return {device: candidates[self.index] for device, candidates in self.options.items()}
 
 
-def test_the_menu_action_lets_the_user_choose_the_method(monkeypatch):
+def test_the_menu_action_lets_the_user_choose_the_method(monkeypatch, make_dataview):
     from PySide6.QtWidgets import QApplication
 
-    from pipilogicanalyzer.ui.main_window import MainWindow
 
     QApplication.instance() or QApplication([])
     infos = []
-    monkeypatch.setattr("pipilogicanalyzer.ui.messages.info", lambda *args, **kwargs: infos.append(args))
-    monkeypatch.setattr("pipilogicanalyzer.ui.main_window.AlignDialog", Chooser)
+    monkeypatch.setattr("openscilab.ui.messages.info", lambda *args, **kwargs: infos.append(args))
+    monkeypatch.setattr("openscilab.ui.documents.dataview.AlignDialog", Chooser)
     session, address = capture(offset=2)
-    window = MainWindow()
+    window = make_dataview()
     try:
         window.load_session(session)
         Chooser.index = 0

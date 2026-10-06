@@ -1,0 +1,33 @@
+flow: Simulated scenario
+description: 'The device node''s signals: {scenario: protocols, text: ...} - UART on D0, SPI on D1 (clock), D2 (data), D3 (select), I²C on D4 (SCL) and D5 (SDA).'
+nodes:
+  la:
+    type: device.instrument
+    signals: {scenario: protocols, text: 'Hello from the simulator
+
+      ', baud: 115200}
+    at: [0, 368]
+  capture:
+    type: device.capture
+    channels: [D0, D1, D2, D3, D4, D5]
+    rate: 16 MHz
+    duration: 4 ms
+    at: [272, 368]
+  uart: {type: decode.uart, channels: {rx: D0}, baudrate: 115200, format: ascii, at: [544, 64]}
+  spi: {type: decode.spi, channels: {clk: D1, mosi: D2, cs: D3}, at: [544, 280]}
+  i2c: {type: decode.i2c, channels: {scl: D4, sda: D5}, at: [544, 472]}
+  text_check: {type: control.compare, op: contains, value: Hello from the simulator, at: [808, 152]}
+  text: {type: view.log, title: UART, at: [808, 0]}
+  spi_table: {type: view.table, title: SPI, at: [808, 344]}
+  i2c_table: {type: view.table, title: I²C, at: [808, 496]}
+  view: {type: view.scope, title: Scenario, at: [544, 656]}
+edges:
+  - la.device -> capture.device
+  - capture.capture -> uart.in
+  - capture.capture -> spi.in
+  - capture.capture -> i2c.in
+  - capture.capture -> view.in
+  - uart.text -> text_check.a
+  - uart.text -> text.in
+  - spi.table -> spi_table.in
+  - i2c.table -> i2c_table.in

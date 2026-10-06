@@ -9,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from pipilogicanalyzer.ui import icons
-from pipilogicanalyzer.ui.theme import set_variant
+from openscilab.ui import icons
+from openscilab.ui.theme import set_variant
 
 
 @pytest.fixture(scope="module")

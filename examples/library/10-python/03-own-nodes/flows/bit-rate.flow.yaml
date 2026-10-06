@@ -1,0 +1,22 @@
+flow: Own nodes
+description: example.bit_rate measures the UART on D9 from its shortest pulse; example.blink switches a value on and off.
+nodes:
+  la: {type: device.instrument, at: [0, 32]}
+  capture: {type: device.capture, channels: [D9], rate: 16 MHz, duration: 2 ms, at: [272, 32]}
+  rate: {type: example.bit_rate, at: [544, 120]}
+  show: {type: view.number, title: Bit rate, at: [808, 176]}
+  check:
+    type: report.check
+    name: Bit rate
+    expected: 115200
+    tolerance: 2000
+    unit: Bd
+    at: [808, 0]
+  blink: {type: example.blink, period: 10 ms, count: 3, at: [0, 304]}
+  led: {type: view.led, title: Blink, at: [272, 272]}
+edges:
+  - la.device -> capture.device
+  - capture.D9 -> rate.line
+  - rate.baud -> show.in
+  - rate.baud -> check.in
+  - blink.level -> led.in

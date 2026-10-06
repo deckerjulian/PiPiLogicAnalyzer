@@ -1,0 +1,7 @@
+project: Subflow
+description: A part of a flow used like one node - the subflow 'duty_check' measures the duty cycle of
+  a signal and checks it; the flow uses it twice, for D8 and for D15. Double-click a subflow node to
+  open it. Select nodes and choose Make subflow to make your own.
+devices:
+  la: sim:free
+open: [flows/subflow.flow.yaml]

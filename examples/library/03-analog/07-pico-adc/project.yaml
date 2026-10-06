@@ -1,0 +1,6 @@
+project: Pico ADC
+description: The three ADC inputs of a simulated Raspberry Pi Pico (a 100 Hz sine on GP26, a 50 Hz
+  triangle on GP27, 1.2 V on GP28), read by the monitor 200 times a second.
+devices:
+  pico: sim:pico
+open: [flows/adc.flow.yaml]

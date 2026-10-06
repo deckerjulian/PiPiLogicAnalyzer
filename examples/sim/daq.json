@@ -1,0 +1,272 @@
+{
+  "name": "daq",
+  "title": "Simulation: USB DAQ",
+  "description": "A measuring box on USB in the class of an NI USB-6001: AI0-AI7 analog inputs (±10 V, 14 bit), AO0/AO1 analog outputs (±10 V, 12 bit), P0.0-P0.7 and P1.0-P1.3 digital lines. Its blocks arrive as over USB (frames, latency, jitter) and its sample clock runs 30 ppm fast, so the time of its samples has to be found as with the real box. Wired: P0.0 → P0.1 (a loopback to measure the latency), AO0 → AI2; P0.7 is free for a sync signal (wire a pin of another simulator to it); AI0 a 50 Hz sine, AI1 a slow triangle, P0.2 a 100 Hz square.",
+  "provisional": "Values in the class of a USB DAQ (NI USB-6001), not of one measured box.",
+  "digital": [
+    "P0.0",
+    "P0.1",
+    "P0.2",
+    "P0.3",
+    "P0.4",
+    "P0.5",
+    "P0.6",
+    "P0.7",
+    "P1.0",
+    "P1.1",
+    "P1.2",
+    "P1.3"
+  ],
+  "analog": [
+    "AI0",
+    "AI1",
+    "AI2",
+    "AI3",
+    "AI4",
+    "AI5",
+    "AI6",
+    "AI7"
+  ],
+  "pins": [
+    {
+      "name": "P0.0",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.1",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.2",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.3",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.4",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.5",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.6",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P0.7",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P1.0",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P1.1",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P1.2",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "P1.3",
+      "caps": [
+        "DIN",
+        "DOUT"
+      ]
+    },
+    {
+      "name": "AI0",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 0
+    },
+    {
+      "name": "AI1",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 1
+    },
+    {
+      "name": "AI2",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 2
+    },
+    {
+      "name": "AI3",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 3
+    },
+    {
+      "name": "AI4",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 4
+    },
+    {
+      "name": "AI5",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 5
+    },
+    {
+      "name": "AI6",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 6
+    },
+    {
+      "name": "AI7",
+      "caps": [
+        "ADC"
+      ],
+      "analog_channel": 7
+    },
+    {
+      "name": "AO0",
+      "caps": [
+        "DAC"
+      ]
+    },
+    {
+      "name": "AO1",
+      "caps": [
+        "DAC"
+      ]
+    }
+  ],
+  "max_rate": 50000,
+  "memory_depth": 1000000,
+  "stream_bandwidth": 400000,
+  "adc_bits": 14,
+  "analog_range": [
+    -10.0,
+    10.0
+  ],
+  "adc_noise": 0.002,
+  "logic_level": 5.0,
+  "latency": 0.002,
+  "gpio_latency": 0.001,
+  "usb": {
+    "frame": 0.001,
+    "latency": 0.002,
+    "jitter": 0.0005,
+    "ring": 0
+  },
+  "clock_drift": 30,
+  "watchdog": 0,
+  "monitor_rate": 100,
+  "dac_range": [
+    -10.0,
+    10.0
+  ],
+  "dac_bits": 12,
+  "capabilities": [
+    "GPIO",
+    "MONITOR",
+    "DAC",
+    "AFG",
+    "IMMEDIATE_TRIGGER",
+    "CONTINUOUS_STREAM"
+  ],
+  "clock_pins": [],
+  "outputs": [
+    {
+      "name": "AO0",
+      "kind": "analog",
+      "net": "AO0",
+      "voltage_range": [
+        -10.0,
+        10.0
+      ],
+      "resolution": 12,
+      "max_rate": 5000,
+      "max_points": 2048,
+      "max_frequency": 1000,
+      "capabilities": [
+        "ARB"
+      ]
+    }
+  ],
+  "circuit": {
+    "sources": {
+      "AI0": {
+        "type": "sine",
+        "frequency": "50 Hz",
+        "amplitude": "2 V",
+        "offset": "0 V"
+      },
+      "AI1": {
+        "type": "triangle",
+        "frequency": "2 Hz",
+        "amplitude": "5 V",
+        "offset": "0 V"
+      },
+      "AI3": {
+        "type": "constant",
+        "level": 1.0
+      },
+      "P0.2": {
+        "type": "square",
+        "frequency": "100 Hz"
+      }
+    },
+    "wiring": [
+      {
+        "from": "P0.0",
+        "to": "P0.1"
+      },
+      {
+        "from": "AO0",
+        "to": "AI2"
+      }
+    ]
+  },
+  "analog_aggregate_rate": 20000
+}

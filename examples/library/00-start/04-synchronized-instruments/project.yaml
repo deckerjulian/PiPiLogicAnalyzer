@@ -1,0 +1,17 @@
+project: Synchronized instruments
+description: Two instruments on one time axis - a logic analyzer and a measuring box whose samples arrive
+  late and uneven over USB and whose clock drifts. The logic analyzer drives a sync signal on GP16; a
+  wire takes it to one of its own channels (GP17) and to a line of the box (P0.7); timing.align matches
+  the edges and puts the box's samples on the logic analyzer's time to microseconds. Both are simulated;
+  with hardware run a wire from the sync pin to a channel of every instrument.
+icon: align
+devices:
+  logic: sim:pico
+  daq: sim:daq
+simulation:
+  wiring:
+    # the sync signal (GP16 of the logic analyzer) on its own GP17 and on P0.7 of the box
+    logic: [{from: GP16, to: GP17}]
+    daq: [{from: "logic:GP16", to: P0.7}]
+realtime: true
+open: [panels/sync.panel.yaml, flows/sync.flow.yaml]

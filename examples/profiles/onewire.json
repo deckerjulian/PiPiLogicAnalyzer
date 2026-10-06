@@ -1,0 +1,67 @@
+{
+  "Profiles": [
+    {
+      "Name": "1-Wire (DS18B20 and others)",
+      "CaptureSettings": {
+        "Frequency": 1000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "1-Wire",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "onewire_link",
+          "label": "1-Wire link",
+          "channel_map": {
+            "0": 0
+          },
+          "options": {
+            "overdrive": "no"
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        },
+        {
+          "decoder_id": "onewire_network",
+          "label": "1-Wire network",
+          "channel_map": {},
+          "options": {},
+          "color_index": 1,
+          "enabled": true,
+          "parent": 0
+        }
+      ],
+      "Notes": "The data line to CH1 (with its pull-up), GND to GND."
+    }
+  ]
+}

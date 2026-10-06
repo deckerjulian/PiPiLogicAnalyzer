@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pipilogicanalyzer import api
-from pipilogicanalyzer.driver.models import ConditionKind, EdgeKind, TriggerCondition, TriggerStage, TriggerType
+from openscilab import api
+from openscilab.driver.models import ConditionKind, EdgeKind, TriggerCondition, TriggerStage, TriggerType
 
 from test_software_trigger import FakeStreamDriver
 

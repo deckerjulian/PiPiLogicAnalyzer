@@ -1,0 +1,6 @@
+project: UART
+description: Decodes the UART on D9 of the simulator (115200 baud, it repeats "openSciLab"). The log
+  shows the text, the table every byte with its time.
+devices:
+  la: sim:free
+open: [flows/uart.flow.yaml]

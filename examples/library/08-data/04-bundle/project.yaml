@@ -1,0 +1,8 @@
+project: Bundle
+description: Frequency and duty cycle of a capture travel together on one wire - structure.bundle
+  makes one value of both; the log shows them side by side, the CSV file gets one line, and
+  structure.unbundle takes them apart again (the frequency is checked). A group frame marks the
+  measurements.
+devices:
+  la: sim:free
+open: [flows/bundle.flow.yaml]

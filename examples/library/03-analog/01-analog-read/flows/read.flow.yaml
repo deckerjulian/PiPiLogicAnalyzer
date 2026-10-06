@@ -1,0 +1,15 @@
+flow: Analog read
+description: Every tick of the timer reads the voltage at A0 (gpio.read with analog).
+nodes:
+  uno: {type: device.instrument, at: [0, 80]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, duty: 0.6, at: [272, 0]}
+  timer: {type: control.timer, interval: 100 ms, count: 20, at: [0, 184]}
+  a0: {type: gpio.read, pin: A0, analog: true, at: [272, 160]}
+  chart: {type: view.strip_chart, title: A0, window: 3 s, at: [544, 256]}
+  volts: {type: view.number, title: A0, unit: V, digits: 3, at: [544, 72]}
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> a0.device
+  - timer.tick -> a0.trigger
+  - a0.value -> chart.in
+  - a0.value -> volts.in

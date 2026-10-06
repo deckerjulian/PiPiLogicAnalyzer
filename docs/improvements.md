@@ -53,7 +53,7 @@ The original embedded CPython through Python.NET, generated a C# class for every
 time with Roslyn and mapped the `sigrokdecode` API to C#. Wait conditions were evaluated sample by
 sample through `Dictionary<int,int>`.
 
-`pipilogicanalyzer/sigrok/runtime.py` provides the same API directly in Python (`Decoder`, `wait`,
+`openscilab/sigrok/runtime.py` provides the same API directly in Python (`Decoder`, `wait`,
 `put`, `register`, `has_channel`, the `OUTPUT_*` constants). Conditions are evaluated in blocks
 with `numpy`, `wait()`/`wait({'skip': n})` additionally through an arithmetic fast path. Unmodified
 `pd.py` files of libsigrokdecode run as they do in PulseView.
@@ -71,7 +71,7 @@ with `numpy`, `wait()`/`wait({'skip': n})` additionally through an arithmetic fa
 | Channel names | Empty/whitespace only → channel number. | The same. |
 | Preview | The pin state is saved. | The visibility of the preview is saved with the window geometry. |
 | Exit | A running capture is aborted before closing. | `dispose()` sends the abort command. |
-| Driver debug log | `DEBUG_MODE` (compile switch) → `driver_debug.log`. | `logging` (`pipilogicanalyzer.driver`), written to the file with `--debug-driver`. |
+| Driver debug log | `DEBUG_MODE` (compile switch) → `driver_debug.log`. | `logging` (`openscilab.driver`), written to the file with `--debug-driver`. |
 | Decoders | Updated decoder set (including `mos6502`, `mcp230xx`, `max72xx`). | Run unmodified; `./decoders` in the project is loaded first. |
 
 Not taken over: the changed mouse wheel assignment (here wheel = zoom, `Ctrl` = scroll,

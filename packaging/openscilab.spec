@@ -1,0 +1,128 @@
+# -*- mode: python -*-
+"""PyInstaller build of the openSciLab application.
+
+    python -m pip install -r requirements.txt pyinstaller pillow
+    python packaging/make_icons.py build/icons
+    python -m PyInstaller packaging/openscilab.spec --noconfirm
+
+Creates dist/openSciLab/ (Windows: openSciLab.exe, Linux: openSciLab) or
+dist/openSciLab.app (macOS). The protocol decoders and the firmware images in
+firmware/uf2 (built with firmware/build_all.sh) are included.
+"""
+
+import glob
+import os
+import sys
+import tomllib
+
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
+ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))
+ICONS = os.path.join(ROOT, "build", "icons")
+
+with open(os.path.join(ROOT, "pyproject.toml"), "rb") as handle:
+    VERSION = tomllib.load(handle)["project"]["version"]
+
+#: Modules imported by the protocol decoders. The decoders are loaded at run time, so
+#: PyInstaller cannot see these imports (tests/test_packaging.py keeps the list complete).
+DECODER_MODULES = [
+    "binascii",
+    "calendar",
+    "collections",
+    "copy",
+    "ctypes",
+    "dataclasses",
+    "decimal",
+    "enum",
+    "functools",
+    "itertools",
+    "json",
+    "math",
+    "operator",
+    "os",
+    "platform",
+    "re",
+    "string",
+    "struct",
+    "subprocess",
+    "zlib",
+]
+
+
+def icon(name):
+    path = os.path.join(ICONS, name)
+    return path if os.path.exists(path) else None
+
+
+a = Analysis(
+    [os.path.join(SPECPATH, "launch.py")],
+    pathex=[ROOT],
+    # The libusb library of libusb-package for the DSLogic driver (loaded through ctypes).
+    binaries=collect_dynamic_libs("libusb_package"),
+    hiddenimports=DECODER_MODULES + ["libusb_package", "usb.backend.libusb1"],
+    excludes=["tkinter"],
+)
+
+# The application looks for decoders/, examples/ and firmware/uf2/ next to the openscilab package.
+decoders = Tree(os.path.join(ROOT, "decoders"), prefix="decoders", excludes=["__pycache__", "*.pyc"])
+# The simulator profiles (openscilab/driver/simulated/profiles.py: examples/sim/).
+templates = Tree(os.path.join(ROOT, "examples", "sim"), prefix=os.path.join("examples", "sim"))
+# the standard profiles, copied into the profiles folder (openscilab/core/profiles.py: examples/profiles/)
+templates += Tree(os.path.join(ROOT, "examples", "profiles"), prefix=os.path.join("examples", "profiles"))
+# the example library - the projects to start from (openscilab/lab/examples.py: examples/library/)
+templates += Tree(os.path.join(ROOT, "examples", "library"), prefix=os.path.join("examples", "library"),
+                  excludes=["__pycache__", "*.pyc", ".DS_Store"])
+firmware_images = [
+    (os.path.join("firmware", "uf2", os.path.basename(path)), path, "DATA")
+    for path in sorted(glob.glob(os.path.join(ROOT, "firmware", "uf2", "*.uf2")))
+]
+
+# License texts and credits travel with every binary (GPL section 4 and 6).
+notices = [
+    (name, os.path.join(ROOT, name), "DATA")
+    for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md", "CHANGELOG.md")
+    if os.path.exists(os.path.join(ROOT, name))
+]
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="openSciLab",
+    console=False,
+    icon=icon("openscilab.ico" if sys.platform.startswith("win") else "openscilab.icns"),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas + decoders + templates + firmware_images + notices,
+    name="openSciLab",
+)
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="openSciLab.app",
+        icon=icon("openscilab.icns"),
+        bundle_identifier="io.github.deckerjulian.openscilab",
+        version=VERSION,
+        info_plist={
+            "CFBundleName": "openSciLab",
+            "CFBundleDisplayName": "openSciLab",
+            "CFBundleShortVersionString": VERSION,
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "11.0",
+            "CFBundleDocumentTypes": [
+                {
+                    "CFBundleTypeName": "openSciLab capture",
+                    "CFBundleTypeRole": "Editor",
+                    "LSItemContentTypes": ["public.data"],
+                    "CFBundleTypeExtensions": ["lac"],
+                }
+            ],
+        },
+    )

@@ -1,0 +1,6 @@
+project: Save a capture
+description: Captures the SPI lines D10-D12 and writes the capture three times - as .lac (opens in the
+  data view), as .vcd (for other tools) and as .csv - into the data folder of the project.
+devices:
+  la: sim:free
+open: [flows/save.flow.yaml]

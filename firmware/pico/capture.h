@@ -1,0 +1,76 @@
+/*
+ * Copyright (C) Agustín Giménez Bernad (gusmanb), original LogicAnalyzer
+ * Copyright (C) 2026 Julian Decker
+ *
+ * Part of openSciLab, based on his LogicAnalyzer firmware;
+ * the changes are described in firmware/README.md.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include "board_settings.h"
+#ifndef __ANALYZER_CAPTURE__
+#define __ANALYZER_CAPTURE__
+
+#if defined(CORE_TYPE_2) //All RP2350 boards (Pico 2, Pico 2 W), not only BUILD_PICO_2
+#include <RP2350.h>
+#endif
+
+typedef enum
+{
+    MODE_8_CHANNEL,
+    MODE_16_CHANNEL,
+    MODE_24_CHANNEL
+
+} CHANNEL_MODE;
+
+bool StartCaptureSimple(uint32_t freq, uint32_t preLength, uint32_t postLength, uint16_t loopCount, uint8_t measureBursts, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPin, bool invertTrigger, CHANNEL_MODE captureMode);
+bool StartCaptureBlast(uint32_t freq, uint32_t length, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPin, bool invertTrigger, CHANNEL_MODE captureMode);
+#ifdef SUPPORTS_COMPLEX_TRIGGER
+bool StartCaptureComplex(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPinBase, uint8_t triggerPinCount, uint16_t triggerValue, CHANNEL_MODE captureMode);
+bool StartCaptureFast(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPinBase, uint8_t triggerPinCount, uint16_t triggerValue, CHANNEL_MODE captureMode);
+//Edge trigger that also drives the trigger output (trigger type 5)
+bool StartCaptureEdgeOut(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t triggerPin, bool invertTrigger, CHANNEL_MODE captureMode);
+//Channel groups on consecutive GPIOs usable by a pattern trigger, e.g. "0-20/21-23"
+void GetPatternTriggerGroups(char* buffer, uint32_t size);
+#endif
+//Simulated capture (trigger type 4): test signals instead of sampled pins
+bool StartCaptureSimulation(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, uint8_t pattern, CHANNEL_MODE captureMode);
+//Pattern test of the capture buffer (clears it afterwards)
+bool TestCaptureBuffer(uint32_t* failedOffset);
+//Stream capture: raw input words without end until StopCapture (testPattern: a counter instead)
+bool StartCaptureStream(uint32_t freq, const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode, bool testPattern);
+uint64_t StreamWrittenSamples();
+uint8_t* GetStreamBuffer(uint32_t* bufferSamples, uint8_t* bytesPerSample);
+//Bit of every captured channel in the stream samples, e.g. "0,1,2,24"
+void GetStreamSampleBits(char* buffer, uint32_t size);
+//Trigger sequence / state mode (trigger type 7): command 10 configures the stages and the clock,
+//the next capture request with trigger type 7 uses the configuration
+bool SetCaptureSequence(const uint8_t* data, uint32_t length);
+bool StartCaptureSequence(uint32_t freq, uint32_t preLength, uint32_t postLength, const uint8_t* capturePins, uint8_t capturePinCount, CHANNEL_MODE captureMode);
+//Evaluates the samples captured since the last call (main loop, while IsSequenceCapture())
+void SequenceCaptureStep();
+bool IsSequenceCapture();
+//Measures the speed of the sequence evaluation (once at start-up, uses the capture buffer)
+void InitSequenceCapture();
+//Highest sample rate of a capture with a trigger sequence; measuredRate: worst case measured
+uint32_t GetSequenceMaxRate(uint32_t* measuredRate);
+//Highest clock frequency of the state mode
+uint32_t GetStateMaxClock();
+void StopCapture();
+bool IsCapturing();
+uint8_t* GetBuffer(uint32_t* bufferSize, uint32_t* firstSample, CHANNEL_MODE* captureMode);
+volatile uint32_t* GetTimestamps(uint8_t* length);
+void check_fast_interrupt();
+//GPIOs of the running capture or stream: channels, trigger and clock inputs (0 if none runs)
+uint32_t GetCaptureGpioMask();
+//The whole capture memory (pattern buffer, digital samples, analog samples)
+uint8_t* GetCaptureMemory(uint32_t* size);
+//Region of the memory the next capture uses for its digital samples (not while one runs)
+bool SetCaptureRegion(uint32_t offset, uint32_t size);
+//Size of that region in bytes
+uint32_t GetCaptureBufferSize();
+//The running stream samples on the edges of a clock channel (command 10 with the state mode)
+bool IsStreamStateMode();
+
+#endif

@@ -8,22 +8,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from pipilogicanalyzer.driver.pico import multi
-from pipilogicanalyzer.driver.base import (
+from openscilab.driver.pico import multi
+from openscilab.driver.base import (
     CAPABILITY_EDGE_TRIGGER_OUT,
     DEFAULT_PATTERN_GROUPS,
     CaptureError,
     CaptureLimits,
 )
-from pipilogicanalyzer.driver.pico.protocol import COMPLEX_TRIGGER_DELAY, parse_pattern_groups
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.driver.pico.protocol import COMPLEX_TRIGGER_DELAY, parse_pattern_groups
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 
 #: Capabilities of the firmware of this project on a Pico board.
 NEW_FIRMWARE = (CAPABILITY_EDGE_TRIGGER_OUT, "PATTERN_GROUPS=0-20/21-23")
 
 
 class FakeDevice:
-    """Stands in for ``PiPiLogicAnalyzerDriver`` and records the capture requests."""
+    """Stands in for ``PicoDriver`` and records the capture requests."""
 
     def __init__(self, name: str, capabilities, started: list) -> None:
         self.name = name
@@ -61,7 +61,7 @@ def make_set(monkeypatch):
     def build(*capabilities):
         started: list = []
         devices = iter(FakeDevice(f"board{index + 1}", caps, started) for index, caps in enumerate(capabilities))
-        monkeypatch.setattr(multi, "PiPiLogicAnalyzerDriver", lambda _connection: next(devices))
+        monkeypatch.setattr(multi, "PicoDriver", lambda _connection: next(devices))
         driver = multi.MultiAnalyzerDriver([f"/dev/{index}" for index in range(len(capabilities))])
         driver.started = started  # type: ignore[attr-defined]
         return driver
@@ -181,8 +181,8 @@ def test_pattern_groups_of_the_set(make_set):
 def test_the_capture_dialog_offers_every_trigger_of_the_set(make_set, monkeypatch):
     from PySide6.QtWidgets import QApplication
 
-    from pipilogicanalyzer.core import settings
-    from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+    from openscilab.core import settings
+    from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(settings, "get_settings", lambda *args, **kwargs: None)

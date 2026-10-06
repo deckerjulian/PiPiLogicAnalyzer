@@ -1,0 +1,8 @@
+project: Remote control panel
+description: A panel for the remote climate station - a slider sets the heating power, a switch the
+  fan, a button calibrates the sensor; the panel shows temperature and humidity. Outputs are sent
+  a little ahead with the time they should take effect, so the station applies them on time.
+devices:
+  station: remote-sim:climate
+realtime: true
+open: [panels/control.panel.yaml, flows/control.flow.yaml]

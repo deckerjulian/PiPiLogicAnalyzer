@@ -1,0 +1,16 @@
+flow: Counter
+description: Captures the counter of the simulator and saves it.
+nodes:
+  sim: {type: device.instrument, address: sim:free}
+  cap:
+    type: device.capture
+    channels: [D0, D1, D2, D3, D8]
+    rate: 4 MHz
+    samples: 20000
+    trigger: {edge: rising, source: D8}
+  scope: {type: view.scope, title: Counter}
+  file: {type: data.file, path: counter.lac}
+edges:
+  - sim.device -> cap.device
+  - cap.capture -> scope.in
+  - cap.capture -> file.in

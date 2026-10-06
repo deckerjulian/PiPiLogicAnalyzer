@@ -1,0 +1,6 @@
+project: Sequence
+description: Steps without code - a sequence switches D13 on and off three times (on for 200 ms, off
+  for 100 ms), then sends 'done'. The monitor shows the pin.
+devices:
+  uno: sim:uno
+open: [flows/sequence.flow.yaml]

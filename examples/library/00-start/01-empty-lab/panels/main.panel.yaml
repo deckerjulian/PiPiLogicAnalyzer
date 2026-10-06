@@ -1,0 +1,4 @@
+panel: Main
+flow: ../flows/main.flow.yaml
+widgets:
+  hint: {kind: label, text: "Add widgets from the palette and bind them to ports of the flow."}

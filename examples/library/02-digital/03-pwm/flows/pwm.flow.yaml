@@ -1,0 +1,31 @@
+flow: PWM
+description: 'gpio.pwm starts the PWM, its ''done'' arms the capture of the same pin.'
+nodes:
+  uno: {type: device.instrument, at: [0, 112]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, duty: 0.25, at: [272, 136]}
+  capture: {type: device.capture, channels: [D9], rate: 100 kHz, samples: 448, at: [544, 96]}
+  frequency: {type: measure.frequency, at: [808, 152]}
+  duty: {type: measure.duty, at: [808, 264]}
+  frequency_check:
+    type: report.check
+    name: Frequency
+    expected: 1000
+    tolerance: 5
+    unit: Hz
+    at: [1080, 120]
+  duty_check:
+    type: report.check
+    name: Duty cycle
+    expected: 0.25
+    tolerance: 0.01
+    at: [1080, 296]
+  scope: {type: view.scope, title: D9, at: [808, 0]}
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> capture.device
+  - pwm.done -> capture.arm
+  - capture.D9 -> frequency.in
+  - capture.D9 -> duty.in
+  - frequency.out -> frequency_check.in
+  - duty.out -> duty_check.in
+  - capture.capture -> scope.in

@@ -1,0 +1,41 @@
+flow: Multi board
+description: One capture over both boards; dsp.math subtracts the times of the first rising edges.
+nodes:
+  pair: {type: device.instrument, at: [0, 200]}
+  capture:
+    type: device.capture
+    channels: [B1.GP12, B2.GP12, B1.GP10, B2.GP10]
+    rate: 10 MHz
+    duration: 3 ms
+    at: [272, 200]
+  f1: {type: measure.frequency, at: [544, 152]}
+  f2: {type: measure.frequency, at: [544, 488]}
+  edges1: {type: convert.edges, kind: rising, at: [544, 264]}
+  edges2: {type: convert.edges, kind: rising, at: [544, 376]}
+  skew:
+    type: control.python
+    inputs: [a, b]
+    outputs: [skew]
+    code: |
+      def on_input(ctx, port, value):
+          a, b = ctx.latest("a"), ctx.latest("b")
+          if a is not None and b is not None and len(a) and len(b):
+              ctx.emit("skew", signals.Scalar(name="skew", unit="s", value=float(b.times[0] - a.times[0]),
+                                              at=ctx.now()))
+    at: [808, 304]
+  show1: {type: view.number, title: Board 1 GP12, unit: Hz, at: [808, 136]}
+  show2: {type: view.number, title: Board 2 GP12, unit: Hz, at: [808, 512]}
+  show_skew: {type: view.number, title: Edge of board 2 after board 1, unit: s, at: [1080, 304]}
+  view: {type: view.scope, title: Both boards, at: [544, 0]}
+edges:
+  - pair.device -> capture.device
+  - capture.B1.GP12 -> f1.in
+  - capture.B2.GP12 -> f2.in
+  - capture.B1.GP12 -> edges1.in
+  - capture.B2.GP12 -> edges2.in
+  - edges1.out -> skew.a
+  - edges2.out -> skew.b
+  - f1.out -> show1.in
+  - f2.out -> show2.in
+  - skew.skew -> show_skew.in
+  - capture.capture -> view.in

@@ -1,0 +1,7 @@
+project: PWM sweep
+description: Steps the duty cycle of D9 from 0 to 100 % in five steps; after the RC low pass at A0 has
+  settled, A0 is read. The table and the XY chart show the voltage over the duty cycle - a straight
+  line up to 5 V.
+devices:
+  uno: sim:uno
+open: [flows/sweep.flow.yaml]

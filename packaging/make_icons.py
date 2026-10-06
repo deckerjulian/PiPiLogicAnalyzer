@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Julian Decker
 #
-# Part of PiPiLogicAnalyzer.
+# Part of openSciLab.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,7 +8,7 @@
 
     python packaging/make_icons.py build/icons
 
-The drawing is ``APP_ICON_SVG`` in ``pipilogicanalyzer/ui/icons.py``, the same icon the
+The drawing is ``APP_ICON_SVG`` in ``openscilab/ui/icons.py``, the same icon the
 running application uses for its windows. Needs PySide6 and Pillow.
 """
 
@@ -21,14 +21,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, ROOT)
 
-from pipilogicanalyzer import qt_plugins  # noqa: E402
+from openscilab import qt_plugins  # noqa: E402
 
 qt_plugins.ensure_loadable_plugins()
 
 from PIL import Image  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 
-from pipilogicanalyzer.ui.icons import render_app_icon  # noqa: E402
+from openscilab.ui.icons import render_app_icon  # noqa: E402
 
 PNG_SIZES = (16, 24, 32, 48, 64, 128, 256, 512, 1024)
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
@@ -39,13 +39,13 @@ def main(output: str) -> None:
     application = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841 - needed for painting
 
     for size in PNG_SIZES:
-        path = os.path.join(output, f"pipilogicanalyzer-{size}.png")
+        path = os.path.join(output, f"openscilab-{size}.png")
         if not render_app_icon(size).save(path, "PNG"):
             raise SystemExit(f"cannot write {path}")
 
-    largest = Image.open(os.path.join(output, "pipilogicanalyzer-1024.png"))
-    largest.save(os.path.join(output, "pipilogicanalyzer.ico"), sizes=ICO_SIZES)
-    largest.save(os.path.join(output, "pipilogicanalyzer.icns"))
+    largest = Image.open(os.path.join(output, "openscilab-1024.png"))
+    largest.save(os.path.join(output, "openscilab.ico"), sizes=ICO_SIZES)
+    largest.save(os.path.join(output, "openscilab.icns"))
     print(f"Icons written to {output}")
 
 

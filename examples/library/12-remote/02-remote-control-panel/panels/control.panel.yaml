@@ -1,0 +1,11 @@
+panel: Remote control panel
+flow: ../flows/control.flow.yaml
+columns: 4
+widgets:
+  heater: {kind: slider, bind: heater.value, title: Heating power, columns: 2, min: 0, max: 100, step: 5, unit: W, value: 0}
+  fan: {kind: switch, bind: fan.value, title: Fan, column: 2}
+  calibrate: {kind: button, bind: calibrate.trigger, title: Calibrate to 21 °C, column: 3}
+  temperature: {kind: number, bind: temperature.out, title: Temperature, row: 1, unit: °C, digits: 3}
+  humidity: {kind: number, bind: humidity.out, title: Humidity, row: 1, column: 1, unit: '%', digits: 3}
+  offset: {kind: number, bind: calibrate.result, title: Sensor offset, row: 1, column: 2, unit: °C}
+  chart: {kind: chart, bind: temperature.out, title: Temperature, row: 2, columns: 4, rows: 3, unit: °C}

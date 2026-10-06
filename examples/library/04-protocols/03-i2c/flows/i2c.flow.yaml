@@ -1,0 +1,13 @@
+flow: I²C
+description: decode.i2c with scl and sda; the addresses shown shifted (7 bit address and R/W bit).
+nodes:
+  la: {type: device.instrument, at: [0, 104]}
+  capture: {type: device.capture, channels: [D13, D14], rate: 16 MHz, samples: 64000, at: [272, 104]}
+  i2c: {type: decode.i2c, channels: {scl: D13, sda: D14}, address_format: shifted, at: [544, 0]}
+  frames: {type: view.table, title: I²C, at: [808, 16]}
+  scope: {type: view.scope, title: I²C, at: [544, 208]}
+edges:
+  - la.device -> capture.device
+  - capture.capture -> i2c.in
+  - capture.capture -> scope.in
+  - i2c.table -> frames.in

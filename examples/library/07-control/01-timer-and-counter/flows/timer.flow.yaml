@@ -1,0 +1,15 @@
+flow: Timer and counter
+description: control.timer -> control.counter -> dsp.math; the views show every value.
+nodes:
+  timer: {type: control.timer, interval: 100 ms, count: 10, at: [0, 184]}
+  count: {type: control.counter, at: [272, 184]}
+  square: {type: dsp.math, expression: a ** 2, at: [544, 0]}
+  chart: {type: view.strip_chart, title: Count squared, window: 2 s, at: [808, 0]}
+  show: {type: view.number, title: Count, at: [544, 352]}
+  check: {type: report.check, name: Ticks, low: 1, high: 10, at: [544, 192]}
+edges:
+  - timer.tick -> count.in
+  - count.count -> square.a
+  - count.count -> show.in
+  - count.count -> check.in
+  - square.out -> chart.in

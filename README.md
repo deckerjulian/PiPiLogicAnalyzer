@@ -1,561 +1,216 @@
-# PiPiLogicAnalyzer
+<img src="docs/images/openscilab-logo.svg" alt="" width="96" align="right">
 
-For an upcoming Commodore 64 project I wanted to debug right at the 6502 bus, and a logic analyzer
-is the tool for that. The C64 keeps a lot of lines busy, though: 16 address lines, 8 data lines and
-a handful of control signals. Anything useful therefore starts at around 24 channels, and
-affordable analyzers with that many channels are hard to come by. Luckily I came across the
-[LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín Giménez Bernad (gusmanb), a
-clever and inexpensive design built around Raspberry Pi Picos. It gave me exactly the hardware I
-needed, so instead of starting from scratch I built on his project and extended the software and
-the firmware for what I had in mind.
+# openSciLab
 
-PiPiLogicAnalyzer is the result: software and firmware for the RP2040/RP2350 based logic analyzer,
-with a cross-platform Python/Qt application for Windows, macOS and Linux and an extended firmware
-for the Raspberry Pi Pico, Pico 2, Pico W, Pico 2 W, RP2040-Zero and the LogicAnalyzer Interceptor.
+**openSciLab** is an open measurement and control lab for the desk: connect several instruments
+at once, capture, process, check and generate signals in **flows** – drawn in an editor or written
+in Python –, operate them from **panels**, write **reports**, and try all of it with **simulated
+instruments** before any hardware is connected. It grew out of *PiPiLogicAnalyzer*, a logic
+analyzer for Raspberry Pi Pico boards; the logic analyzer is still there, complete, as the *data
+view* of the lab. Windows, macOS and Linux; GPL-3.0.
 
-![Main window](docs/images/main-window.png)
+> **Beta (0.1).** The application is covered by about 2000 automated tests and every function
+> works with the simulators. Much of the new firmware (Pico protocol 8, the Arduino firmware, the
+> Rigol bridge) has **not been checked on real hardware yet**. Reports of what works on your
+> hardware, and what does not, are very welcome.
 
-## Credits
+![A flow that sweeps a PWM duty cycle and measures the voltage behind an RC low pass](docs/images/flow-editor.png)
 
-This project is built on the **[LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by
-Agustín Giménez Bernad (gusmanb)**. The hardware design, the capture firmware and the original
-C#/Avalonia software are his work; PiPiLogicAnalyzer starts from his version 6.5 (branch
-`version/v6_5`, commit `3fa3703`) and extends it. Many thanks to Agustín for creating this
-remarkable open hardware logic analyzer and for sharing it under the GNU GPL, which makes a
-project like this possible. If you build or use the hardware, please visit and support the
-[original project](https://github.com/gusmanb/logicanalyzer).
+## What it does
 
-The protocol decoders come from the [sigrok](https://sigrok.org) project
-([libsigrokdecode](https://github.com/sigrokproject/libsigrokdecode)) and from the decoder set of
-LogicAnalyzer 6.5. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for all components
-and licenses.
+* **Instruments side by side.** Pico boards, Arduino boards, DreamSourceLab DSLogic analyzers, a
+  Rigol DHO900 oscilloscope, measuring devices on other computers and simulators – each with a
+  device card for its pins, signals, timing and details. What openSciLab offers follows from what
+  a device reports it can do.
+* **Flows.** Nodes for devices, GPIO, generators, every sigrok protocol decoder, measurements,
+  signal processing, control (timers, sweeps, sequences, state machines, Python), data, views and
+  reports, wired in a visual editor. A flow is a `*.flow.yaml` file (also written in Python) and
+  runs in real time or in a deterministic virtual time.
+* **Panels** with switches, sliders, numbers, LEDs, charts and scopes bound to a flow – a measuring
+  station of your own, also full screen.
+* **The logic analyzer** (*data view*): captures with triggers and trigger sequences, streams,
+  analog channels and state captures, sigrok decoders, cursors, measurements, search, buses,
+  comparison with a reference, sample editing – and a C64/6502 bus decoder with disassembly.
+* **Signal generation**: waveforms, arbitrary points, digital patterns, UART/SPI/I²C frames, and
+  captures played back on an output.
+* **Time**: samples of different instruments on one time axis – sync signals, latency
+  measurement, clock drift, NTP/PTP.
+* **Reports** in HTML or PDF with passed and failed checks; `openscilab run --report` makes a flow a
+  test on the command line.
+* **Simulators** that behave like the real devices – with their limits, wiring, faults and USB
+  timing – and can be told what to simulate: a UART, SPI, I²C, a counter, the C64 bus, a capture
+  file.
 
-## What PiPiLogicAnalyzer adds
+![The data view with a Commodore 64 capture, decoded and disassembled](docs/images/data-view.png)
 
-Compared with LogicAnalyzer 6.5:
+## Supported devices
 
-* **Runs everywhere:** a Python/Qt application with ready-to-run builds for Windows, macOS
-  (Apple Silicon and Intel) and Linux. It reads and writes the same `.lac` files. The
-  application works with the firmware it comes with (see
-  [Installing the firmware](#installing-the-firmware)); a board with another firmware is
-  updated when it is connected.
-* **Complete capture workflow:** find, connect, configure, capture, abort and repeat, over USB,
-  WiFi and as a multi device set of 2 to 5 cascaded analyzers.
-* **Fast display:** 1,000,000 samples × 24 channels are drawn in about 20 ms per frame (see
-  [Performance](#performance)); decoders run on a worker thread.
-* **Protocol decoders:** the unmodified `pd.py` decoders of libsigrokdecode run natively in
-  Python, including stacked decoders, options and automatic channel assignment by name.
-* **Firmware tools:** install or update the firmware from the application, board self-test,
-  simulated captures generated by the board, and detailed device information.
-* **Improved firmware:** many bug fixes and new commands, turbo mode off by default (see
-  [firmware/README.md](firmware/README.md)).
-* **Stream captures over USB:** with the firmware of this project a board streams its samples
-  while capturing, shown live, for as long as wanted or *until stopped* (keeping the latest
-  samples). USB full speed limits the rate to 800 kHz with 8 channels, 400 kHz with 16 and
-  200 kHz with 24; the buffer mode keeps its 100/200 MHz. The stream starts at once, without a
-  trigger, and needs USB (not WiFi, not a multi device set). *Record to disk* makes it as long
-  as the free disk space allows (about 23 GB per hour at 800 kHz × 8 channels).
-* **DreamSourceLab DSLogic:** the DSLogic Plus, U2Pro16, U3Pro16 and U3Pro32 can be used as well, see
-  [DreamSourceLab DSLogic](#dreamsourcelab-dslogic) (experimental).
-* **Sample editor:** cut, copy, paste, delete, shift channels, regions, measurements, and
-  samples created with the *Signal Description Language*.
-* **Analysis tools** (see [Analysis](#analysis)): cursors A/B with time and frequency, statistics
-  of every channel, setup and hold times, search for edges, patterns, pulse widths, gaps, bus
-  values and decoder output, buses with symbol tables, a listing of every change, charts and
-  histograms, comparison with a reference capture and state analysis on a clock channel.
-* **Trigger sequences:** up to 8 stages of patterns, edges, pulse widths and gaps with counts and
-  time limits, evaluated by the application on a stream (any device that streams), or by the
-  board where the firmware supports it.
-* **Profiles** as in 6.5, plus export and import as JSON files.
-* **Export** to CSV, VCD (GTKWave) and sigrok sessions `.sr` (PulseView, also opened), decoder
-  output as CSV or JSON, and gzip-compressed `.lac.gz` files.
-* **Command line and Python API** for scripted captures, decoding and conversion, see
-  [docs/cli.md](docs/cli.md).
+| Device | Connection | What openSciLab does with it | State |
+| --- | --- | --- | --- |
+| Raspberry Pi Pico, Pico 2, Pico W, Pico 2 W, RP2040-Zero, LogicAnalyzer Interceptor | USB, WiFi; openSciLab Pico firmware | 24 channel logic analyzer (100 MHz, 200 MHz with *Turbo*), streams, trigger sequences, state mode, 2–5 boards as one analyzer; GPIO, PWM, pulses, ADC, monitor, pattern generator, UART/SPI/I²C | version 8 not yet tried on hardware (the 7.x capture firmware it extends is in use) |
+| Arduino Uno, Nano, Mega 2560, Uno R4 Minima, ESP32, ESP32-S3 | USB; openSciLab Arduino firmware | logic analyzer of its pins (buffer, stream, state), analog inputs, GPIO, PWM, monitor, pattern/square/arbitrary generator, UART/SPI/I²C | not yet tested on hardware |
+| DreamSourceLab DSLogic Plus, U2Pro16, U3Pro16, U3Pro32 | USB; DSView firmware | logic analyzer up to 1 GHz, streams, record to disk | experimental, tested on a U2Pro16 |
+| Rigol DHO900 (DHO924S ...) | network: SCPI, or the bridge app on the instrument | 4 analog and 16 logic channels, large captures arriving progressively, generator | not yet tested on the instrument |
+| Measuring devices on other computers | network; Python package `openscilab_device` | values, streams, outputs and commands with their time | beta |
+| Simulators (`sim:free`, `sim:uno`, `sim:uno_r4`, `sim:pico`, `sim:daq`, `sim:dho924s`, `remote-sim:…`) | built in | everything above, several at once, wired together | ready |
 
-The bugs fixed in the application are listed in [docs/improvements.md](docs/improvements.md),
-all changes in the [changelog](CHANGELOG.md).
+New devices are added as drivers or as plugins that need no change of openSciLab, see
+[docs/drivers.md](docs/drivers.md).
 
-## Downloads
+## Getting started
 
-Ready-to-run builds are published under
-[Releases](https://github.com/deckerjulian/PiPiLogicAnalyzer/releases). Every push to `main`
-updates the pre-release
-[**latest-build**](https://github.com/deckerjulian/PiPiLogicAnalyzer/releases/tag/latest-build);
-tagged versions (for example `v7.0.0`) are regular releases.
+### Download
+
+Ready-to-run builds are under [Releases](https://github.com/deckerjulian/openSciLab/releases); every
+push to `main` also updates the pre-release
+[*latest-build*](https://github.com/deckerjulian/openSciLab/releases/tag/latest-build).
 
 | System | File | How to start |
 | --- | --- | --- |
-| Windows (x64) | `PiPiLogicAnalyzer-<version>-windows-x64.zip` | unzip, run `PiPiLogicAnalyzer\PiPiLogicAnalyzer.exe` |
-| macOS (Apple Silicon) | `PiPiLogicAnalyzer-<version>-macos-arm64.dmg` | open, drag `PiPiLogicAnalyzer.app` to *Applications* |
-| macOS (Intel) | `PiPiLogicAnalyzer-<version>-macos-x64.dmg` | as above (tagged releases only) |
-| Linux (x86_64) | `PiPiLogicAnalyzer-<version>-linux-x86_64.AppImage` | `chmod +x` and run; or unpack the `.tar.gz` |
-| Firmware | `PiPiLogicAnalyzer_<BOARD>[_Turbo].uf2`, all in `PiPiLogicAnalyzer-firmware-uf2.zip` | see [Installing the firmware](#installing-the-firmware) |
+| Windows (x64) | `openSciLab-<version>-windows-x64.zip` | unzip, run `openSciLab\openSciLab.exe` |
+| macOS (Apple Silicon) | `openSciLab-<version>-macos-arm64.dmg` | open, drag `openSciLab.app` to *Applications* |
+| macOS (Intel) | `openSciLab-<version>-macos-x64.dmg` | as above (tagged releases only) |
+| Linux (x86_64) | `openSciLab-<version>-linux-x86_64.AppImage` | `chmod +x` and run; or unpack the `.tar.gz` |
+| Firmware | `openSciLab-firmware-pico-uf2.zip`, `openSciLab-firmware-arduino.zip`, `openSciLab-bridge.apk` | installed from the application, see [Firmware](https://github.com/deckerjulian/openSciLab/wiki/Firmware) |
 
-The applications include Python, Qt, the protocol decoders and all firmware images; nothing
-else has to be installed, and *Device → Install or update firmware…* offers the images directly.
-`SHA256SUMS.txt` lists the checksums, `LICENSE.txt` and `THIRD_PARTY_NOTICES.md` the licenses.
+The applications include Python, Qt, the protocol decoders and the Pico firmware images. They are **not
+code-signed**: on Windows choose *More info → Run anyway*, on macOS right-click → *Open* on the
+first start (or `xattr -dr com.apple.quarantine /Applications/openSciLab.app`), on Linux add
+yourself to the `dialout` group for serial ports. Details in the wiki under
+[Installation](https://github.com/deckerjulian/openSciLab/wiki/Installation).
 
-The builds are **not code-signed**:
+### First steps
 
-* **Windows:** SmartScreen reports an unknown publisher → *More info* → *Run anyway*.
-* **macOS:** right-click the app → *Open* on the first start, or run
-  `xattr -dr com.apple.quarantine /Applications/PiPiLogicAnalyzer.app`.
-* **Linux:** add your user to the `dialout` group for the serial port
-  (`sudo usermod -aG dialout $USER`, then log in again). Without FUSE, start the AppImage with
-  `--appimage-extract-and-run`; Qt needs `libxcb-cursor0` among others.
+![The start page](docs/images/start-page.png)
 
-## Automatic builds
+openSciLab opens on the start page. *Try a simulator* connects a simulated Arduino, Pico or
+oscilloscope, *Connect a device* lists the boards on USB and in the network, and below them every
+example project is a tile – each opens as a temporary project to start from, and all of them run
+with simulators. *Start a project* holds the plain starting points: an empty lab, the logic
+analyzer, data acquisition, synchronized instruments and a remote measuring device. The
+[wiki](https://github.com/deckerjulian/openSciLab/wiki/Getting-started) walks through a first
+measurement.
 
-The workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) runs on GitHub
-Actions:
-
-| Event | Tests | Firmware | Applications | Published as |
-| --- | --- | --- | --- | --- |
-| Pull request | ✓ | – | – | – |
-| Push to `main` | ✓ | only if `firmware/` or the workflow changed, otherwise the images of *latest-build* are reused | Windows, macOS (Apple Silicon), Linux | pre-release *latest-build* |
-| Tag `v*` | ✓ | ✓ | Windows, macOS (Apple Silicon and Intel), Linux | release |
-| Manual run (*Actions → Build → Run workflow*) | ✓ | ✓ | all | artifacts only |
-
-A push that changes documentation alone starts no run; pull requests always run the tests. Every
-packaged application is started once with
-`--smoke-test` before it is uploaded.
-
-## Creating a release
-
-1. Set the new version in `pyproject.toml` and `pipilogicanalyzer/__init__.py`, and in
-   `firmware/PiPiLogicAnalyzer/CMakeLists.txt` in `pico_set_program_version`. If the firmware
-   changed in a way hosts should notice, also raise `FIRMWARE_VERSION` in the same file (it is
-   the `V<major>_<minor>` the firmware reports, and every board of a multi device set has to
-   carry the same one).
-2. Add a section `## [<version>] - <date>` to [CHANGELOG.md](CHANGELOG.md); it becomes the
-   release notes.
-3. Commit and push to `main`, then tag and push the tag:
-
-   ```bash
-   git tag -a v7.0.0 -m "PiPiLogicAnalyzer 7.0.0"
-   git push origin v7.0.0
-   gh run watch        # optional: follow the build
-   ```
-
-The workflow checks that the tag matches both version numbers and the changelog, builds the
-firmware and all applications and creates the release with all files. If the build fails,
-fix the problem, delete the tag (`git push --delete origin v7.0.0` and `git tag -d v7.0.0`)
-and tag again. A test build without a release: `gh workflow run build.yml`.
-
-## Running from source
+### From source
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
-pipilogicanalyzer                      # or: python -m pipilogicanalyzer
+openscilab                         # the application (also: python -m openscilab)
+openscilab run examples/flows/counter.flow.yaml --fast   # a flow without the window
+openscilab-cli --help              # captures, decoding and conversion on the command line
 ```
 
-Requirements: Python ≥ 3.10, PySide6-Essentials, NumPy, pyserial. On Linux, Qt additionally needs
-the system libraries `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3`.
-
-```bash
-pipilogicanalyzer capture.lac                 # open a file on start-up
-pipilogicanalyzer --decoders /path/to/decoders
-pipilogicanalyzer --debug-driver              # log to driver_debug.log in the settings directory
-```
-
-**macOS with iCloud Drive:** if the project lives in a synced folder ("Desktop & Documents"),
-iCloud sets the `hidden` flag on the files in `.venv` (visible with `ls -lO`) and restores it
-after `chflags nohidden`. Qt skips hidden plugins and would stop with *Could not find the Qt
-platform plugin "cocoa"*. The application detects this and loads the plugins from a copy in
-`~/Library/Caches/PiPiLogicAnalyzer/qt-plugins`. Cleaner is a virtual environment iCloud ignores,
-e.g. `python -m venv .venv.nosync && ln -s .venv.nosync .venv`.
-
-Building the packaged application yourself (on the target operating system):
-
-```bash
-python -m pip install -r requirements.txt pyinstaller pillow
-python packaging/make_icons.py build/icons
-python -m PyInstaller packaging/pipilogicanalyzer.spec --noconfirm   # → dist/
-```
-
-## Protocol decoders
-
-The sigrok decoders are in the `decoders` folder and included in the packaged applications.
-They are searched in this order; for decoders with the same id the first one wins:
-
-1. paths given with `--decoders` (repeatable)
-2. the environment variable `PIPILOGICANALYZER_DECODERS` (separated by `:` or `;`)
-3. `./decoders` in the working directory
-4. `decoders` in the project directory (next to the `pipilogicanalyzer/` package)
-5. `decoders` inside the installed `pipilogicanalyzer` package (the packaged applications)
-6. `<settings directory>/decoders`
-7. system paths of libsigrokdecode (`/usr/share/libsigrokdecode/decoders`, PulseView on
-   Windows, Homebrew on macOS)
-
-The decoder set of LogicAnalyzer 6.5 (including `mos6502`, `mcp230xx`, `max72xx`) can be
-refreshed from the original repository:
-
-```bash
-git clone --depth 1 --branch version/v6_5 https://github.com/gusmanb/logicanalyzer /tmp/la
-cp -R /tmp/la/Software/decoders/. ./decoders/
-```
-
-*Help → Decoder search paths* shows the searched directories and the number of loaded decoders.
-
-Click the name of an annotation row (or double-click an annotation) to open the row as a list in a
-window of its own, e.g. to read the disassembly of the C64 bus decoder. The list shows sample, time
-relative to the trigger, duration, type and value; it can be filtered and copied (*Copy values*
-gives a plain listing). Selecting an entry shows it in the waveform, and hovering an annotation in
-the waveform selects its entry.
-
-### C64 bus decoder
-
-`c64bus` decodes the 6510 bus cycles of a Commodore 64 captured at the expansion port (profile
-`examples/c64-expansion-port-profile.json`): reads and writes with address and data, the memory
-region, control lines and a disassembly of the executed code.
-
-* **Read point:** the 6510 takes the data at the falling edge of Φ2. The decoder reads address,
-  data and R/W at the last sample before that edge (option *Read the bus*, plus *Read offset* in
-  samples). Cycles whose lines change one sample before or after the read point are marked
-  `(unstable: A5 A9)` and listed in the *Warnings* row: the capture is too coarse there, record at
-  a higher sampling rate or take Φ2 from the same board as the bus.
-* **Disassembly:** the 6510 has no SYNC output, so the decoder follows the program flow. It
-  synchronises on a RESET/IRQ/NMI vector fetch or on three consistent instructions in a row,
-  checks the operand reads, follows branches, jumps, `JSR`/`RTS`/`RTI` and interrupt sequences and
-  synchronises again when a prediction fails. Undocumented opcodes are shown as such. Cycles taken
-  by the VIC (BA low) are skipped.
-* In PulseView the decoder reads at the edge, because libsigrokdecode cannot look back one sample.
-
-### Triggering a multi device set
-
-Connect the trigger output of one board to the trigger input of the others (Pico: GPIO 0 → GPIO 1).
-On every board both pins are linked, so the trigger pins of all boards form one line. The board of
-the trigger channel evaluates the trigger and starts the other boards through this line:
-
-* **Pattern:** on any board, up to 16 channels (5 with fast matching) on consecutive trigger inputs
-  of that board, e.g. channels 1–21 or 22–24 of a Pico board. Firmware that does not report its
-  groups (older than version 7.1) allows channels 1–16. A pattern cannot span two boards.
-* **Edge on a channel:** on every board whose firmware drives the trigger output on an edge (the
-  firmware of this project); the capture dialog only lists these channels.
-* **External trigger (every board):** the trigger signal goes to the trigger input of every board
-  and each board waits for the edge itself, so all boards start together without a trigger delay.
-  The trigger input is a 3.3 V GPIO: use a level shifter or a voltage divider for 5 V signals.
-
-Blast mode and bursts are not available for a set, and the board evaluating the trigger has to
-capture at least one channel.
-
-### Aligning the boards of a multi device set
-
-The other boards are triggered through the trigger line. The driver compensates the fixed delay of
-the trigger, but a slave can still start a sample early or late, and the crystals of the boards
-drift apart by a few samples over a full buffer. After every multi device capture, and with
-*Capture → Align boards* for captures opened from files, the application corrects this:
-
-* **Reference line (exact):** connect one signal of a slave board also to a free input of the
-  master and name it like the slave channel plus ` ref`. The C64 profile uses `A0 (Y) ref` on CH15
-  of board B for A0 of board A. Offset and drift are measured from both copies.
-* **Clock (estimate):** without a usable reference line, the offset is estimated from a clock
-  channel on the master (`Φ2`, `PHI2`, `CLK` or `clock`): address lines of a synchronous bus only
-  change after the falling clock edge, so the slave is moved by the smallest amount that removes
-  changes from the two samples before the edges.
-
-After a capture the reference line is used when it is available. The status bar and the row
-*Alignment* in the capture information name the method and the correction, e.g.
-`board 2 moved by -1 samples (reference A0 (Y) ref)`. *Capture → Align boards* measures again on
-the samples as captured; when several methods are possible, it lets you choose one of them or
-leave a board unchanged.
-
-## Analysis
-
-The toolbar holds the settings of the next capture: sample rate, length and the trigger (a click
-opens all settings); **Start** (F5) captures at once, the icons next to it repeat the last capture
-and open the search, the measurements, the listing and the panels. Zoom and channel height are
-in the bar below the waveform. The panels on the right and the listing
-below the waveform (*View → Listing*, Ctrl+2) can be moved, closed and reopened.
-
-* **Cursors:** drag *A* and *B* on the time axis, or press A / B with the pointer over the
-  waveform. *Measure* (Ctrl+M) shows Δt, 1/Δt, the level of every channel at both cursors and the
-  edges between them, and statistics of every channel over the whole capture, the view or the
-  span between the cursors (frequency, duty cycle, shortest and longest pulses), plus the setup
-  and hold time of a data channel around the edges of a clock.
-* **Markers:** M sets a named marker at the pointer; *Markers* lists them with the regions.
-* **Search** (Ctrl+F, F3 / Shift+F3): edges, patterns with don't-cares (`10X1`), pulses of a
-  width range (`1 µs` to `2 µs`), gaps without edges, bus values (`==`, `<`, `in` …) and text
-  of the decoder output. Every match is marked in the waveform.
-* **Buses and groups** (*Analyze → New bus*): several channels shown as one value in hex,
-  decimal, signed, binary or ASCII, with a symbol table (`NAME = 0x1F`, `$D020 NAME`, CSV);
-  saved with the capture.
-* **Listing:** every change of the channels and buses as a table, or the decoder output,
-  following the view; a click marks the sample in the waveform.
-* **Charts and histograms:** a bus value over time; histograms of pulse widths, periods and bus
-  values.
-* **Compare with a reference:** finds the offset between two captures and marks every
-  difference (with a tolerance for edge jitter), as search matches or regions.
-* **State analysis:** resamples a capture on the edges of a clock channel, like an analyzer
-  clocked by the device under test, optionally only while qualifier channels match. It suggests
-  the edge and read offset at which the other lines are stable (on a C64 the falling edge of
-  Φ2); *Back to the timing capture* returns to the original. Decoders that follow the clock
-  themselves, such as the C64 bus, run on the timing capture.
-
-### Trigger sequences
-
-Choose *Sequence* in the capture settings: each stage waits for a pattern, an edge, a pulse of a
-width range or a gap without edges on a channel, a number of times, optionally within a time
-after the previous stage (else the sequence starts over). The capture triggers when the last
-stage completes. On devices that stream, *Evaluate the trigger in the application* looks for any
-trigger in the stream, also on the Pico boards whose streams have no trigger of their own; the
-samples before the trigger are kept from the stream.
-
-## Profiles
-
-A profile stores capture settings (channels with names and colours, frequency, samples,
-trigger, bursts) together with the decoder configuration. All profiles are kept in
-`<settings directory>/profiles.json`.
-
-* **Menu *Profiles*:** *Save current settings as profile…* stores the loaded capture (or the
-  last used capture settings) with the decoders. Every profile has *Load*, *Edit…* (name, notes,
-  capture settings and decoders) and *Delete*.
-  Loading applies the decoders immediately; the capture settings apply to the next capture.
-  *Export profiles…* / *Import profiles…* exchange all profiles as a JSON file.
-* **Capture dialog, button *Profiles*:** save the current settings as a profile, export them
-  to a file, import them from a file, or apply a stored profile.
-
-Profile files of this application, single capture settings and the `profiles.json` of the
-original 6.5 software (including its decoder tree) can be imported.
-
-## Testing the board
-
-Neither test needs connected signals.
-
-* ***Device → Self-test…*** (the *Self-test* tab of *Device information*) checks the connected
-  board: capture buffer, trigger link,
-  every channel input using the internal pull resistors, a real capture through PIO/DMA in
-  normal and blast mode, and a stream of a test counter over USB at the highest stream rate.
-  See [firmware/README.md](firmware/README.md#self-test-and-simulation).
-* ***Capture → Simulated capture…*** records test signals: a counter, a walking bit, or UART,
-  SPI and I2C carrying the text "PiPiLogicAnalyzer". With this firmware the board generates the
-  signals and transfers them like a real capture, which tests the firmware, USB/WiFi and the
-  application. Without a board the application computes the same
-  signals. For the protocol pattern the matching UART, SPI and I2C decoders are added on request.
-
-## Installing the firmware
-
-While no analyzer is connected, the application looks for Raspberry Pi boards without the
-PiPiLogicAnalyzer firmware every two seconds: boards in bootloader mode (drive `RPI-RP2` or
-`RP2350`) or running other firmware such as MicroPython. A banner with *Install firmware…*
-appears when one is found.
-
-Every version of the application works only with the firmware it comes with (the firmware
-reports its protocol version when it is identified). Connecting a board with an older or the
-original firmware offers *Update firmware…* instead; after the update it connects as usual.
-
-*Device → Install or update firmware…*:
-
-1. Select the board. The list shows the installed firmware version and Pico model of every
-   analyzer. If the board is not in bootloader mode, *Restart into bootloader* restarts it;
-   alternatively hold BOOTSEL while plugging it in.
-2. Select the image. The list shows the images built with `firmware/build_all.sh` in
-   `firmware/uf2/` (the packaged applications include all images) with the board and the firmware
-   version they contain, e.g. *Raspberry Pi Pico 2 - 7.1 PiPiLogicAnalyzer_BOARD_PICO_2.uf2*, so the
-   version can be compared with the one installed on the board. *Browse…* accepts any other `.uf2`
-   file. Images for a different chip (RP2040/RP2350) cannot be flashed.
-3. *Flash firmware* copies the image to the drive. As soon as the analyzer appears as a serial
-   port, it is selected in the device list.
-
-*Device → Device information…* shows what is known about the connected device and can be
-copied with *Copy to clipboard*:
-
-* board, build setting, firmware version and microcontroller;
-* with the firmware of this project also chip revision, boot ROM, unique board ID, flash size,
-  Pico SDK version, build date, system clock, turbo mode and WiFi;
-* the USB data of the port: VID:PID, manufacturer, product, serial number;
-* the capture limits.
-
-## DreamSourceLab DSLogic
-
-Besides its own hardware, PiPiLogicAnalyzer drives the USB logic analyzers **DSLogic Plus**,
-**DSLogic U2Pro16**, **DSLogic U3Pro16** and **DSLogic U3Pro32** of DreamSourceLab. The driver follows the open source
-DSLogic driver of [DSView](https://github.com/DreamSourceLab/DSView) (GPL) and needs the board
-firmware of current DSView versions (protocol version 2), which the boards start from their own
-memory; a board with older firmware is updated by connecting it once to DSView. It has been
-tested on a U2Pro16; the other models have not been tested on hardware yet, reports with the log of
-`pipilogicanalyzer --debug-driver` are welcome.
-
-* **Connecting:** a connected DSLogic appears in the device list with its model, USB speed and
-  bus position. *Connect* loads the FPGA of the board.
-* **FPGA bitstream:** the FPGA design of the DSLogic is not open source, so its bitstreams
-  (`DSLogicPlus.bin`, `DSLogicU2Pro16.bin`, `DSLogicU3Pro16.bin`, `DSLogicU3Pro32.bin`) are not part of
-  PiPiLogicAnalyzer. They are taken from an installed DSView (its `res` folder is found in the
-  usual places). Without DSView the application asks: choose the `res` folder, or download the
-  file once from the DSView repository on GitHub (a fixed version, checked by its SHA-256) into
-  the settings directory.
-* **Capture settings:** the rates of the device (up to 400 MHz on the Plus, 1 GHz on the U2Pro16
-  and the U3 models) are offered in a list that depends on the selected channels, as in DSView:
-
-  | Model | Buffer (device memory) | Stream (over USB) |
-  | --- | --- | --- |
-  | DSLogic Plus (256 Mbit) | 100 MHz with channels 1–16, 200 MHz with 1–8, 400 MHz with 1–4 | 20 MHz with 16, 25 MHz with 12, 50 MHz with 6, 100 MHz with 3 channels |
-  | DSLogic U2Pro16 (4 Gbit) | 500 MHz with channels 1–16, 1 GHz with 1–8 | USB 2: 20 MHz with 16, 25 MHz with 12, 50 MHz with 6, 100 MHz with 3 channels |
-  | DSLogic U3Pro16 (2 Gbit) | 500 MHz with channels 1–16, 1 GHz with 1–8 | USB 3: 125 MHz with 16, 250 MHz with 12, 500 MHz with 6 channels, 1 GHz with 3 of channels 1–8; USB 2: 20–100 MHz |
-  | DSLogic U3Pro32 (2 Gbit) | 250 MHz with channels 1–32, 500 MHz with 1–16, 1 GHz with 1–8 | USB 3: 50 MHz with 32, 100 MHz with 30, 250 MHz with 12 channels, …; USB 2: 10–100 MHz |
-
-  *Buffer* keeps the capture in the memory of the analyzer (the memory is shared by the enabled
-  channels); *Stream* sends the samples over USB while capturing and allows longer captures at
-  lower rates. A stream is shown while it runs, following its end (zoom or scroll back at any
-  time); *Stop* keeps the samples received so far, and the decoders run when it ends. With
-  *Until stopped* a stream runs until *Stop* (up to 2³⁶ samples, about an hour at 20 MHz) and
-  keeps only its latest samples, as many as the sample count says; older ones are dropped.
-  *Record to disk* keeps a stream in memory-mapped files instead of memory: the operating system
-  holds only the parts in use in RAM, and the limit is the free disk space less 4 GB (an endless
-  stream uses half of it) instead of about one billion samples. At 20 MHz × 16 channels that is
-  320 MB/s, about 19 GB per minute. The files are deleted with the capture; decoders then run
-  on request, and captures larger than the memory limit cannot be saved or exported yet. A disk
-  that fills up stops the stream, keeping what arrived. The input
-  threshold (0–5 V, default 1.0 V) is set in the same dialog. A capture holds at most about one
-  billion samples over all channels, the memory the application needs.
-* **Triggers:** an edge on any channel, a level pattern on consecutive channels, or none (the
-  capture starts at once). Blast mode and bursts are features of the PiPiLogicAnalyzer hardware
-  and are not offered for the DSLogic.
-* **Self-test** (*Device* menu, a tab of *Device information*): the FPGA captures its internal
-  test counter instead of
-  the inputs, which checks the capture memory, the USB transfer in buffer and stream mode (at the
-  highest stream rate of 16 channels) and the pattern and edge triggers bit by bit, without any
-  signal. It also lists the firmware, the FPGA, the USB speed and the security check of the board,
-  and reports every input that does not read low: disconnect the probes before running it.
-* **Permissions:** on Linux install [the udev rule](packaging/linux/60-dslogic.rules)
-  (`sudo cp packaging/linux/60-dslogic.rules /etc/udev/rules.d/`, then reconnect the analyzer).
-  On Windows the WinUSB driver installed with DSView is used; without DSView install WinUSB for
-  the device with [Zadig](https://zadig.akeo.ie). DSView and PiPiLogicAnalyzer cannot use the
-  analyzer at the same time.
-
-## Example without hardware
-
-The repository contains a synthetic capture (I2C, UART, clock):
-
-```bash
-pipilogicanalyzer examples/demo.lac
-```
-
-Then press *Add decoder…* on the right, add `I2C` (SCL → channel 1, SDA → channel 2) and
-stack for example `eeprom24xx` on top. `python tools/make_demo_capture.py` recreates the file.
-
-`examples/c64-demo.lac` shows a Commodore 64 captured at the expansion port with the profile
-`c64-expansion-port-profile.json`: a reset, a loop writing "C64!!" to the screen and changing the
-border colour, and two IRQs. Load the profile (*Profiles → C64 expansion port … → Load*) to get
-the decoders, or add the `C64 bus` decoder yourself; its *Disassembly* row shows the program.
-`python tools/make_c64_demo.py` recreates the file with a cycle-accurate 6510 model.
-
-## Controls
-
-| Action | Input |
-| --- | --- |
-| Zoom | mouse wheel over the waveform, ruler or annotations (`Shift`: bigger steps), `+` / `-` (also with `Ctrl`), pinch on a trackpad, `Ctrl` `0` (fit) |
-| Channel height (more channels on the screen) | `Alt` + mouse wheel over the waveform or the channel names, `Ctrl` `Shift` `↑` / `↓`, `Ctrl` `Shift` `0` (default), slider in the view bar below the waveform; low channels show their name instead of the name field |
-| Scroll horizontally | swipe left/right on a trackpad, `←` `→` (10 %), drag the waveform, `Ctrl` + mouse wheel, horizontal wheel, scroll bar |
-| Scroll through the channels | swipe up/down on a trackpad, scroll bar |
-| Go to trigger | `Ctrl` `T` |
-| Page/step | `Ctrl` `↑` `↓` (full page), `Shift` `←` `→` (one sample) |
-| Start capture (toolbar settings) / all settings / repeat / stop | `F5` / `Ctrl` `F5` / `Ctrl` `R` / `Shift` `F5` |
-| Cursors A and B | drag them on the ruler, or press `A` / `B` with the pointer over the waveform; right-click in the ruler: *Place cursor A/B here*, *Cursors to the selection* |
-| Named marker | `M` with the pointer over the waveform, or right-click in the ruler |
-| Search / next / previous match | `Ctrl` `F` / `F3` / `Shift` `F3` |
-| Measurements / analysis panels / listing | `Ctrl` `M` / `Ctrl` `1` / `Ctrl` `2` |
-| Edit or remove a bus | double-click or right-click its row |
-| Set/remove marker | click into the ruler |
-| Select a range | drag in the ruler (`Shift` + click extends the selection) |
-| Sample menu | right-click in the ruler (copy, paste, delete, measure, region …) |
-| See how a decoded value is made up | rest the pointer on an annotation: its samples are marked across all channels, a dashed line shows where the decoder read the value, and every channel it read shows its level (`A15 = 1 (+$8000)`); buses such as A0…A15 also show their value (`A = $FFFC`), and lines changing next to the read point are marked with `~`. The entries of other rows that belong to it are outlined (the bus cycles of an instruction, the instruction of a bus cycle); an entry made of several values, such as an instruction, shows where each of them was read and lists them next to it |
-| List an annotation row | click the name of the row: a list with the other rows of the decoder as columns (e.g. the bytes of each instruction) and the details of the selected entry |
-| Show/hide a channel | dot left of the channel name |
-| Pin a channel | pin right of the channel name: pinned channels stay at the top while the others scroll (*View → Unpin all channels*) |
-| Change a channel colour | click the channel name |
-| Move the overview | click or drag in the preview at the bottom |
-
-*Help → Keyboard shortcuts* lists all shortcuts.
-
-## File formats
-
-| Format | Read | Write | Remarks |
-| --- | --- | --- | --- |
-| `.lac` | ✓ | ✓ | identical to the original software, including regions |
-| `.lac` (≤ V5) | ✓ | – | packed `UInt128` samples are unpacked |
-| `.lac.gz` | ✓ | ✓ | same structure, gzip-compressed |
-| `.csv` | – | ✓ | optionally with a time column relative to the trigger |
-| `.vcd` | – | ✓ | for PulseView, GTKWave, … |
-| `.sr` | ✓ | ✓ | sigrok session (PulseView, sigrok-cli) |
-
-## Project structure
-
-```
-pipilogicanalyzer/
-├── driver/      device drivers: base class, pico/ (PiPiLogicAnalyzer firmware), dslogic/ (DSLogic)
-├── core/        analysis (edges, statistics, buses, search, trigger engine, compare, state mode), files (.lac, .sr, CSV, VCD), settings, firmware
-├── sdl/         Signal Description Language (samples created by hand)
-├── sigrok/      sigrokdecode compatible runtime, decoder search and execution
-└── ui/          Qt interface: main window, widgets, panels/ (measure, search, markers, listing), dialogs, devices/, theme
-decoders/        sigrok protocol decoders (libsigrokdecode, LogicAnalyzer 6.5, c64bus)
-firmware/        firmware for Pico/Pico 2/Pico W/Zero/Interceptor (C, Pico SDK)
-packaging/       PyInstaller build, icons, AppImage
-tests/           pytest suite (driver, analysis, files, SDL, decoders, GUI, packaging)
-```
-
-Adding support for another analyzer is described in [docs/drivers.md](docs/drivers.md).
-
-## Performance
-
-Measured with 1,000,000 samples on 24 channels (offscreen, 1600 × 1000):
-
-| Operation | Time |
-| --- | --- |
-| load a capture, index it and create the overview | 118 ms |
-| redraw with 100 visible samples | 3.7 ms |
-| redraw with 10,000 visible samples | 20 ms |
-| redraw with 1,000,000 visible samples | 20 ms |
-
-The cost per frame depends on the pixel width of the window, not on the number of samples.
-Details are in [docs/improvements.md](docs/improvements.md).
-
-## Tests
+Python ≥ 3.10; on Linux Qt needs `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3`.
+
+## Documentation
+
+* **The [wiki](https://github.com/deckerjulian/openSciLab/wiki)** is the user guide: installation,
+  getting started, devices and firmware, the data view, protocol decoders, flows and nodes, panels
+  and reports, time and synchronization, simulators, remote devices, scripting, troubleshooting.
+* Reference in this repository:
+  [docs/lab.md](docs/lab.md) (flows, every node, panels, reports),
+  [docs/cli.md](docs/cli.md) (command line and Python API),
+  [docs/simulator.md](docs/simulator.md) (simulators and their profiles),
+  [docs/timing.md](docs/timing.md) (the time of samples),
+  [docs/remote.md](docs/remote.md) (remote devices and their protocol),
+  [docs/drivers.md](docs/drivers.md) (new devices),
+  [docs/protocols.md](docs/protocols.md) (capabilities and the protocols of the firmware),
+  [firmware/README.md](firmware/README.md) (building and the Pico firmware),
+  [docs/improvements.md](docs/improvements.md) (what the logic analyzer fixes compared with the
+  original software), [CHANGELOG.md](CHANGELOG.md).
+
+## Development
 
 ```bash
 pip install -e ".[dev]"
-QT_QPA_PLATFORM=offscreen pytest
+QT_QPA_PLATFORM=offscreen pytest   # about 2000 tests, a few minutes
+ruff check openscilab tests
 ```
 
-## Status and contributing
+```
+openscilab/
+├── core/        signals, analysis, files, timing, firmware handling (no Qt)
+├── driver/      devices: pico/, arduino/, dslogic/, rigoldho/, remote/, simulated/, process/ (devices in a process of their own)
+├── lab/         flows: model, engine, nodes/, projects, panels, reports, examples (no Qt)
+├── sigrok/      sigrokdecode compatible runtime for the protocol decoders
+├── sdl/         Signal Description Language
+├── ui/          Qt interface: shell, documents (data view, flow, panel, device card ...), widgets
+├── api.py, cli.py   Python API and command line
+openscilab_device/   the package for measuring devices on other computers
+decoders/        sigrok protocol decoders (libsigrokdecode, LogicAnalyzer 6.5) and c64bus
+examples/        example library (library/), simulator profiles (sim/), captures, profiles, plugins
+firmware/        Pico firmware (C), Arduino firmware (PlatformIO), bridge app (Android)
+packaging/       PyInstaller build, icons, AppImage
+tests/           pytest suite
+```
 
-PiPiLogicAnalyzer is a young project. The application is covered by an automated test suite and
-built for Windows, macOS and Linux; the firmware is built for every supported board, but not every
-board has been tried with real signals yet. Reports of what works on your board, and what does
-not, are very welcome.
+### Builds and releases
 
-Bug reports, ideas and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). For
-questions about building the hardware itself, the
-[original project](https://github.com/gusmanb/logicanalyzer) is the best place to ask.
+[`.github/workflows/build.yml`](.github/workflows/build.yml) runs on GitHub Actions:
+
+| Event | Tests | Firmware | Applications | Published as |
+| --- | --- | --- | --- | --- |
+| Pull request | ✓ | – | – | – |
+| Push to `main` | ✓ | when `firmware/` changed, else reused | Windows, macOS (Apple Silicon), Linux | pre-release *latest-build* |
+| Tag `v*` | ✓ | ✓ | Windows, macOS (Apple Silicon and Intel), Linux | release (pre-release for `a`, `b`, `rc` versions) |
+| Manual run | ✓ | ✓ | all | artifacts only |
+
+A release:
+
+1. Set the version (`0.1.0b1`, `0.2.0`, ...) in `pyproject.toml`, `openscilab/__init__.py`,
+   `pico_set_program_version` in `firmware/pico/CMakeLists.txt` and `FIRMWARE_VERSION` in
+   `firmware/arduino/src/board.h`. The Pico's `FIRMWARE_VERSION` (`V8_0`) and the protocol versions
+   name what the application must know; raise them only when the protocol changes
+   ([docs/protocols.md](docs/protocols.md)).
+2. Rename `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) to `## [<version>] - <date>`; it becomes
+   the release notes.
+3. Push to `main`, then tag: `git tag -a v<version> -m "openSciLab <version>"` and
+   `git push origin v<version>`. The workflow checks that tag, versions and changelog agree.
+
+## Credits
+
+openSciLab is built on the **[LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín
+Giménez Bernad (gusmanb)**: the Pico logic analyzer hardware, its capture firmware and the original
+C#/Avalonia software are his work, and this project started from his version 6.5. Many thanks to
+Agustín for sharing it under the GNU GPL – if you build the hardware, please visit and support the
+original project. The protocol decoders come from [sigrok](https://sigrok.org)
+([libsigrokdecode](https://github.com/sigrokproject/libsigrokdecode)) and the decoder set of
+LogicAnalyzer 6.5; the DSLogic driver follows [DSView](https://github.com/DreamSourceLab/DSView).
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for all components and licenses.
+
+## Contributing
+
+Bug reports, test results from real hardware, ideas and pull requests are welcome, see
+[CONTRIBUTING.md](CONTRIBUTING.md); security problems go to [SECURITY.md](SECURITY.md).
 
 ## Disclaimer
 
 This is a hobby project. It is not affiliated with, endorsed by or supported by Raspberry Pi Ltd,
-by DreamSourceLab or by Agustín Giménez Bernad (gusmanb), whose LogicAnalyzer it builds on.
-"Raspberry Pi" and "Pico" are trademarks of Raspberry Pi Ltd, "DSLogic" and "DSView" of
-DreamSourceLab.
+Arduino, DreamSourceLab, RIGOL or Agustín Giménez Bernad (gusmanb). "Raspberry Pi" and "Pico" are
+trademarks of Raspberry Pi Ltd, "Arduino" of Arduino SA, "DSLogic" and "DSView" of DreamSourceLab,
+"RIGOL" of RIGOL Technologies.
 
 Use it at your own risk, and keep an eye on your hardware:
 
-* The inputs of the boards tolerate **3.3 V**. Higher voltages — 5 V systems such as a Commodore 64
-  included — need a level shifter or a divider, on the trigger input as well.
-* The *Turbo* firmware images overclock the board to 400 MHz with raised core voltage. That is
-  outside the specification of the RP2040/RP2350 and can shorten its life.
-* Protocol decoders are Python files that are executed. Only add decoders from sources you trust.
+* The inputs of the Pico boards tolerate **3.3 V**. Higher voltages – 5 V systems such as a
+  Commodore 64 included – need a level shifter or a divider, on the trigger input as well.
+* Flows and panels switch real outputs: check what a flow drives before you run it on hardware.
+  The *All outputs safe* button of a device card and the watchdog of the firmware release them.
+* The *Turbo* Pico firmware overclocks the board to 400 MHz with raised core voltage, outside the
+  specification of the RP2040/RP2350.
+* Protocol decoders, driver plugins and `control.python` nodes are Python code that is executed:
+  only use those from sources you trust.
 
 As stated in sections 15 to 17 of the GNU General Public License, the software comes without any
 warranty, and nobody is liable for damage arising from its use.
 
 ## License
 
-PiPiLogicAnalyzer is licensed under the **GNU General Public License v3** ([LICENSE](LICENSE)),
-the license of the original LogicAnalyzer by Agustín Giménez Bernad. It is a modified and
-extended version of his work; the changes are described in the [changelog](CHANGELOG.md),
-[docs/improvements.md](docs/improvements.md) and [firmware/README.md](firmware/README.md).
-
-The protocol decoders keep their own licenses (mostly GPL-2.0-or-later or GPL-3.0-or-later, a few
-MIT or BSD, stated in each file; all GPL-compatible). The packaged applications and firmware images contain further open source
-components such as Qt for Python (LGPL-3.0) and the Raspberry Pi Pico SDK (BSD-3-Clause); see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+openSciLab is licensed under the **GNU General Public License v3** ([LICENSE](LICENSE)), the license
+of the original LogicAnalyzer by Agustín Giménez Bernad, whose work it modifies and extends. The
+protocol decoders keep their own licenses (mostly GPL-2.0-or-later or GPL-3.0-or-later, a few MIT
+or BSD, all GPL-compatible). The packaged applications and firmware images contain further open
+source components such as Qt for Python (LGPL-3.0) and the Raspberry Pi Pico SDK (BSD-3-Clause);
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

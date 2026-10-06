@@ -10,8 +10,12 @@ venv/
 .mypy_cache/
 firmware/*/publish/
 firmware/uf2/
+firmware/arduino-images/
+firmware/apk/
 firmware/*/*_Build_Settings.cmake.orig
 .DS_Store
+.claude
+docs/roadmap/
 # Personal editor settings (the firmware keeps the VS Code setup of the original project)
 /.vscode/
 /firmware/.vscode/

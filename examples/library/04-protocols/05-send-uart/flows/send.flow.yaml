@@ -1,0 +1,23 @@
+flow: Send UART
+description: The capture waits for the start bit on D3; its 'armed' tells gen.tx_uart to send its 'data'. The decoder reads the capture.
+nodes:
+  uno: {type: device.instrument, at: [0, 160]}
+  capture:
+    type: device.capture
+    channels: [D3]
+    rate: 100 kHz
+    samples: 448
+    pre: 20
+    trigger: {edge: falling, source: D3}
+    at: [272, 192]
+  send: {type: gen.tx_uart, pin: D7, baud: 9600 Hz, data: Hi, at: [544, 256]}
+  uart: {type: decode.uart, channels: {rx: D3}, baudrate: 9600, format: ascii, at: [544, 40]}
+  check: {type: control.compare, op: contains, value: Hi, at: [808, 152]}
+  text: {type: view.log, title: Read back, at: [808, 0]}
+edges:
+  - uno.device -> capture.device
+  - uno.device -> send.device
+  - capture.armed -> send.data
+  - capture.capture -> uart.in
+  - uart.text -> check.a
+  - uart.text -> text.in

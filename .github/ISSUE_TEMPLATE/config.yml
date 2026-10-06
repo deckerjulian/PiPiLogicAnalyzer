@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Documentation (wiki)
+    url: https://github.com/deckerjulian/openSciLab/wiki
+    about: How to install openSciLab, connect devices, build flows and panels.
   - name: Questions about the LogicAnalyzer hardware
     url: https://github.com/gusmanb/logicanalyzer
     about: Building the hardware and the original software are discussed in gusmanb's project.

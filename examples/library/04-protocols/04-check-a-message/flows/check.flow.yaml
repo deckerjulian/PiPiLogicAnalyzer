@@ -1,0 +1,14 @@
+flow: Check a message
+description: 'decode.uart on GP11, control.compare with ''contains''; the report lists the result.'
+nodes:
+  pico: {type: device.instrument, at: [0, 128]}
+  capture: {type: device.capture, channels: [GP11], rate: 2 MHz, duration: 4 ms, at: [272, 128]}
+  uart: {type: decode.uart, channels: {rx: GP11}, baudrate: 115200, format: ascii, at: [544, 128]}
+  check: {type: control.compare, op: contains, value: openSciLab Pico, at: [808, 168]}
+  result: {type: view.led, title: Message received, at: [1080, 168]}
+  report: {type: report.write, path: message.html, title: Check a message, at: [1080, 0]}
+edges:
+  - pico.device -> capture.device
+  - capture.capture -> uart.in
+  - uart.text -> check.a
+  - check.result -> result.in

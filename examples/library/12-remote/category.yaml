@@ -1,0 +1,3 @@
+title: Remote devices
+description: Scripts on other computers as devices (package openscilab_device) - receiving values with the device's time, setting outputs at a time, calling commands, aligning clocks with a sync signal. Simulated here; a real script connects the same way (docs/remote.md).
+icon: wifi

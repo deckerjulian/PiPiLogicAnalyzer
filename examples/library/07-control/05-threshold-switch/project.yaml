@@ -1,0 +1,7 @@
+project: Threshold switch
+description: Switches an LED on D13 when A0 rises above 2.5 V - control.limit tells for every reading
+  whether it is above the threshold. (control.compare does the same for any comparison, and its
+  result counts as a check in the report.)
+devices:
+  uno: sim:uno
+open: [flows/switch.flow.yaml]

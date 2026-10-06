@@ -1,0 +1,5 @@
+project: Python node
+description: Two Python nodes - 'source' runs with the flow and sends a damped oscillation every
+  20 ms, 'smooth' is called for every value and sends the moving average of the last five. In the
+  code, ctx.emit sends, await ctx.sleep waits; the editor completes ctx., np. and the port names.
+open: [flows/python.flow.yaml]

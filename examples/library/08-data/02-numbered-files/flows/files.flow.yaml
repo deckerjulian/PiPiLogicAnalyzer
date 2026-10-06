@@ -1,0 +1,18 @@
+flow: Numbered files
+description: data.file with 'numbered' writes a new file for every capture instead of replacing it.
+nodes:
+  la: {type: device.instrument, at: [0, 0]}
+  timer: {type: control.timer, interval: 1 s, count: 3, at: [0, 88]}
+  capture:
+    type: device.capture
+    channels: [D0, D1, D2, D3, D8]
+    rate: 4 MHz
+    samples: 10000
+    at: [272, 32]
+  file: {type: data.file, path: capture.lac, numbered: true, at: [544, 32]}
+  written: {type: view.log, title: Files, at: [808, 32]}
+edges:
+  - la.device -> capture.device
+  - timer.tick -> capture.arm
+  - capture.capture -> file.in
+  - file.written -> written.in

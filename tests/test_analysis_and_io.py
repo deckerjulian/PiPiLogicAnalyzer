@@ -8,11 +8,11 @@ import os
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import capture_io
-from pipilogicanalyzer.core.analysis import ChannelTransitions, measure_channel
-from pipilogicanalyzer.core.formatting import to_large_frequency, to_small_time
-from pipilogicanalyzer.core.regions import SampleRegion
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.core import capture_io
+from openscilab.core.analysis import ChannelTransitions, measure_channel
+from openscilab.core.formatting import to_large_frequency, to_small_time
+from openscilab.core.regions import SampleRegion
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 
 
 def square_wave(period: int, count: int) -> np.ndarray:
@@ -241,8 +241,8 @@ def test_vcd_times_do_not_drift_at_fractional_periods(tmp_path):
 
 
 def test_an_endless_stream_setting_is_saved():
-    from pipilogicanalyzer.core.capture_io import session_from_dict, session_to_dict
-    from pipilogicanalyzer.driver.models import CaptureSession
+    from openscilab.core.capture_io import session_from_dict, session_to_dict
+    from openscilab.driver.models import CaptureSession
 
     session = CaptureSession(frequency=1_000_000, post_trigger_samples=1000, acquisition_mode="stream",
                              continuous=True)

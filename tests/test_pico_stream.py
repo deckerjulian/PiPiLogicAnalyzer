@@ -11,15 +11,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver.pico import analyzer, protocol
-from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
-from pipilogicanalyzer.driver.base import (
+from openscilab.driver.pico import analyzer, protocol
+from openscilab.driver.pico.analyzer import PicoDriver
+from openscilab.driver.base import (
     ACQUISITION_STREAM,
     CAPABILITY_CONTINUOUS_STREAM,
     CAPABILITY_STREAM_IMMEDIATE_ONLY,
     CaptureError,
 )
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
 
 from test_driver import FakeTransport
 
@@ -43,9 +43,9 @@ class StreamingTransport(FakeTransport):
 def pico(monkeypatch):
     transport = StreamingTransport()
     transport.queue_response("CAPS:SELFTEST,DEVICEINFO,STREAM=800000")
-    monkeypatch.setattr("pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
+    monkeypatch.setattr("openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
     monkeypatch.setattr(analyzer, "STREAM_PROGRESS_INTERVAL", 0)
-    driver = PiPiLogicAnalyzerDriver("/dev/fake")
+    driver = PicoDriver("/dev/fake")
     driver.capabilities()
     driver.test_transport = transport  # type: ignore[attr-defined]
     return driver
@@ -151,8 +151,8 @@ def test_invalid_streams_are_rejected(pico):
 def test_firmware_without_the_stream_offers_the_buffer_only(monkeypatch):
     transport = FakeTransport()
     transport.queue_response("CAPS:SELFTEST,DEVICEINFO")
-    monkeypatch.setattr("pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
-    driver = PiPiLogicAnalyzerDriver("/dev/fake")
+    monkeypatch.setattr("openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
+    driver = PicoDriver("/dev/fake")
     assert driver.acquisition_modes() == ()
     assert driver.start_capture(stream_session()) is CaptureError.BAD_PARAMS
 
@@ -160,7 +160,7 @@ def test_firmware_without_the_stream_offers_the_buffer_only(monkeypatch):
 def test_the_dialog_starts_a_pico_stream_at_once(pico):
     from PySide6.QtWidgets import QApplication
 
-    from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+    from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
     QApplication.instance() or QApplication([])
     dialog = CaptureDialog(pico)

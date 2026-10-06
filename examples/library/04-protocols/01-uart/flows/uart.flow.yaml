@@ -1,0 +1,15 @@
+flow: UART
+description: 'decode.uart with rx on D9; ''text'' joins the bytes, ''table'' lists them.'
+nodes:
+  la: {type: device.instrument, at: [0, 160]}
+  capture: {type: device.capture, channels: [D9], rate: 4 MHz, duration: 3 ms, at: [272, 160]}
+  uart: {type: decode.uart, channels: {rx: D9}, baudrate: 115200, format: ascii, at: [544, 48]}
+  text: {type: view.log, title: Received text, at: [808, 152]}
+  bytes: {type: view.table, title: Bytes, at: [808, 0]}
+  scope: {type: view.scope, title: D9, at: [544, 264]}
+edges:
+  - la.device -> capture.device
+  - capture.capture -> uart.in
+  - capture.capture -> scope.in
+  - uart.text -> text.in
+  - uart.table -> bytes.in

@@ -21,7 +21,7 @@ def application():
 
 
 def spec_decoder_modules() -> set[str]:
-    with open(os.path.join(ROOT, "packaging", "pipilogicanalyzer.spec"), encoding="utf-8") as handle:
+    with open(os.path.join(ROOT, "packaging", "openscilab.spec"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
@@ -52,11 +52,11 @@ def test_packaged_build_includes_every_module_the_decoders_import():
                     imported.add(node.module.split(".")[0])
 
     missing = imported - local - spec_decoder_modules() - set(sys.builtin_module_names)
-    assert not missing, f"add to DECODER_MODULES in packaging/pipilogicanalyzer.spec: {sorted(missing)}"
+    assert not missing, f"add to DECODER_MODULES in packaging/openscilab.spec: {sorted(missing)}"
 
 
 def test_application_icon_renders(application):
-    from pipilogicanalyzer.ui.icons import app_icon, render_app_icon
+    from openscilab.ui.icons import app_icon, render_app_icon
 
     image = render_app_icon(64)
     assert image.width() == 64 and image.pixelColor(32, 32).alpha() == 255
@@ -64,13 +64,13 @@ def test_application_icon_renders(application):
 
 
 def test_smoke_test_reports_decoders_and_firmware(application, tmp_path):
-    from pipilogicanalyzer import app
-    from pipilogicanalyzer.ui.main_window import MainWindow
+    from openscilab import app
+    from openscilab.ui.shell.main_window import ShellWindow
 
     report = tmp_path / "report.txt"
-    status = app.smoke_test(MainWindow(), str(report))
+    status = app.smoke_test(ShellWindow(), str(report))
 
     text = report.read_text()
-    assert "window created" in text and "firmware images" in text
+    assert "shell created" in text and "firmware images" in text
     if os.path.isdir(DECODERS):
         assert status == 0

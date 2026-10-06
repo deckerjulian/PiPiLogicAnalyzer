@@ -7,7 +7,7 @@ import stat
 
 import pytest
 
-from pipilogicanalyzer import app, qt_plugins
+from openscilab import app, qt_plugins
 
 requires_file_flags = pytest.mark.skipif(
     not hasattr(stat, "UF_HIDDEN") or not hasattr(os, "chflags"),

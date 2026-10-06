@@ -1,0 +1,6 @@
+project: Buffer
+description: A stream of the counter keeps arriving; the buffer keeps only the last 5 ms. A timer
+  reads the buffer three times - each time the scope shows the latest 5 ms, as a scope in roll mode.
+devices:
+  la: sim:free
+open: [flows/buffer.flow.yaml]

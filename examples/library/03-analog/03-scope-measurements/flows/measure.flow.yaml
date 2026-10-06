@@ -1,0 +1,42 @@
+flow: Scope measurements
+description: One capture of CH1-CH4 (50 ms at 1 MHz); every channel goes into the measurements.
+nodes:
+  scope: {type: device.instrument, at: [0, 376]}
+  capture:
+    type: device.capture
+    channels: [CH1, CH2, CH3, CH4]
+    rate: 1 MHz
+    samples: 50000
+    at: [272, 376]
+  view: {type: view.scope, title: CH1-CH4, at: [544, 32]}
+  rms1: {type: measure.rms, at: [544, 184]}
+  pp1: {type: measure.peak_to_peak, at: [544, 296]}
+  mean2: {type: measure.mean, at: [544, 400]}
+  pp2: {type: measure.peak_to_peak, at: [544, 512]}
+  min3: {type: measure.min, at: [544, 616]}
+  max3: {type: measure.max, at: [544, 728]}
+  mean4: {type: measure.mean, at: [544, 840]}
+  show_rms1: {type: view.number, title: CH1 RMS, unit: V, at: [808, 0]}
+  show_pp1: {type: view.number, title: CH1 peak to peak, unit: V, at: [808, 168]}
+  show_mean2: {type: view.number, title: CH2 mean, unit: V, at: [808, 336]}
+  show_pp2: {type: view.number, title: CH2 peak to peak, unit: V, at: [808, 512]}
+  show_min3: {type: view.number, title: CH3 minimum, unit: V, at: [808, 680]}
+  show_max3: {type: view.number, title: CH3 maximum, unit: V, at: [808, 848]}
+  show_mean4: {type: view.number, title: CH4 mean, unit: V, at: [808, 1024]}
+edges:
+  - scope.device -> capture.device
+  - capture.capture -> view.in
+  - capture.CH1 -> rms1.in
+  - capture.CH1 -> pp1.in
+  - capture.CH2 -> mean2.in
+  - capture.CH2 -> pp2.in
+  - capture.CH3 -> min3.in
+  - capture.CH3 -> max3.in
+  - capture.CH4 -> mean4.in
+  - rms1.out -> show_rms1.in
+  - pp1.out -> show_pp1.in
+  - mean2.out -> show_mean2.in
+  - pp2.out -> show_pp2.in
+  - min3.out -> show_min3.in
+  - max3.out -> show_max3.in
+  - mean4.out -> show_mean4.in

@@ -1,0 +1,6 @@
+project: Statistics
+description: Ten captures, one every 100 ms; the frequency of each goes into a table. The table view
+  lists them, the report adds the table, a diagram and a check of every value.
+devices:
+  la: sim:free
+open: [flows/statistics.flow.yaml]

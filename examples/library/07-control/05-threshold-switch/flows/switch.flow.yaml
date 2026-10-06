@@ -1,0 +1,18 @@
+flow: Threshold switch
+description: The monitor reads A0 while the RC low pass charges; above 2.5 V the limit's 'ok' turns D13 on.
+nodes:
+  uno: {type: device.instrument, at: [0, 168]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, duty: 0.8, at: [272, 328]}
+  monitor: {type: device.monitor, analog: [A0], rate: 20 Hz, duration: 1.5 s, at: [272, 120]}
+  above: {type: control.limit, low: 2.5, at: [544, 72]}
+  led: {type: gpio.write, pin: D13, at: [808, 0]}
+  shown: {type: view.led, title: A0 above 2.5 V, at: [808, 128]}
+  chart: {type: view.strip_chart, title: A0, window: 2 s, at: [544, 256]}
+edges:
+  - uno.device -> pwm.device
+  - uno.device -> monitor.device
+  - uno.device -> led.device
+  - monitor.A0 -> above.in
+  - monitor.A0 -> chart.in
+  - above.ok -> led.value
+  - above.ok -> shown.in

@@ -1,0 +1,51 @@
+flow: Characteristic curve
+description: 'PWM duty cycle of D9 from 0 to 100 %; for every step the scope captures the voltage at A0 behind the RC low pass, its mean is a point of the curve. The slope of the line is checked (5 V for a 5 V board) and written into a report.'
+nodes:
+  uno: {type: device.instrument, at: [0, 0]}
+  scope: {type: device.instrument, at: [0, 120]}
+  sweep: {type: control.sweep, start: 0, stop: 1, step: 0.1, dwell: 500 ms, at: [0, 208]}
+  pwm: {type: gpio.pwm, pin: D9, freq: 1 kHz, at: [272, 0]}
+  capture: {type: device.capture, channels: [CH1], rate: 100 kHz, samples: 2000, at: [272, 144]}
+  mean: {type: measure.mean, at: [544, 240]}
+  points: {type: data.table, columns: [duty, volts], at: [808, 232]}
+  fit:
+    type: control.python
+    inputs: [table, done]
+    outputs: [slope]
+    code: |
+      table = None
+
+      def on_input(ctx, port, value):
+          global table
+          if port == "table":
+              table = value
+          elif table is not None and len(table) > 1:
+              slope, _offset = np.polyfit(table.columns["duty"], table.columns["volts"], 1)
+              ctx.emit("slope", signals.Scalar(name="slope", unit="V", value=float(slope), at=ctx.now()))
+    at: [1080, 368]
+  check: {type: report.check, name: Slope, expected: 5, tolerance: 0.25, unit: V, at: [1352, 368]}
+  diagram:
+    type: report.image
+    title: Characteristic curve
+    x: duty
+    y: volts
+    x_label: Duty cycle
+    y_label: CH1 mean (V)
+    at: [1080, 216]
+  values: {type: report.table, title: Measurements, at: [1080, 104]}
+  report: {type: report.write, path: curve.html, title: Characteristic curve, at: [1616, 368]}
+edges:
+  - uno.device -> pwm.device
+  - scope.device -> capture.device
+  - sweep.value -> pwm.duty
+  - sweep.value -> points.duty
+  - sweep.step -> capture.arm
+  - capture.CH1 -> mean.in
+  - mean.out -> points.volts
+  - mean.out -> sweep.next
+  - points.table -> fit.table
+  - points.table -> diagram.in
+  - points.table -> values.in
+  - sweep.done -> fit.done
+  - fit.slope -> check.in
+  - check.pass -> report.write

@@ -1,0 +1,6 @@
+project: I²C sensor
+description: Reads two bytes from the temperature sensor at address 0x48 on the I²C bus of the Pico
+  (GP3 = SCL, GP2 = SDA) - the Pico is the master; the answer appears in the log.
+devices:
+  pico: sim:pico
+open: [flows/sensor.flow.yaml]

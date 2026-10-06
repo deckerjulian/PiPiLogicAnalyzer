@@ -1,0 +1,34 @@
+flow: Waveform file
+description: gen.output plays the file given in 'file' (or a waveform arriving at 'waveform'); 'sync' arms the capture.
+nodes:
+  scope: {type: device.instrument, at: [0, 128]}
+  play: {type: gen.output, file: waveforms/triangle.wave.yaml, duration: 5 ms, at: [272, 152]}
+  capture: {type: device.capture, channels: [CH1], rate: 1 MHz, samples: 4000, at: [544, 112]}
+  view: {type: view.scope, title: Triangle on CH1, at: [808, 0]}
+  logic: {type: dsp.threshold, threshold: 0 V, at: [808, 152]}
+  frequency: {type: measure.frequency, at: [1080, 152]}
+  peak: {type: measure.peak_to_peak, at: [808, 312]}
+  frequency_check:
+    type: report.check
+    name: Frequency
+    expected: 2000
+    tolerance: 40
+    unit: Hz
+    at: [1352, 152]
+  peak_check:
+    type: report.check
+    name: Peak to peak
+    expected: 3
+    tolerance: 0.2
+    unit: V
+    at: [1080, 312]
+edges:
+  - scope.device -> play.device
+  - scope.device -> capture.device
+  - play.sync -> capture.arm
+  - capture.capture -> view.in
+  - capture.CH1 -> logic.in
+  - logic.out -> frequency.in
+  - capture.CH1 -> peak.in
+  - frequency.out -> frequency_check.in
+  - peak.out -> peak_check.in

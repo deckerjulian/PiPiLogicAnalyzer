@@ -9,10 +9,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from pipilogicanalyzer.core import settings
-from pipilogicanalyzer.driver.emulated import EmulatedAnalyzerDriver
-from pipilogicanalyzer.driver.models import TriggerType
-from pipilogicanalyzer.ui.dialogs.capture_dialog import CaptureDialog
+from openscilab.core import settings
+from openscilab.driver.emulated import EmulatedAnalyzerDriver
+from openscilab.driver.models import TriggerType
+from openscilab.ui.dialogs.capture_dialog import CaptureDialog
 
 
 class FakeDriver(EmulatedAnalyzerDriver):

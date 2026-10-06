@@ -1,0 +1,59 @@
+{
+  "Profiles": [
+    {
+      "Name": "WS2812 / NeoPixel LEDs",
+      "CaptureSettings": {
+        "Frequency": 10000000,
+        "PreTriggerSamples": 50000,
+        "PostTriggerSamples": 450000,
+        "TotalSamples": 500000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "DIN",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": false,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "rgb_led_ws281x",
+          "label": "WS2812",
+          "channel_map": {
+            "0": 0
+          },
+          "options": {
+            "wireorder": "GRB",
+            "textorder": "RGB[W]"
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "The data input of the first LED to CH1. The colour of every LED, in the order of the strip."
+    }
+  ]
+}

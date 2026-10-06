@@ -11,7 +11,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication
 
-from pipilogicanalyzer.ui.view_model import (
+from openscilab.ui.view_model import (
     DEFAULT_CHANNEL_HEIGHT,
     LARGEST_CHANNEL_HEIGHT,
     SMALLEST_CHANNEL_HEIGHT,
@@ -48,10 +48,9 @@ def alt_wheel(widget, notches: int) -> None:
     QApplication.sendEvent(widget, event)
 
 
-def test_lower_channels_fit_more_channels_on_the_screen(application):
-    from pipilogicanalyzer.ui.main_window import MainWindow
+def test_lower_channels_fit_more_channels_on_the_screen(application, make_dataview):
 
-    window = MainWindow()
+    window = make_dataview()
     try:
         window.model.set_channel_height(DEFAULT_CHANNEL_HEIGHT)
         window.resize(1200, 800)
@@ -94,4 +93,32 @@ def test_lower_channels_fit_more_channels_on_the_screen(application):
         assert window.model.channels[0].channel_name == "CLK" and "CLK" in rows[0].label.text()
     finally:
         window.model.set_channel_height(DEFAULT_CHANNEL_HEIGHT)
+        window.close()
+
+
+def test_rows_start_at_the_top_and_the_overview_shows_analog_channels(application, make_dataview):
+    """Few channels keep their height from the top (they do not stretch to fill the view); the
+    overview draws analog channels as an envelope."""
+    import numpy as np
+
+    from openscilab.driver.models import AnalogChannel
+
+    window = make_dataview()
+    try:
+        window.resize(1200, 900)
+        session = build_session(1000, 2)
+        analog = AnalogChannel(channel_number=0)
+        analog.raw = (np.sin(np.linspace(0, 20, 1000)) * 1000).astype(np.int16)
+        session.analog_channels = [analog]
+        window.load_session(session)
+        window.show()
+        application.processEvents()
+        assert window.sample_viewer.height() == 2 * window.model.channel_height
+        assert window.scroll_area.viewport().height() > 3 * window.model.channel_height
+        window.previewer._build_image()
+        buffer = window.previewer._image_buffer
+        rows = buffer.shape[0]
+        analog_rows = buffer[2 * rows // 3:, :, :]
+        assert (analog_rows.max(axis=2) > 60).any()  # (the envelope of the sine is there)
+    finally:
         window.close()

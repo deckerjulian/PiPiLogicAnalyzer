@@ -1,0 +1,7 @@
+project: Simulated scenario
+description: The simulator plays a scenario chosen in the device node - here UART, SPI and I²C on D0
+  to D5 with a text of your own (signals of the device node). All three decoders read their bus;
+  change the text and run again.
+devices:
+  la: sim:free
+open: [flows/scenario.flow.yaml]

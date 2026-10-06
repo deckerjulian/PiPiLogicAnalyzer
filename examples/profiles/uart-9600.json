@@ -1,0 +1,79 @@
+{
+  "Profiles": [
+    {
+      "Name": "UART 9600 baud",
+      "CaptureSettings": {
+        "Frequency": 1000000,
+        "PreTriggerSamples": 100000,
+        "PostTriggerSamples": 900000,
+        "TotalSamples": 1000000,
+        "LoopCount": 0,
+        "MeasureBursts": false,
+        "CaptureChannels": [
+          {
+            "TextualChannelNumber": "Channel 1",
+            "ChannelNumber": 0,
+            "ChannelName": "RX",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          },
+          {
+            "TextualChannelNumber": "Channel 2",
+            "ChannelNumber": 1,
+            "ChannelName": "TX",
+            "ChannelColor": null,
+            "Hidden": false,
+            "Samples": null
+          }
+        ],
+        "Bursts": null,
+        "TriggerType": 0,
+        "TriggerChannel": 0,
+        "TriggerInverted": true,
+        "TriggerBitCount": 0,
+        "TriggerPattern": 0,
+        "AcquisitionMode": "buffer",
+        "ThresholdVoltage": null,
+        "Continuous": false,
+        "ToDisk": false,
+        "TriggerSequence": null,
+        "SoftwareTrigger": false,
+        "ClockChannel": null,
+        "ClockEdge": "rising",
+        "Buses": [],
+        "AnalogChannels": [],
+        "StateTimes": null
+      },
+      "DecoderConfiguration": [
+        {
+          "decoder_id": "uart",
+          "label": "UART",
+          "channel_map": {
+            "0": 0,
+            "1": 1
+          },
+          "options": {
+            "baudrate": 9600,
+            "data_bits": 8,
+            "parity": "none",
+            "stop_bits": 1.0,
+            "bit_order": "lsb-first",
+            "format": "ascii",
+            "invert_rx": "no",
+            "invert_tx": "no",
+            "sample_point": 50,
+            "rx_packet_delim": -1,
+            "tx_packet_delim": -1,
+            "rx_packet_len": -1,
+            "tx_packet_len": -1
+          },
+          "color_index": 0,
+          "enabled": true,
+          "parent": null
+        }
+      ],
+      "Notes": "RX to CH1, TX to CH2, GND to GND. 8N1, shown as text. The capture starts with the first start bit on RX."
+    }
+  ]
+}

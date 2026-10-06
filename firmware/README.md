@@ -1,4 +1,58 @@
-# Firmware (PiPiLogicAnalyzer)
+# Firmware
+
+The instruments of openSciLab run firmware of their own; it belongs to the project and is built,
+tested and versioned with the application.
+
+| Firmware | Folder | Boards | Build | State |
+| --- | --- | --- | --- | --- |
+| Pico | [`pico/`](pico/) | Raspberry Pi Pico, Pico 2, Pico W, Pico 2 W, RP2040-Zero, Interceptor | Pico SDK 2.1.1, ARM GNU toolchain 14.2, CMake/Ninja | version 8 not yet tried on hardware (the 7.x firmware it extends is in use) |
+| Arduino | [`arduino/`](arduino/) | Uno, Nano, Mega 2560, Uno R4 Minima, ESP32, ESP32-S3 | PlatformIO | built and host-tested, not yet tested on hardware |
+| Bridge app | [`bridge-android/`](bridge-android/) | Rigol DHO900 (Android) | Gradle, Android SDK, JDK 17 | built, not yet tested on the instrument |
+
+All of them carry the version of the release (`0.1.0b1`); what a host must know to talk to them is
+the protocol version they report (the Pico: protocol 8).
+
+What the devices report about themselves (capabilities, pins) and how they talk to the
+application is specified in [docs/protocols.md](../docs/protocols.md); `capabilities.h` of each
+firmware is checked against it by `tests/test_protocol_spec.py`.
+
+## Development environment
+
+The dev container ([`.devcontainer/`](../.devcontainer/)) has everything: Pico SDK, ARM GNU
+toolchain and picotool (in `~/.pico-sdk`, the layout of the VS Code extension and the CI),
+PlatformIO, the Android command line tools with JDK 17, Python with the development dependencies
+of the application and the Qt libraries for its tests. Open the repository in VS Code and choose
+*Reopen in Container*. USB devices reach the container only on Linux hosts (add
+`"runArgs": ["--privileged", "-v", "/dev/bus/usb:/dev/bus/usb"]`); elsewhere flash from the
+application or the host.
+
+Without the container install:
+
+* Pico: the *Raspberry Pi Pico* extension of VS Code (installs SDK and tools in `~/.pico-sdk`), or
+  Pico SDK 2.1.1, ARM GNU toolchain 14.2, CMake and Ninja yourself (`PICO_SDK_PATH`,
+  `PICO_TOOLCHAIN_PATH`).
+* Arduino: PlatformIO (`pip install platformio`).
+* Bridge: JDK 17 and the Android command line tools (`ANDROID_HOME`).
+
+## Building everything
+
+```bash
+firmware/build_all.sh               # everything there is
+firmware/build_all.sh --pico        # every Pico board and turbo variant -> firmware/uf2/
+firmware/build_all.sh --arduino     # the Arduino firmware -> firmware/arduino-images/
+firmware/build_all.sh --bridge      # the bridge app -> firmware/apk/
+```
+
+## Flashing
+
+* Pico: *Devices → Connected hardware* (or *Update firmware…* on the device card) restarts the
+  board into its bootloader and copies the image; by hand, hold *BOOTSEL* while plugging the board
+  in and copy the `.uf2` to the drive.
+* Arduino: with PlatformIO (`pio run -e uno -t upload` in `firmware/arduino/`) or avrdude with an
+  image of the release; installing from the application is not wired up yet.
+* Bridge: `adb install -r openSciLab-bridge.apk`.
+
+# Pico firmware (openSciLab Pico)
 
 Firmware for the RP2040/RP2350 logic analyzer. It is based on the firmware of the
 **[LogicAnalyzer](https://github.com/gusmanb/logicanalyzer) by Agustín Giménez Bernad
@@ -13,7 +67,7 @@ License: GNU General Public License v3, like the original. Not included are
 schematic and PSRAM helpers the build does not use).
 
 All changes compared with the original are part of the source code in
-[`PiPiLogicAnalyzer/`](PiPiLogicAnalyzer/); they are described in
+[`pico/`](pico/); they are described in
 [Fixed bugs](#fixed-bugs), [Self-test and simulation](#self-test-and-simulation) and
 [Trigger sequences and state mode](#trigger-sequences-and-state-mode).
 
@@ -21,40 +75,40 @@ All changes compared with the original are part of the source code in
 
 Requirements: Raspberry Pi Pico SDK 2.1.1, ARM GCC 14.2 and CMake/Ninja. The easiest way is the
 *Raspberry Pi Pico* extension for VS Code, which installs everything in `~/.pico-sdk`. The VS Code
-setup of the extension is part of the repository in `firmware/PiPiLogicAnalyzer/.vscode`; open
-`firmware/PiPiLogicAnalyzer` as the folder.
+setup of the extension is part of the repository in `firmware/pico/.vscode`; open
+`firmware/pico` as the folder.
 
 1. Set `BOARD_TYPE` and, if wanted, `TURBO_MODE` in
-   [`PiPiLogicAnalyzer/PiPiLogicAnalyzer_Build_Settings.cmake`](PiPiLogicAnalyzer/PiPiLogicAnalyzer_Build_Settings.cmake).
+   [`pico/build_settings.cmake`](pico/build_settings.cmake).
 2. Build:
 
    ```bash
-   cd firmware/PiPiLogicAnalyzer
+   cd firmware/pico
    export PICO_SDK_PATH=~/.pico-sdk/sdk/2.1.1   # not needed with the VS Code extension
    cmake -S . -B build -G Ninja
    cmake --build build
    ```
 
-3. Copy `build/PiPiLogicAnalyzer.uf2` to the board (hold *BOOTSEL* while plugging it in, or use
-   *Device → Enter bootloader mode* in the application).
+3. Copy `build/openscilab_pico.uf2` to the board (hold *BOOTSEL* while plugging it in, or use
+   *Restart into the bootloader...* on the *Details* tab of the device card in the application).
 
 ### All variants at once
 
 [`build_all.sh`](build_all.sh) (macOS/Linux) builds every board and turbo variant in turn. It
 uses the tools the VS Code extension installed in `~/.pico-sdk` and writes the images to
 `firmware/uf2/`. It builds in `firmware/uf2/.build`, so the VS Code build folder
-(`PiPiLogicAnalyzer/build`) is left alone:
+(`pico/build`) is left alone:
 
 ```bash
 firmware/build_all.sh                          # all boards
 firmware/build_all.sh BOARD_PICO BOARD_PICO_2  # selected boards
 ```
 
-The files are named `PiPiLogicAnalyzer_<BOARD_TYPE>[_Turbo].uf2`; the application recognises the
+The files are named `openSciLab-pico_<BOARD_TYPE>[_Turbo].uf2`; the application recognises the
 board of an image by this name when flashing. The build settings are restored afterwards; error
 logs are kept as `.log` files next to the images. On Windows,
-`firmware/PiPiLogicAnalyzer/publish.ps1` does the same (PowerShell) and writes the images to
-`firmware/PiPiLogicAnalyzer/publish`.
+`firmware/pico/publish.ps1` does the same (PowerShell) and writes the images to
+`firmware/pico/publish`.
 
 ### Automatic builds (GitHub Actions)
 
@@ -63,16 +117,19 @@ for all boards in parallel with the same versions as the VS Code extension (Pico
 picotool 2.1.1, ARM GNU Toolchain 14.2) using `build_all.sh`. SDK and toolchain are cached.
 
 * Push to `main`: only if `firmware/` (or the workflow) changed since the pre-release
-  [*latest-build*](https://github.com/deckerjulian/PiPiLogicAnalyzer/releases/tag/latest-build). The
+  [*latest-build*](https://github.com/deckerjulian/openSciLab/releases/tag/latest-build). The
   images are published in that release together with the applications, which include them.
 * Tag `v*` and manual runs (*Actions → Build → Run workflow*): always; a tag creates a release.
 * Every firmware run creates the artifact `firmware-uf2` with all images (*Actions* → run →
   *Artifacts*); if a board fails, its build log is in `firmware-log-<BOARD>`.
 * Pull requests do not build the firmware.
+* A release carries the images singly and as `openSciLab-firmware-pico-uf2.zip`; once they exist,
+  the Arduino images (`openSciLab-firmware-arduino.zip`) and the bridge app
+  (`openSciLab-bridge.apk`) are built in jobs of their own and published with them.
 
 ### Flashing from the application
 
-*Device → Install or update firmware…* lists all boards in bootloader mode, Raspberry Pi boards
+*Devices → Connected hardware* lists all boards in bootloader mode, Raspberry Pi boards
 running other firmware (e.g. MicroPython) and connected analyzers with their installed firmware.
 The dialog restarts a board into the bootloader (by command or 1200 baud reset) and copies the
 selected image to the drive. It checks the chip family in the UF2 (RP2040 or RP2350) against the
@@ -94,10 +151,10 @@ the original, `TURBO_MODE` is **off** by default and has to be enabled deliberat
 
 ## Working with the application
 
-The firmware identifies itself as `PIPI_LOGIC_ANALYZER_<BOARD>_V7_2`, followed by `FREQ:`,
+The firmware identifies itself as `OPENSCILAB_PICO_<BOARD>_V8_0`, followed by `FREQ:`,
 `BLASTFREQ:`, `BUFFER:`, `CHANNELS:` and `PROTOCOL:<n>`. The application works only with the
 firmware it comes with: it opens a board only when `PROTOCOL` equals its own protocol version
-(`FIRMWARE_PROTOCOL` in `CMakeLists.txt` and in `pipilogicanalyzer/driver/pico/protocol.py`) and
+(`FIRMWARE_PROTOCOL` in `CMakeLists.txt` and in `openscilab/driver/pico/protocol.py`) and
 offers the firmware update otherwise. **Raise `FIRMWARE_PROTOCOL` with every change of a command,
 request or response**, in both places; compatibility with older applications or firmware is not
 kept. The capture request is the 56 byte request of V6_5 (32 channel entries, 16 bit loop count);
@@ -182,15 +239,15 @@ trigger (it starts at once), without pre-trigger samples.
 Instead of sampling pins, the firmware writes test signals directly into the capture buffer and
 transfers them like a real capture. This tests the USB/WiFi transfer, the display and the
 decoders without a single signal. The generator is
-[`PiPiLogicAnalyzer_Simulation.c`](PiPiLogicAnalyzer/PiPiLogicAnalyzer_Simulation.c). It is identical to
-`pipilogicanalyzer/core/simulation.py`; `tests/test_simulation.py` compiles the C file on the
+[`simulation.c`](pico/simulation.c). It is identical to
+`openscilab/core/simulation.py`; `tests/test_simulation.py` compiles the C file on the
 computer and compares both generators sample by sample.
 
 | `triggerValue` | Pattern |
 | --- | --- |
 | 0 | counter: channel n toggles every 2^(n mod 16) samples |
 | 1 | walking bit: one channel is high for 16 samples each |
-| 2 | protocols carrying the text `PiPiLogicAnalyzer\n`, at 1 MHz sampling rate:<br>channel 1: UART 8N1 at f/10 baud (100,000 baud)<br>channels 2–4: SPI CLK, MOSI, CS (mode 0, f/10 clock)<br>channels 5–6: I2C SCL, SDA (write to address 0x50, f/20 bit/s)<br>further channels: counter |
+| 2 | protocols carrying the text `openSciLab\n`, at 1 MHz sampling rate:<br>channel 1: UART 8N1 at f/10 baud (100,000 baud)<br>channels 2–4: SPI CLK, MOSI, CS (mode 0, f/10 clock)<br>channels 5–6: I2C SCL, SDA (write to address 0x50, f/20 bit/s)<br>further channels: counter |
 
 ## Trigger sequences and state mode
 
@@ -205,7 +262,7 @@ Both use the ring buffer of the stream capture. A PIO program samples without en
 capture buffer through the two ping-pong DMA channels (`SEQUENCE_CAPTURE` at the requested rate,
 5 PIO cycles per sample; `STATE_CAPTURE` on the edges of the clock input). The main loop
 evaluates the trigger sequence on the samples behind the DMA write position
-([`PiPiLogicAnalyzer_Sequence.c`](PiPiLogicAnalyzer/PiPiLogicAnalyzer_Sequence.c), plain C,
+([`sequence.c`](pico/sequence.c), plain C,
 compared with a reference implementation by `tests/test_pico_triggers.py`). It skips samples in
 which no watched channel changed with a load, a mask and a compare per sample and only looks at
 the others in detail. Once the last stage completes at sample *T*, the firmware sends the stop
@@ -348,32 +405,32 @@ active edge (one cycle plus synchroniser jitter).
 
 | File | Problem in the original | Fix |
 | --- | --- | --- |
-| `PiPiLogicAnalyzer.c` | 128 byte receive buffer with an 8 bit index; the overflow check `>= 256` could never trigger. Longer frames overwrote the memory behind it, e.g. WiFi settings with escaped characters (`U` = 0x55 in the password) or garbage after `0x55 0xAA`. | 256 byte buffer (512 since the trigger sequences), 16 bit index, check before writing. |
-| `PiPiLogicAnalyzer.c` | Capture and WiFi requests were interpreted as structures without a length check, directly in the unaligned buffer. | The length must equal `sizeof` the structure; copied with `memcpy`. |
-| `PiPiLogicAnalyzer.c` | SSID, password and IP were stored without a terminating zero although the WiFi core uses them as C strings. | The last byte of every field is set to 0. |
-| `PiPiLogicAnalyzer.c` | WiFi responses were copied into a 32 byte event with `memcpy` without a length limit. | Responses go through `wifi_transfer` in 32 byte chunks; `printf` with the format string `"%s"`. |
-| `PiPiLogicAnalyzer_Capture.c` | Blast mode: the buffer end was computed as `lastPostSize` instead of `lastPostSize - 1`. The first sample was missing and a zeroed one was appended (with a full buffer sample 0 came last). | Correct buffer end. |
-| `PiPiLogicAnalyzer_Capture.c` | The NMI and SysTick handlers of the burst measurement were only restored for `timestampIndex != 0`. After an abort before the first timestamp, the next measurement panicked in `exception_set_exclusive_handler`. | Separate flag `lastBurstMeasure`; the previous SysTick state is restored. |
-| `PiPiLogicAnalyzer_Capture.c` | A burst measurement without loops loaded the measuring PIO program but installed no NMI handler. The `irq wait 1` blocked the capture forever. | Measuring only with `loopCount > 0`; the program is selected accordingly. |
-| `PiPiLogicAnalyzer_Capture.c` | `GetBuffer` computed with `lastTail = 0xFFFFFFFF` when `find_capture_tail` could not determine the DMA position and then wrote far behind the buffer. | The buffer end is limited to the valid range. |
-| `PiPiLogicAnalyzer_Capture.c` | Missing parameter checks: unknown capture mode (undefined buffer size), channel numbers outside the pin map (reading outside the array, arbitrary GPIOs), 0 post-trigger samples (`postLength - 1` gave an endless capture), frequency 0 (division by 0) or too low for the PIO divider, 32 bit overflow of `pre + post × (loops + 1)`. | All values are checked before starting. |
-| `PiPiLogicAnalyzer_Capture.c` | Pattern trigger: bits above the pattern length in the trigger value prevented any trigger. | The trigger value is masked to the pattern length. |
-| `PiPiLogicAnalyzer_Capture.c` | `StopCapture` could finish a capture a second time if it ended right before interrupts were disabled. `captureFinished` was not `volatile`. | Checked again with interrupts disabled; `volatile`. Blast captures no longer touch the unused second DMA channel. |
-| `PiPiLogicAnalyzer_Capture.c` | After a simple capture the PIO program of the other edge was removed, never the measuring one. | The program actually loaded is removed. |
-| `PiPiLogicAnalyzer_Capture.c` | `1 << pin` with pin 31 is undefined in C. | `1u << pin`. |
-| `PiPiLogicAnalyzer_Capture.h` | `RP2350.h` was only included for `BUILD_PICO_2`, not for the Pico 2 W. | Included through `CORE_TYPE_2`. |
-| `PiPiLogicAnalyzer_WiFi.c` | `tryStartServer` had no `return true` on the success path (undefined return value). On errors every retry leaked a PCB. | Return value added, PCBs are closed on errors. |
-| `PiPiLogicAnalyzer_WiFi.c` | `sendData` called `tcp_write` with `NULL` if the client disconnected while waiting for send buffers. | Aborts when no client is connected. |
-| `PiPiLogicAnalyzer_WiFi.c` | `sleep_ms(100)` with interrupts disabled during the battery measurement. | `busy_wait_ms(100)`. |
+| `main.c` | 128 byte receive buffer with an 8 bit index; the overflow check `>= 256` could never trigger. Longer frames overwrote the memory behind it, e.g. WiFi settings with escaped characters (`U` = 0x55 in the password) or garbage after `0x55 0xAA`. | 256 byte buffer (512 since the trigger sequences), 16 bit index, check before writing. |
+| `main.c` | Capture and WiFi requests were interpreted as structures without a length check, directly in the unaligned buffer. | The length must equal `sizeof` the structure; copied with `memcpy`. |
+| `main.c` | SSID, password and IP were stored without a terminating zero although the WiFi core uses them as C strings. | The last byte of every field is set to 0. |
+| `main.c` | WiFi responses were copied into a 32 byte event with `memcpy` without a length limit. | Responses go through `wifi_transfer` in 32 byte chunks; `printf` with the format string `"%s"`. |
+| `capture.c` | Blast mode: the buffer end was computed as `lastPostSize` instead of `lastPostSize - 1`. The first sample was missing and a zeroed one was appended (with a full buffer sample 0 came last). | Correct buffer end. |
+| `capture.c` | The NMI and SysTick handlers of the burst measurement were only restored for `timestampIndex != 0`. After an abort before the first timestamp, the next measurement panicked in `exception_set_exclusive_handler`. | Separate flag `lastBurstMeasure`; the previous SysTick state is restored. |
+| `capture.c` | A burst measurement without loops loaded the measuring PIO program but installed no NMI handler. The `irq wait 1` blocked the capture forever. | Measuring only with `loopCount > 0`; the program is selected accordingly. |
+| `capture.c` | `GetBuffer` computed with `lastTail = 0xFFFFFFFF` when `find_capture_tail` could not determine the DMA position and then wrote far behind the buffer. | The buffer end is limited to the valid range. |
+| `capture.c` | Missing parameter checks: unknown capture mode (undefined buffer size), channel numbers outside the pin map (reading outside the array, arbitrary GPIOs), 0 post-trigger samples (`postLength - 1` gave an endless capture), frequency 0 (division by 0) or too low for the PIO divider, 32 bit overflow of `pre + post × (loops + 1)`. | All values are checked before starting. |
+| `capture.c` | Pattern trigger: bits above the pattern length in the trigger value prevented any trigger. | The trigger value is masked to the pattern length. |
+| `capture.c` | `StopCapture` could finish a capture a second time if it ended right before interrupts were disabled. `captureFinished` was not `volatile`. | Checked again with interrupts disabled; `volatile`. Blast captures no longer touch the unused second DMA channel. |
+| `capture.c` | After a simple capture the PIO program of the other edge was removed, never the measuring one. | The program actually loaded is removed. |
+| `capture.c` | `1 << pin` with pin 31 is undefined in C. | `1u << pin`. |
+| `capture.h` | `RP2350.h` was only included for `BUILD_PICO_2`, not for the Pico 2 W. | Included through `CORE_TYPE_2`. |
+| `wifi.c` | `tryStartServer` had no `return true` on the success path (undefined return value). On errors every retry leaked a PCB. | Return value added, PCBs are closed on errors. |
+| `wifi.c` | `sendData` called `tcp_write` with `NULL` if the client disconnected while waiting for send buffers. | Aborts when no client is connected. |
+| `wifi.c` | `sleep_ms(100)` with interrupts disabled during the battery measurement. | `busy_wait_ms(100)`. |
 | `Event_Machine.c` | `event_has_events` compared the addresses of two structure fields and always returned `true`. | `!queue_is_empty(...)`. |
-| `PiPiLogicAnalyzer_Build_Settings.cmake` | Turbo mode (overclocking and overvoltage) was the default; the board list was outdated. | Turbo off, complete list. |
+| `build_settings.cmake` | Turbo mode (overclocking and overvoltage) was the default; the board list was outdated. | Turbo off, complete list. |
 | `publish.ps1` | Turbo builds were attempted for the Pico 2 W although CMake refuses them. | They are skipped. |
-| `PiPiLogicAnalyzer_WiFi.c` | Received data was never acknowledged with `tcp_recved`: every request shrank the TCP receive window until the connection hung. | Acknowledged as it is handed to the capture core. |
-| `PiPiLogicAnalyzer_WiFi.c` | The error callback closed the PCB that lwIP had already freed; a remote close returned `ERR_ABRT` without aborting the PCB. | Only the reference is dropped; `ERR_ABRT` only after `tcp_abort`. |
-| `PiPiLogicAnalyzer_WiFi.c` | Received data was pushed into the event queue with a blocking call. With both queues full the two cores could block each other; a client that stopped reading stalled both cores. | The data waits in lwIP (closed window) until the queue has room; a client is dropped after 5 s without progress. Responses are sent with `tcp_output`. |
-| `PiPiLogicAnalyzer_Capture.c` | Channels whose GPIO bit did not fit into the samples of the mode read as 0 (Interceptor in 8 and 16 channel mode). | Rejected by the firmware; the application chooses the mode by the GPIO bits. |
-| `PiPiLogicAnalyzer.c` | Unknown trigger types started an edge capture. | `CAPTURE_ERROR`. |
-| `PiPiLogicAnalyzer_Capture.c` | Undefined shifts: `systickLoops << 24` (signed) and the blast mask for the external trigger (negative shift). A blast capture kept the trigger input inverted. | Unsigned shift, mask only for sampled GPIOs, GPIOs released. |
+| `wifi.c` | Received data was never acknowledged with `tcp_recved`: every request shrank the TCP receive window until the connection hung. | Acknowledged as it is handed to the capture core. |
+| `wifi.c` | The error callback closed the PCB that lwIP had already freed; a remote close returned `ERR_ABRT` without aborting the PCB. | Only the reference is dropped; `ERR_ABRT` only after `tcp_abort`. |
+| `wifi.c` | Received data was pushed into the event queue with a blocking call. With both queues full the two cores could block each other; a client that stopped reading stalled both cores. | The data waits in lwIP (closed window) until the queue has room; a client is dropped after 5 s without progress. Responses are sent with `tcp_output`. |
+| `capture.c` | Channels whose GPIO bit did not fit into the samples of the mode read as 0 (Interceptor in 8 and 16 channel mode). | Rejected by the firmware; the application chooses the mode by the GPIO bits. |
+| `main.c` | Unknown trigger types started an edge capture. | `CAPTURE_ERROR`. |
+| `capture.c` | Undefined shifts: `systickLoops << 24` (signed) and the blast mask for the external trigger (negative shift). A blast capture kept the trigger input inverted. | Unsigned shift, mask only for sampled GPIOs, GPIOs released. |
 | `CMakeLists.txt` | A changed `BOARD_TYPE` was ignored in an existing build directory (cached `PICO_BOARD`). | `PICO_BOARD` is forced. |
 
 ## Known, unfixed issues
@@ -385,7 +442,7 @@ active edge (one cycle plus synchroniser jitter).
 
 All twelve variants (eight boards, turbo where possible) compile with Pico SDK 2.1.1 and ARM GCC
 14.2 via `build_all.sh`, without warnings from the source files of this project. The signal
-generator `PiPiLogicAnalyzer_Simulation.c` is also built and checked on the computer in every test
+generator `simulation.c` is also built and checked on the computer in every test
 run. **The changes have not been tested on hardware yet.**
 
 Before relying on it, run the self-test and a simulated capture once and check at least a

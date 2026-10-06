@@ -1,0 +1,6 @@
+project: First capture
+description: Captures the 8 bit counter of the simulator (D0-D3) and its clock (D8) once and shows
+  them in a data view. Run the flow (F5); the scope window opens with the capture.
+devices:
+  la: sim:free
+open: [flows/capture.flow.yaml]

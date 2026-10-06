@@ -6,8 +6,8 @@ import json
 
 import numpy as np
 
-from pipilogicanalyzer.core import capture_io
-from pipilogicanalyzer.driver.models import (
+from openscilab.core import capture_io
+from openscilab.driver.models import (
     AnalyzerChannel,
     BusDefinition,
     BusFormat,

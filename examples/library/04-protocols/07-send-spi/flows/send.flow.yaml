@@ -1,0 +1,42 @@
+flow: Send SPI
+description: The capture waits for CS (D0) to go low; 0.5 ms after its 'armed' (the samples before the trigger are recorded by then) the sequence tells gen.tx_spi to send its 'data'.
+nodes:
+  la: {type: device.instrument, signals: {scenario: idle}, at: [0, 344]}
+  capture:
+    type: device.capture
+    channels: [D0, D1, D2]
+    rate: 1 MHz
+    samples: 4000
+    pre: 100
+    trigger: {edge: falling, source: D0}
+    at: [272, 208]
+  start:
+    type: control.sequence
+    steps: [{wait_for: armed}, {wait: 0.5 ms}, {emit: go}]
+    at: [544, 440]
+  send:
+    type: gen.tx_spi
+    pins: [D0, D1, D2]
+    clock: 100 kHz
+    rate: 1 MHz
+    data: [165, 60, 1]
+    at: [808, 432]
+  spi:
+    type: decode.spi
+    channels: {cs: D0, clk: D1, mosi: D2}
+    cpol: 0
+    cpha: 0
+    wordsize: 8
+    at: [544, 48]
+  check: {type: control.compare, op: ==, value: A53C01, at: [808, 152]}
+  words: {type: view.table, title: SPI words, at: [808, 0]}
+  scope: {type: view.scope, title: SPI, at: [544, 280]}
+edges:
+  - la.device -> capture.device
+  - la.device -> send.device
+  - capture.armed -> start.armed
+  - start.go -> send.data
+  - capture.capture -> spi.in
+  - capture.capture -> scope.in
+  - spi.text -> check.a
+  - spi.table -> words.in

@@ -1,0 +1,30 @@
+flow: Frequency sweep
+description: control.sweep sends the frequencies to the generator's 'frequency' input; after a dwell its 'step' arms the capture; the measured frequency asks for the next step.
+nodes:
+  scope: {type: device.instrument, at: [0, 104]}
+  sweep: {type: control.sweep, values: [1000, 2000, 5000, 10000], dwell: 10 ms, at: [0, 192]}
+  sine: {type: gen.waveform, kind: sine, frequency: 1 kHz, amplitude: 1 V, at: [272, 0]}
+  capture: {type: device.capture, channels: [CH1], rate: 2 MHz, samples: 40000, at: [272, 200]}
+  digital: {type: dsp.threshold, threshold: 0, hysteresis: 0.1, at: [544, 264]}
+  frequency: {type: measure.frequency, at: [808, 272]}
+  table: {type: data.table, columns: [set, measured], at: [1080, 152]}
+  view: {type: view.table, title: Set and measured, at: [1352, 152]}
+  xy:
+    type: view.xy
+    title: Measured over set frequency
+    x_label: Set (Hz)
+    y_label: Measured (Hz)
+    at: [1080, 344]
+edges:
+  - scope.device -> sine.device
+  - scope.device -> capture.device
+  - sweep.value -> sine.frequency
+  - sweep.value -> table.set
+  - sweep.value -> xy.x
+  - sweep.step -> capture.arm
+  - capture.CH1 -> digital.in
+  - digital.out -> frequency.in
+  - frequency.out -> table.measured
+  - frequency.out -> xy.y
+  - frequency.out -> sweep.next
+  - table.table -> view.in

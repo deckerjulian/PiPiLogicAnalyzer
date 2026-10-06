@@ -1,0 +1,7 @@
+project: Replay a capture
+description: A capture played back - the UART line D9 of the simulator is captured, gen.replay plays
+  it on the pattern generator at D3 (pins picks the channel and renames it), a second capture of D3 records the
+  replay, and the UART decoder reads the same text from both.
+devices:
+  la: sim:free
+open: [flows/replay.flow.yaml]

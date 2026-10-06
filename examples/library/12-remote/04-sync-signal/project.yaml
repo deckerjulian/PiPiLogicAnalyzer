@@ -1,0 +1,14 @@
+project: Sync signal
+description: For microsecond alignment the station drives a sync output (in the simulation it is
+  wired to D5 of a simulated logic analyzer - with hardware, a wire from a GPIO of the station to a
+  channel of the analyzer). The analyzer streams D5; remote.sync matches the edges and from then on
+  the station's values are converted on the time axis of that recording.
+devices:
+  station: remote-sim:climate
+  la: sim:free
+simulation:
+  wiring:
+    # the sync output of the station on D5 of the logic analyzer
+    la: [{from: "station:SYNC", to: D5}]
+realtime: true
+open: [flows/sync.flow.yaml]

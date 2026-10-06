@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.sdl import parser
-from pipilogicanalyzer.sdl.parser import (
+from openscilab.sdl import parser
+from openscilab.sdl.parser import (
     DuplicatedGroupError,
     InvalidGroupError,
     InvalidTokenError,

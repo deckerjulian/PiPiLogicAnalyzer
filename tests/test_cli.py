@@ -12,10 +12,10 @@ import threading
 import numpy as np
 import pytest
 
-from pipilogicanalyzer import api, cli
-from pipilogicanalyzer.core import capture_io
-from pipilogicanalyzer.driver import discovery
-from pipilogicanalyzer.driver.base import (
+from openscilab import api, cli
+from openscilab.core import capture_io
+from openscilab.driver import discovery
+from openscilab.driver.base import (
     ACQUISITION_BUFFER,
     ACQUISITION_STREAM,
     CAPABILITY_IMMEDIATE_TRIGGER,
@@ -26,7 +26,7 @@ from pipilogicanalyzer.driver.base import (
     CaptureError,
     DeviceConnectionError,
 )
-from pipilogicanalyzer.driver.models import (
+from openscilab.driver.models import (
     AnalyzerChannel,
     CaptureSession,
     ConditionKind,
@@ -183,9 +183,9 @@ def test_parse_rate_and_duration():
 # ------------------------------------------------------------------ no Qt GUI
 def test_cli_does_not_load_the_user_interface():
     code = (
-        "import sys, pipilogicanalyzer.cli, pipilogicanalyzer.api; "
-        "pipilogicanalyzer.cli.build_parser(); "
-        "bad = [m for m in sys.modules if m.startswith('PySide6.QtWidgets') or m.startswith('pipilogicanalyzer.ui')]; "
+        "import sys, openscilab.cli, openscilab.api; "
+        "openscilab.cli.build_parser(); "
+        "bad = [m for m in sys.modules if m.startswith('PySide6.QtWidgets') or m.startswith('openscilab.ui')]; "
         "print(bad); sys.exit(1 if bad else 0)"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=PROJECT)
@@ -299,7 +299,7 @@ def test_capture_timeout_stops_the_device(capsys, fake, tmp_path):
 
 
 def test_missing_bitstream_explains_the_download(capsys, monkeypatch, tmp_path):
-    from pipilogicanalyzer.driver.dslogic.driver import BitstreamMissingError
+    from openscilab.driver.dslogic.driver import BitstreamMissingError
 
     def missing(device_id, download_bitstream=False):
         assert not download_bitstream
@@ -344,7 +344,7 @@ def test_convert_errors(capsys, tmp_path):
     code, _, err = run(capsys, "convert", source, str(tmp_path / "out.txt"))
     assert code == 1 and "Unknown file type" in err
     code, _, err = run(capsys, "convert", str(tmp_path / "missing.lac"), str(tmp_path / "out.sr"))
-    assert code == 1 and err.startswith("pipilogicanalyzer-cli: error:")
+    assert code == 1 and err.startswith("openscilab-cli: error:")
     code, _, err = run(capsys, "convert", str(tmp_path / "out.vcd"), str(tmp_path / "out.sr"))
     assert code == 1 and "Unknown file type" in err
 
@@ -476,13 +476,13 @@ def test_api_save_and_load(tmp_path):
 
 # ------------------------------------------------------------------ discovery
 def test_list_devices(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import usb
-    from pipilogicanalyzer.driver.pico import detector
+    from openscilab.driver.dslogic import usb
+    from openscilab.driver.pico import detector
 
     monkeypatch.setattr(detector, "detect", lambda: [detector.DetectedDevice("/dev/cu.usbmodem1", "E661")])
     monkeypatch.setattr(usb, "list_devices", lambda: [usb.UsbDeviceInfo(1, 4, 0x0030, "DSLogic U2Pro16")])
     assert discovery.list_devices() == [
-        discovery.DeviceInfo("pico:/dev/cu.usbmodem1", "PiPiLogicAnalyzer on /dev/cu.usbmodem1, S/N E661", "pico"),
+        discovery.DeviceInfo("pico:/dev/cu.usbmodem1", "openSciLab Pico on /dev/cu.usbmodem1, S/N E661", "pico"),
         discovery.DeviceInfo("dslogic:1:4", "DSLogic U2Pro16 (USB 2, 1:4)", "dslogic"),
     ]
 
@@ -492,7 +492,7 @@ def test_open_device_identifiers(monkeypatch):
     monkeypatch.setattr(discovery, "_open_pico", lambda text: calls.append(("pico", text)))
     monkeypatch.setattr(discovery, "_open_dslogic", lambda text, download: calls.append(("dslogic", text, download)))
 
-    from pipilogicanalyzer.driver.pico import multi
+    from openscilab.driver.pico import multi
 
     monkeypatch.setattr(multi, "MultiAnalyzerDriver", lambda strings: calls.append(("multi", strings)))
 
@@ -529,8 +529,8 @@ def test_open_missing_dslogic():
 
 
 def test_dslogic_bitstream_download(monkeypatch):
-    from pipilogicanalyzer.driver.dslogic import driver as dslogic_driver
-    from pipilogicanalyzer.driver.dslogic import resources, usb
+    from openscilab.driver.dslogic import driver as dslogic_driver
+    from openscilab.driver.dslogic import resources, usb
 
     info = usb.UsbDeviceInfo(1, 4, 0x0030, "DSLogic U2Pro16")
     monkeypatch.setattr(usb, "find_device", lambda location: info)
@@ -553,3 +553,82 @@ def test_dslogic_bitstream_download(monkeypatch):
     attempts.clear()
     assert discovery.open_device("dslogic:1:4", download_bitstream=True) == "driver"
     assert downloads == ["X.bin"]
+
+
+# ------------------------------------------------------------------- flows
+def test_run_a_flow_with_the_simulator_fast(tmp_path, capsys):
+    import time
+
+    report = tmp_path / "report.html"
+    started = time.monotonic()
+    status = cli.main(["run", os.path.join(PROJECT, "examples", "flows", "counter.flow.yaml"), "--sim", "--fast",
+                       "--data-dir", str(tmp_path), "--report", str(report)])
+    assert status == 0
+    assert time.monotonic() - started < 1
+    out = capsys.readouterr().out
+    assert "Counter: finished after" in out and "virtual time" in out
+    session = capture_io.load_capture(str(tmp_path / "counter.lac")).session
+    assert session.total_samples == 20000
+    assert "Counter" in report.read_text() and "finished" in report.read_text()
+
+
+def test_run_a_dsl_script_and_override_a_device(tmp_path, capsys):
+    script = tmp_path / "flow.py"
+    script.write_text(
+        "from openscilab.lab import flow, nodes as n\n"
+        "with flow('Script') as f:\n"
+        "    dev = f.device('dev', 'pico:/dev/none')\n"
+        "    n.device.capture(dev, channels=['D15'], samples=100) >> n.data.file(path='x.csv')\n"
+        "f.run()  # does nothing under 'openscilab run'\n"
+    )
+    status = cli.main(["run", str(script), "--fast", "--device", "dev=sim:free", "--data-dir", str(tmp_path), "-q"])
+    assert status == 0
+    assert (tmp_path / "x.csv").exists()
+
+
+def test_run_a_flow_of_the_project_by_its_name(tmp_path, monkeypatch, capsys):
+    (tmp_path / "project.yaml").write_text("project: P\ndevices:\n  la: sim:free\n")
+    (tmp_path / "flows").mkdir()
+    (tmp_path / "flows" / "count.flow.yaml").write_text(
+        "flow: Count\nnodes:\n  la: {type: device.instrument}\n"
+        "  cap: {type: device.capture, channels: [D15], rate: 1 MHz, samples: 1000}\n"
+        "  n: {type: measure.count}\nedges:\n  - la.device -> cap.device\n  - cap.D15 -> n.in\n")
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["run", "count", "--fast", "-q"]) == 0
+    assert cli.main(["run", "nothing", "--fast"]) == 1
+    assert "no such flow file" in capsys.readouterr().err
+
+
+def test_run_reports_errors(tmp_path, capsys):
+    broken = tmp_path / "broken.flow.yaml"
+    broken.write_text("flow: B\nnodes:\n  a: {type: no.such}\nedges: []\n")
+    assert cli.main(["run", str(broken), "--fast"]) == 1
+    assert "unknown node type" in capsys.readouterr().err
+    assert cli.main(["run", str(tmp_path / "missing.flow.yaml")]) == 1
+    assert cli.main(["run", str(broken), "--device", "nonsense"]) == 1
+
+
+def test_sim_lists_and_describes_profiles(capsys):
+    assert cli.main(["sim"]) == 0
+    assert "sim:free" in capsys.readouterr().out
+    assert cli.main(["sim", "free"]) == 0
+    out = capsys.readouterr().out
+    assert "Memory depth" in out and "D9" in out and "UART" in out
+
+
+def test_the_app_command_runs_cli_commands(capsys):
+    from openscilab import app
+
+    assert app.main(["sim"]) == 0
+    assert "sim:free" in capsys.readouterr().out
+
+
+def test_api_opens_simulators_and_runs_flows(tmp_path):
+    with api.open("sim:free") as device:
+        assert device.channel_count == 16
+    with pytest.raises(DeviceConnectionError):
+        api.open("sim:nothing")
+    result = api.run_flow(os.path.join(PROJECT, "examples", "flows", "counter.flow.yaml"), fast=True,
+                          data_dir=str(tmp_path))
+    assert result.ok and (tmp_path / "counter.lac").exists()
+    assert api.lab.flow is not None

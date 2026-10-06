@@ -1,0 +1,22 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'>
+  <defs>
+    <linearGradient id='background' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0' stop-color='#3a3a41'/>
+      <stop offset='1' stop-color='#1b1b1f'/>
+    </linearGradient>
+    <linearGradient id='liquid' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0' stop-color='#4b8ae6' stop-opacity='0.35'/>
+      <stop offset='1' stop-color='#4b8ae6' stop-opacity='0.12'/>
+    </linearGradient>
+  </defs>
+  <rect x='64' y='64' width='896' height='896' rx='200' fill='url(#background)'/>
+  <rect x='64' y='64' width='896' height='896' rx='200' fill='none' stroke='#55555e' stroke-width='8'/>
+  <path d='M326 640 L262 778 Q246 846 318 846 H706 Q778 846 762 778 L698 640 Z' fill='url(#liquid)'/>
+  <path d='M300 660 H372 V572 H456 V660 H540 V572 H624 V660 H724' fill='none' stroke='#7fd18b'
+        stroke-width='40' stroke-linecap='round' stroke-linejoin='round'/>
+  <path d='M392 196 H632 M432 196 V408 L246 790 Q226 854 300 854 H724 Q798 854 778 790 L592 408 V196'
+        fill='none' stroke='#e8ecf2' stroke-width='44' stroke-linecap='round' stroke-linejoin='round'/>
+  <circle cx='520' cy='480' r='26' fill='#e8b04b'/>
+  <circle cx='568' cy='392' r='17' fill='#e8b04b'/>
+  <circle cx='498' cy='318' r='12' fill='#e8b04b'/>
+</svg>

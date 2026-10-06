@@ -1,0 +1,29 @@
+flow: Square wave
+description: gen.waveform with kind square on the output SQUARE (0 V to 5 V - amplitude 2.5 V around 2.5 V); 'sync' arms the capture of D9.
+nodes:
+  uno: {type: device.instrument, at: [0, 56]}
+  square:
+    type: gen.waveform
+    output: SQUARE
+    kind: square
+    frequency: 10 kHz
+    amplitude: 2.5 V
+    offset: 2.5 V
+    at: [272, 88]
+  capture: {type: device.capture, channels: [D9], rate: 100 kHz, samples: 448, at: [544, 48]}
+  frequency: {type: measure.frequency, at: [808, 152]}
+  check:
+    type: report.check
+    name: Frequency on D9
+    expected: 10000
+    tolerance: 100
+    unit: Hz
+    at: [1080, 152]
+  view: {type: view.scope, title: D9, at: [808, 0]}
+edges:
+  - uno.device -> square.device
+  - uno.device -> capture.device
+  - square.sync -> capture.arm
+  - capture.D9 -> frequency.in
+  - frequency.out -> check.in
+  - capture.capture -> view.in

@@ -1,6 +1,6 @@
 # Credits and third-party notices
 
-PiPiLogicAnalyzer is licensed under the GNU General Public License v3 (see [LICENSE](LICENSE)).
+openSciLab (formerly PiPiLogicAnalyzer) is licensed under the GNU General Public License v3 (see [LICENSE](LICENSE)).
 It contains, is based on, or is distributed together with the following works. Their copyright
 notices and licenses are kept; the complete license texts are part of the respective projects.
 
@@ -8,10 +8,10 @@ notices and licenses are kept; the complete license texts are part of the respec
 
 <https://github.com/gusmanb/logicanalyzer> — GNU General Public License v3
 
-PiPiLogicAnalyzer is a modified and extended version of this project, based on version 6.5
-(branch `version/v6_5`, commit `3fa3703`):
+openSciLab (formerly PiPiLogicAnalyzer) is a modified and extended version of this project, based
+on version 6.5 (branch `version/v6_5`, commit `3fa3703`):
 
-* the firmware in `firmware/PiPiLogicAnalyzer` is his firmware with the bug fixes and additions
+* the Pico firmware in `firmware/pico` is his firmware with the bug fixes and additions
   described in [firmware/README.md](firmware/README.md);
 * the application is a Python/Qt port of his C#/Avalonia software (`LogicAnalyzer`,
   `SharedDriver`, `SignalDescriptionLanguage`, the sigrok decoder bridge) with the changes
@@ -25,12 +25,12 @@ Thank you, Agustín, for the LogicAnalyzer hardware, firmware and software.
 
 <https://github.com/DreamSourceLab/DSView> — GNU General Public License v3 or later
 
-The DSLogic driver in `pipilogicanalyzer/driver/dslogic` implements the USB protocol of the
+The DSLogic driver in `openscilab/driver/dslogic` implements the USB protocol of the
 DSLogic analyzers after the driver of DSView (`libsigrok4DSL/hardware/DSL`, `trigger.c`): device
 profiles, commands, capture settings and data format. The FPGA bitstreams and firmware images of
 the DSLogic boards are **not** included; they are loaded from a DSView installation or
 downloaded from the DSView repository at the user's request. DSLogic and DSView are trademarks
-of DreamSourceLab; PiPiLogicAnalyzer is not affiliated with DreamSourceLab.
+of DreamSourceLab; openSciLab is not affiliated with DreamSourceLab.
 
 ## Protocol decoders (`decoders/`)
 
@@ -54,6 +54,7 @@ The decoders are shipped as source files, including in the packaged applications
 | AppImage runtime (Linux build) | MIT, with squashfuse and zstd (BSD) | <https://github.com/AppImage/AppImageKit> |
 | pyserial | BSD-3-Clause | <https://github.com/pyserial/pyserial> |
 | pyusb | BSD-3-Clause | <https://github.com/pyusb/pyusb> |
+| PyYAML (flow, panel and waveform files) | MIT | <https://pyyaml.org> |
 | libusb (via libusb-package, shared library) | GNU Lesser General Public License v2.1 | <https://libusb.info>, <https://github.com/pyocd/libusb-package> |
 | PyInstaller bootloader | GPL-2.0-or-later with the PyInstaller bootloader exception | <https://pyinstaller.org> |
 

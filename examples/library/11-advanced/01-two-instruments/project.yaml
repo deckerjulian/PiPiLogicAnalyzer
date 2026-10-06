@@ -1,0 +1,12 @@
+project: Two instruments
+description: An Arduino makes a PWM signal, an oscilloscope measures it - two devices in one flow.
+  In the simulation the probe of CH1 sits on D9 of the Uno (simulation/wiring in project.yaml); with
+  real devices, connect them the same way.
+devices:
+  uno: sim:uno
+  scope: sim:dho924s
+simulation:
+  wiring:
+    # the probe of CH1 on D9 of the Uno
+    scope: [{from: "uno:D9", to: CH1}]
+open: [flows/two.flow.yaml]

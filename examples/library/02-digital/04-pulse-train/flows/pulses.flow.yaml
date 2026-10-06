@@ -1,0 +1,38 @@
+flow: Pulse train
+description: The capture is armed first; 1 ms after 'armed' (the samples before the trigger are recorded by then) the board starts the pulses.
+nodes:
+  uno: {type: device.instrument, at: [0, 144]}
+  capture:
+    type: device.capture
+    channels: [D3]
+    rate: 100 kHz
+    samples: 448
+    pre: 20
+    trigger: {edge: rising, source: D3}
+    at: [272, 200]
+  delay:
+    type: control.sequence
+    steps: [{wait_for: armed}, {wait: 1 ms}, {emit: go}]
+    at: [544, 152]
+  pulse: {type: gpio.pulse, pin: D7, width: 500 us, count: 3, period: 1 ms, at: [808, 72]}
+  count: {type: measure.count, edge: rising, at: [544, 368]}
+  width: {type: measure.pulse_width, level: high, at: [544, 504]}
+  count_check: {type: report.check, name: Pulses, expected: 3, at: [808, 360]}
+  width_check:
+    type: report.check
+    name: Width
+    expected: 0.0005
+    tolerance: 2.0e-05
+    unit: s
+    at: [808, 512]
+  scope: {type: view.scope, title: D3, at: [544, 0]}
+edges:
+  - uno.device -> capture.device
+  - uno.device -> pulse.device
+  - capture.armed -> delay.armed
+  - delay.go -> pulse.trigger
+  - capture.D3 -> count.in
+  - capture.D3 -> width.in
+  - count.out -> count_check.in
+  - width.out -> width_check.in
+  - capture.capture -> scope.in

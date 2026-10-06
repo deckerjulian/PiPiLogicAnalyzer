@@ -7,15 +7,15 @@ import zipfile
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core import sigrok_session
-from pipilogicanalyzer.core.sigrok_session import (
+from openscilab.core import sigrok_session
+from openscilab.core.sigrok_session import (
     SigrokSessionError,
     load_session,
     parse_samplerate,
     samplerate_string,
     save_session,
 )
-from pipilogicanalyzer.driver.models import AnalyzerChannel, CaptureSession
+from openscilab.driver.models import AnalyzerChannel, CaptureSession
 
 
 @pytest.mark.parametrize(

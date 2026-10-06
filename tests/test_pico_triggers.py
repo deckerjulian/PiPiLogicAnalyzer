@@ -1,8 +1,8 @@
 """Trigger sequences and state mode of the PiPiLogicAnalyzer firmware (trigger type 7, command 10).
 
 The driver is exercised against a fake transport; the evaluation of the firmware
-(``PiPiLogicAnalyzer_Sequence.c``) is compiled on the computer and compared with a reference
-implementation of the semantics in ``pipilogicanalyzer/driver/models.py``.
+(``sequence.c``) is compiled on the computer and compared with a reference
+implementation of the semantics in ``openscilab/driver/models.py``.
 """
 
 from __future__ import annotations
@@ -18,14 +18,14 @@ from typing import Optional
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.driver.base import (
+from openscilab.driver.base import (
     ACQUISITION_STREAM,
     CAPABILITY_STATE_MODE,
     CAPABILITY_TRIGGER_SEQUENCE,
     CaptureError,
     CaptureMode,
 )
-from pipilogicanalyzer.driver.models import (
+from openscilab.driver.models import (
     AnalyzerChannel,
     CaptureSession,
     ConditionKind,
@@ -35,18 +35,18 @@ from pipilogicanalyzer.driver.models import (
     TriggerStage,
     TriggerType,
 )
-from pipilogicanalyzer.driver.pico import analyzer, protocol
-from pipilogicanalyzer.driver.pico.analyzer import PiPiLogicAnalyzerDriver
-from pipilogicanalyzer.driver.pico.protocol import (
+from openscilab.driver.pico import analyzer, protocol
+from openscilab.driver.pico.analyzer import PicoDriver
+from openscilab.driver.pico.protocol import (
     SEQUENCE_NO_LIMIT,
     SequenceRequest,
     SequenceStage,
 )
-from pipilogicanalyzer.sigrok.engine import PROJECT_DIRECTORY
+from openscilab.sigrok.engine import PROJECT_DIRECTORY
 
 from test_driver import FakeTransport, build_capture_payload
 
-FIRMWARE = os.path.join(PROJECT_DIRECTORY, "firmware", "PiPiLogicAnalyzer")
+FIRMWARE = os.path.join(PROJECT_DIRECTORY, "firmware", "pico")
 
 NEW_CAPS = (
     "CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,PATTERN_GROUPS=0-20/21-23,"
@@ -60,8 +60,8 @@ OLD_CAPS = "CAPS:SELFTEST,SIMULATION,DEVICEINFO,STREAM=800000,EDGE_TRIGGER_OUT,P
 def make_driver(monkeypatch, caps: Optional[str], version: str = "PIPI_LOGIC_ANALYZER_PICO_V7_1"):
     transport = FakeTransport()
     transport._responses[0] = version
-    monkeypatch.setattr("pipilogicanalyzer.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
-    driver = PiPiLogicAnalyzerDriver("/dev/fake")
+    monkeypatch.setattr("openscilab.driver.pico.analyzer.SerialTransport", lambda *args, **kwargs: transport)
+    driver = PicoDriver("/dev/fake")
     transport.queue_response(caps if caps is not None else "ERR_UNKNOWN_MSG")
     driver.capabilities()
     transport.written.clear()
@@ -131,8 +131,8 @@ def test_the_longest_sequence_fits_into_the_firmware_receive_buffer():
     stages = [SequenceStage(kind=0, mask=0xAAAAAAAA, value=0x55555555, count=0xF0F0F0F0) for _ in range(8)]
     payload = SequenceRequest(stages=stages).pack()
     assert 2 + 2 * (1 + len(payload)) + 2 <= 512
-    with open(os.path.join(FIRMWARE, "PiPiLogicAnalyzer.c")) as source:
-        assert "#define MESSAGE_BUFFER_SIZE 512" in source.read()
+    with open(os.path.join(FIRMWARE, "proto.h")) as source:
+        assert "#define PROTO_FRAME_MAX 512" in source.read()
 
 
 def test_nanoseconds_become_samples_without_float_rounding():
@@ -186,6 +186,7 @@ def test_older_firmware_keeps_the_normal_captures(old_pico):
     session = sequence_session([], pre=2, post=6)
     session.trigger_type = TriggerType.EDGE
     old_pico.test_transport.queue_response("CAPTURE_STARTED")
+    old_pico.test_transport.queue_response("CAPTURE_DATA")
     old_pico.test_transport.queue_data(build_capture_payload([1, 2, 3, 4, 5, 6, 7, 8], CaptureMode.CHANNELS_8))
     result = run_capture(old_pico, session)
     assert result.success
@@ -269,6 +270,7 @@ def test_a_sequence_capture_sends_the_stages_and_reads_the_samples(pico):
     transport = pico.test_transport
     transport.queue_response("SEQUENCE_OK")
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     words = [(index * 7) & 0x0F for index in range(500)]
     transport.queue_data(build_capture_payload(words, CaptureMode.CHANNELS_8))
 
@@ -299,6 +301,7 @@ def test_stage_channels_widen_the_capture_mode(pico):
     transport = pico.test_transport
     transport.queue_response("SEQUENCE_OK")
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     transport.queue_data(build_capture_payload([3, 1] * 15, CaptureMode.CHANNELS_16))
     result = run_capture(pico, session)
     assert result.success
@@ -314,6 +317,7 @@ def test_a_capture_without_samples_reports_the_overflow(pico):
     transport = pico.test_transport
     transport.queue_response("SEQUENCE_OK")
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     transport.queue_data(struct.pack("<I", 0) + bytes([0]))
     done = threading.Event()
     results = []
@@ -354,6 +358,7 @@ def test_state_mode_captures(pico, trigger, expected_stages):
     transport = pico.test_transport
     transport.queue_response("SEQUENCE_OK")
     transport.queue_response("CAPTURE_STARTED")
+    transport.queue_response("CAPTURE_DATA")
     transport.queue_data(build_capture_payload(list(range(32)), CaptureMode.CHANNELS_8))
 
     result = run_capture(pico, session)
@@ -395,6 +400,7 @@ def test_the_state_mode_ignores_the_sequence_rate(pico):
     session.clock_channel = 5
     pico.test_transport.queue_response("SEQUENCE_OK")
     pico.test_transport.queue_response("CAPTURE_STARTED")
+    pico.test_transport.queue_response("CAPTURE_DATA")
     pico.test_transport.queue_data(build_capture_payload([0] * 500, CaptureMode.CHANNELS_8))
     assert run_capture(pico, session).success
 
@@ -416,15 +422,18 @@ def test_the_state_mode_without_firmware_sequences_is_immediate_only(monkeypatch
     session.trigger_type = TriggerType.IMMEDIATE
     driver.test_transport.queue_response("SEQUENCE_OK")
     driver.test_transport.queue_response("CAPTURE_STARTED")
+    driver.test_transport.queue_response("CAPTURE_DATA")
     driver.test_transport.queue_data(build_capture_payload([0] * 500, CaptureMode.CHANNELS_8))
     assert run_capture(driver, session).success
 
 
 def test_firmware_sources_report_the_capabilities():
-    with open(os.path.join(FIRMWARE, "PiPiLogicAnalyzer.c")) as source:
+    with open(os.path.join(FIRMWARE, "main.c")) as source:
         text = source.read()
-    assert "TRIGGER_SEQUENCE=%d,TRIGGER_CONDITIONS=pattern/edge/pulse/gap,SEQUENCE_MAX_RATE=%lu,STATE_MODE,STATE_MAX_CLOCK=%lu" in text
-    assert "case 10:" in text and "req->triggerType == 7" in text
+    # the strings come from capabilities.h (tests/test_protocol_spec.py compiles and parses the line)
+    assert ('CAP_TRIGGER_SEQUENCE "=%d," CAP_TRIGGER_CONDITIONS "pattern/edge/pulse/gap," CAP_SEQUENCE_MAX_RATE "%lu,"'
+            in text)
+    assert "case CMD_SEQUENCE:" in text and "req->triggerType == 7" in text
 
 
 # ------------------------------------------- the firmware evaluation (C, on the computer)
@@ -434,7 +443,7 @@ HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "PiPiLogicAnalyzer_Sequence.h"
+#include "sequence.h"
 
 /* Input per case: ring bytes seed stages samples, the stages (kind edge bit mask value min max
    count within), the samples. The samples are written into a ring buffer in chunks of random
@@ -506,7 +515,7 @@ def firmware_sequence(tmp_path_factory):
     subprocess.run(
         [
             compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-I", FIRMWARE,
-            str(source), os.path.join(FIRMWARE, "PiPiLogicAnalyzer_Sequence.c"), "-o", str(binary),
+            str(source), os.path.join(FIRMWARE, "sequence.c"), "-o", str(binary),
         ],
         check=True,
         capture_output=True,

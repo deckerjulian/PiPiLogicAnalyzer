@@ -1,0 +1,24 @@
+flow: Buffer
+description: data.buffer with 'length' joins the blocks of the stream and drops what is older; 'read' sends it.
+nodes:
+  la: {type: device.instrument, at: [0, 0]}
+  stream:
+    type: device.stream
+    channels: [D0, D1, D2, D8]
+    rate: 4 MHz
+    duration: 400 ms
+    at: [272, 0]
+  latest: {type: data.buffer, length: 5 ms, at: [544, 136]}
+  timer: {type: control.timer, interval: 100 ms, count: 3, delay: 50 ms, at: [272, 288]}
+  scope: {type: view.scope, title: The last 5 ms, at: [808, 200]}
+  clock: {type: convert.channel, channel: D8, at: [808, 64]}
+  size: {type: measure.count, total: false, edge: rising, at: [1080, 64]}
+  show: {type: view.number, title: Clock edges in the buffer, at: [1352, 64]}
+edges:
+  - la.device -> stream.device
+  - stream.capture -> latest.in
+  - timer.tick -> latest.read
+  - latest.out -> scope.in
+  - latest.out -> clock.in
+  - clock.out -> size.in
+  - size.out -> show.in

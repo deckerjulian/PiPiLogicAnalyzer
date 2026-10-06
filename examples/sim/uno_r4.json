@@ -1,0 +1,361 @@
+{
+  "name": "uno_r4",
+  "title": "Simulation: Uno R4",
+  "description": "Arduino Uno R4 with the openSciLab firmware: D0-D13 as inputs and outputs (USB is native, D0/D1 are free), PWM on D3, D5, D6, D9, D10, D11, A0-A5 analog (14 bit, 5 V), a 12 bit DAC on A0. Wired: the DAC (A0) to A1, D7 to D3, PWM of D9 through an RC low pass (10 kΩ, 10 µF) to A2, a push button with bounce on D2.",
+  "firmware": "arduino",
+  "provisional": "Values of the openSciLab Arduino firmware (phase 2) until measured (step 2a).",
+  "digital": [
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13"
+  ],
+  "analog": [
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5"
+  ],
+  "pins": [
+    {
+      "name": "D0",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D1",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D2",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "D3",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PWM",
+        "CLOCK"
+      ]
+    },
+    {
+      "name": "D4",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D5",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PWM",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D6",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PWM",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D7",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D8",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D9",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PWM",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D10",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PWM",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D11",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "PWM",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D12",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "D13",
+      "caps": [
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "CLOCK_SW"
+      ]
+    },
+    {
+      "name": "A0",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP",
+        "DAC"
+      ],
+      "analog_channel": 0
+    },
+    {
+      "name": "A1",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP"
+      ],
+      "analog_channel": 1
+    },
+    {
+      "name": "A2",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP"
+      ],
+      "analog_channel": 2
+    },
+    {
+      "name": "A3",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP"
+      ],
+      "analog_channel": 3
+    },
+    {
+      "name": "A4",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP"
+      ],
+      "analog_channel": 4
+    },
+    {
+      "name": "A5",
+      "caps": [
+        "ADC",
+        "DIN",
+        "DOUT",
+        "PULLUP"
+      ],
+      "analog_channel": 5
+    }
+  ],
+  "max_rate": 1000000,
+  "memory_depth": 12288,
+  "stream_bandwidth": 500000,
+  "adc_bits": 14,
+  "analog_range": [
+    0.0,
+    5.0
+  ],
+  "adc_noise": 0.002,
+  "logic_level": 5.0,
+  "latency": 0.001,
+  "gpio_latency": 0.001,
+  "watchdog": 1.0,
+  "monitor_rate": 2000,
+  "dac_range": [
+    0.0,
+    5.0
+  ],
+  "dac_bits": 12,
+  "capabilities": [
+    "GPIO",
+    "PWM",
+    "MONITOR",
+    "DAC",
+    "AFG",
+    "IMMEDIATE_TRIGGER",
+    "CONTINUOUS_STREAM",
+    "STATE_MODE",
+    "STREAM_STATE",
+    "PATTERN_GEN=200000,6",
+    "GEN_SQUARE",
+    "TX_UART",
+    "TX_SPI",
+    "TX_I2C"
+  ],
+  "clock_pins": [
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13"
+  ],
+  "outputs": [
+    {
+      "name": "DAC",
+      "kind": "analog",
+      "net": "A0",
+      "voltage_range": [
+        0.0,
+        5.0
+      ],
+      "resolution": 12,
+      "max_rate": 100000,
+      "max_points": 2048,
+      "max_frequency": 10000,
+      "capabilities": [
+        "ARB"
+      ]
+    },
+    {
+      "name": "PATTERN",
+      "kind": "pattern",
+      "pins": [
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7"
+      ],
+      "max_rate": 200000,
+      "max_points": 8192
+    },
+    {
+      "name": "SQUARE",
+      "kind": "square",
+      "net": "D9",
+      "pins": [
+        "D9"
+      ],
+      "voltage_range": [
+        0.0,
+        5.0
+      ],
+      "max_frequency": 12000000
+    }
+  ],
+  "circuit": {
+    "sources": {
+      "D2": {
+        "type": "button",
+        "presses": [],
+        "bounce": "2 ms",
+        "bounces": 4
+      }
+    },
+    "wiring": [
+      {
+        "from": "A0",
+        "to": "A1"
+      },
+      {
+        "from": "D7",
+        "to": "D3"
+      },
+      {
+        "from": "D9",
+        "to": "A2",
+        "rc": {
+          "r": "10k",
+          "c": "10 uF"
+        }
+      }
+    ]
+  },
+  "i2c_devices": {
+    "0x48": "1900"
+  },
+  "memory_depth_digital": {
+    "8": 12288,
+    "16": 6144
+  },
+  "stream_max_rate": 100000,
+  "buffer_analog": false,
+  "max_post_seconds": 2,
+  "clock_hz": 48000000
+}

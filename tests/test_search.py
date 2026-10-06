@@ -8,15 +8,15 @@ import time
 import numpy as np
 import pytest
 
-from pipilogicanalyzer.core.search import (
+from openscilab.core.search import (
     AnnotationMatch,
     find_annotations,
     find_bus_values,
     match_positions,
     next_match,
 )
-from pipilogicanalyzer.sigrok.engine import Annotation, AnnotationSegment
-from pipilogicanalyzer.sigrok.provider import AnnotationGroup, DecoderInstance
+from openscilab.sigrok.engine import Annotation, AnnotationSegment
+from openscilab.sigrok.provider import AnnotationGroup, DecoderInstance
 
 VALUES = np.array([1, 1, 5, 5, 2, 7, 7, 1, 9], dtype=np.uint8)
 

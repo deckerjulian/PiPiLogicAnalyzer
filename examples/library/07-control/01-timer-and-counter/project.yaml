@@ -1,0 +1,4 @@
+project: Timer and counter
+description: The simplest flow without a device - a timer ticks ten times, a counter counts the ticks
+  and math squares the count. Good to try single steps and breakpoints (F10 while paused).
+open: [flows/timer.flow.yaml]
