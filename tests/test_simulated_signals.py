@@ -286,7 +286,10 @@ def test_a_channel_gets_a_signal_by_hand(shell, monkeypatch):
 
     monkeypatch.setattr(SourceDialog, "exec", choose)
     row = panel.nets().index("D5")
-    assert panel.edit_channel(row)
+    assert not panel.edit_button.isEnabled()  # (for the channel selected in the table)
+    panel.table.selectRow(row)
+    assert panel.edit_button.isEnabled()
+    panel.edit_button.click()
     assert instrument.simulated_driver.circuit.describe()["D5"].startswith("square 2 kHz")
     assert "set by hand" in panel.table.item(row, 2).text()
 

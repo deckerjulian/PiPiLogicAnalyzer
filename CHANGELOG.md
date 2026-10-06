@@ -18,6 +18,9 @@ again from 0.1.
 - The sidebar starts at its width (250 px) instead of taking the room of the hidden node palette
   as well; the node palette opens beside it at its own width. A layout saved by an earlier version
   is not restored once (it held the wide sidebar).
+- *Signals* of a simulator's device card: the button for a channel's own signal says that it acts
+  on the channel selected in the table (*Set signal of the selected channel…*) and is off while
+  none is selected (before, it did nothing without a selection).
 
 ### Devices
 

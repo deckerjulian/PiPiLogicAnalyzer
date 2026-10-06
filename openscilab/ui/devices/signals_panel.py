@@ -227,9 +227,14 @@ class SignalsPanel(QWidget):
         self.table.cellDoubleClicked.connect(lambda row, _column: self.edit_channel(row))
         layout.addWidget(self.table, 1)
         footer = QHBoxLayout()
-        self.edit_button = QPushButton("Signal of the channel...", self)
+        self.edit_button = QPushButton("Set signal of the selected channel...", self)
         set_icon(self.edit_button, "pencil")
+        self.edit_button.setToolTip("Give the channel selected in the table a signal of its own, instead of the "
+                                    "one of the scenario (or double-click the channel)")
         self.edit_button.clicked.connect(lambda: self.edit_channel(self.table.currentRow()))
+        self.edit_button.setEnabled(False)  # (until a channel is selected)
+        self.table.itemSelectionChanged.connect(
+            lambda: self.edit_button.setEnabled(bool(self.table.selectionModel().selectedRows())))
         footer.addWidget(self.edit_button)
         footer.addWidget(hint("What the device drives itself (outputs, a generator, its wiring) stays as it is.",
                               self), 1)
