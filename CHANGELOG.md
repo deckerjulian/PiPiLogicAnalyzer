@@ -49,6 +49,9 @@ again from 0.1.
 - **A device process that hangs is ended**: a device process sends a sign of life every second;
   after 10 s without one, or when a call to it takes longer than 60 s, it is ended and its device
   shown as disconnected (its capture fails with the reason) instead of freezing what waited for it.
+- No error while a capture still arrives is drawn: the data view read the state of the transfer
+  twice in one paint, and when the transfer ended in between, the paint failed (a flickering view,
+  "endPaint called with active painter" in the log).
 - A protocol decoder that cannot be loaded is no longer left out silently: *Help → Decoder search
   paths…* names it with the error, and the log says so.
 - Nothing fails silently any more: every error openSciLab ignores on purpose (a port that is gone

@@ -245,16 +245,16 @@ class AnalogViewer(QWidget):
             painter.drawPath(band)
         painter.setRenderHint(QPainter.Antialiasing, False)
         if progressive is not None:
-            self._draw_missing(painter, rect)
+            self._draw_missing(painter, rect, progressive)
         session = model.session
         if session is not None and session.pre_trigger_samples:
             x = round(self.x_for(session.pre_trigger_samples)) + 0.5
             painter.setPen(QPen(colors.TRIGGER_LINE_COLOR, 1, Qt.DashLine))
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
 
-    def _draw_missing(self, painter: QPainter, rect: QRectF) -> None:
-        """Hatch the parts that did not arrive yet."""
-        progressive = self.model.progressive
+    def _draw_missing(self, painter: QPainter, rect: QRectF, progressive) -> None:
+        """Hatch the parts that did not arrive yet (``progressive`` as the paint read it: the model
+        may drop it while the paint runs, when the transfer ends)."""
         hatch = QColor(255, 255, 255, 22)
         for tile in progressive.tiles_of(self.model.first_sample, self.model.first_sample + self.model.visible_samples):
             if progressive.loaded[tile]:

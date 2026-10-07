@@ -139,7 +139,7 @@ class SampleViewer(QWidget):
             top = round(index * channel_height + margin) + 0.5
             bottom = round((index + 1) * channel_height - margin) - 0.5
             if progressive is not None:
-                self._draw_progressive(painter, channel, top, bottom)
+                self._draw_progressive(painter, channel, top, bottom, progressive)
                 continue
             transitions = self.model.transitions_for(channel)
             if transitions is None or transitions.sample_count == 0:
@@ -147,7 +147,7 @@ class SampleViewer(QWidget):
             self._draw_channel(painter, transitions, top, bottom, channel)
         painter.setRenderHint(QPainter.Antialiasing, False)
         if progressive is not None:
-            self._draw_missing(painter, bounds)
+            self._draw_missing(painter, bounds, progressive)
 
         self._draw_markers(painter, bounds)
         overlays.draw_search_hits(painter, self.model, self._x_for, bounds)
@@ -309,7 +309,8 @@ class SampleViewer(QWidget):
         columns = max(int(round(width * (last - first) / max(visible, 1))), 1)
         if last <= first:
             return np.zeros(0, dtype=np.int8)
-        if channel.samples is not None and progressive.is_loaded(first, last) and (last - first) <= width * 64:
+        if channel.samples is not None and progressive is not None and progressive.is_loaded(first, last) \
+                and (last - first) <= width * 64:
             low, high = column_envelope(np.asarray(channel.samples[first:last]), columns)
         else:
             overview = model.digital_overview(channel)
@@ -318,7 +319,9 @@ class SampleViewer(QWidget):
             low, high = overview.envelope(first, last, columns)
         return np.where(low != high, 2, high).astype(np.int8)
 
-    def _draw_progressive(self, painter: QPainter, channel, top: float, bottom: float) -> None:
+    def _draw_progressive(self, painter: QPainter, channel, top: float, bottom: float, progressive) -> None:
+        """A channel of a capture still arriving (``progressive`` as the paint read it: the model
+        may drop it while the paint runs, when the transfer ends)."""
         color = colors.get_channel_color(channel)
         pen = QPen(color, LINE_WIDTH)
         pen.setCosmetic(True)
@@ -326,7 +329,7 @@ class SampleViewer(QWidget):
         model = self.model
         first, visible = model.first_sample, model.visible_samples
         last = min(first + visible, model.sample_count)
-        if visible <= self.width() and channel.samples is not None and model.progressive.is_loaded(first, last):
+        if visible <= self.width() and channel.samples is not None and progressive.is_loaded(first, last):
             values = np.asarray(channel.samples[first:last]).astype(np.int8)
             if not len(values):
                 return
@@ -381,9 +384,8 @@ class SampleViewer(QWidget):
                     painter.drawLine(QPointF(left, top), QPointF(left, bottom))
             previous = value
 
-    def _draw_missing(self, painter: QPainter, bounds: QRectF) -> None:
+    def _draw_missing(self, painter: QPainter, bounds: QRectF, progressive) -> None:
         """Hatch the tiles that did not arrive yet."""
-        progressive = self.model.progressive
         first = self.model.first_sample
         for tile in progressive.tiles_of(first, first + self.model.visible_samples):
             if progressive.loaded[tile]:
