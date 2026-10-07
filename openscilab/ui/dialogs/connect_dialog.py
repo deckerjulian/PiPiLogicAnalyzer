@@ -12,6 +12,7 @@ simulators. A double-click or *Connect* chooses one; the shell connects it.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt
@@ -20,6 +21,8 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QListWidget, QListWidgetItem
 from .. import devices
 from ..icons import icon, set_icon
 from .common import accept_button, button_box, dialog_layout, hint
+
+log = logging.getLogger(__name__)
 
 GROUPS = (("detected", "Detected"), ("manual", "Add by hand"), ("simulators", "Simulators"))
 
@@ -31,10 +34,12 @@ def connectable_entries(exclude_uris: frozenset = frozenset()) -> list[tuple[str
         try:
             detected = backend.detected()
         except Exception:  # noqa: BLE001 - one kind of device must not hide the others
+            log.debug("detected = backend.detected() failed: one kind of device must not hide the others", exc_info=True)
             detected = []
         try:
             manual = backend.manual_entries()
         except Exception:  # noqa: BLE001
+            log.debug("manual = backend.manual_entries() failed (ignored)", exc_info=True)
             manual = []
         # every simulator can be connected again: a second, third, ... one beside the first
         result += [("simulators", entry) for entry in detected + manual if entry.simulated]

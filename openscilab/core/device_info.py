@@ -14,10 +14,13 @@ the capture limits are the same for every device.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from ..driver.base import AnalyzerDriverBase, DeviceSection
 from .formatting import to_large_frequency, to_thousands
+
+log = logging.getLogger(__name__)
 
 Section = DeviceSection
 
@@ -26,6 +29,7 @@ def _safe(call: Callable[[], Any], default: Any) -> Any:
     try:
         return call()
     except Exception:  # noqa: BLE001 - information only, never fail the dialog
+        log.debug("return call() failed: information only, never fail the dialog", exc_info=True)
         return default
 
 

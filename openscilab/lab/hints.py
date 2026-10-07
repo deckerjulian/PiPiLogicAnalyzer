@@ -96,6 +96,7 @@ def from_instrument(instrument) -> DeviceHints:
     try:
         pins = instrument.pins() if instrument.gpio is not None else []
     except Exception:  # noqa: BLE001 - a device that cannot answer
+        log.debug("pins = instrument.pins() if instrument.gpio is not None else [] failed: a device that cannot answer", exc_info=True)
         pins = []
     for pin in pins:
         hints.pins[pin.name] = frozenset(pin.capabilities)

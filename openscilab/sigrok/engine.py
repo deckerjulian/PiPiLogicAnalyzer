@@ -16,6 +16,7 @@ shared ``common`` helper package resolves as usual.
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import sys
 import threading
@@ -30,6 +31,8 @@ import numpy as np
 from ..core.settings import settings_directory
 from . import runtime
 from .runtime import ConditionMatcher, DecodeContext, DecoderStop, OutputValue
+
+log = logging.getLogger(__name__)
 
 #: Directories searched for decoders when nothing else is configured.
 DEFAULT_SEARCH_PATHS = (
@@ -217,6 +220,7 @@ class DecoderRegistry:
                     info = self._load_decoder(entry, directory)
                 except Exception as error:  # noqa: BLE001 - reported in the UI
                     self.load_errors[entry] = f"{error}\n{traceback.format_exc(limit=3)}"
+                    log.warning("The protocol decoder %s could not be loaded: %s", entry, error)
                     continue
                 if info is not None:
                     self._decoders[info.id] = info

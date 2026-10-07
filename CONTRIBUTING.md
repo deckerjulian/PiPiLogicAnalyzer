@@ -34,6 +34,14 @@ QT_QPA_PLATFORM=offscreen pytest   # the whole suite (about 2000 tests) takes a 
 ruff check .                       # style, configured in pyproject.toml
 ```
 
+`tests/test_fuzz_parsers.py` throws arbitrary input at the parsers (hypothesis), and
+`OPENSCILAB_SOAK_MINUTES=30 pytest -m soak tests/test_soak.py -s` streams for half an hour while it
+watches the memory (the suite leaves it out; *Run workflow* in the Actions runs it on request).
+
+**An `except` that swallows is a silent failure.** Every handler either reports the error (a
+message, a banner, the result of the call) or logs it - at least `log.debug(..., exc_info=True)`,
+so `--debug-driver` and the console show what was ignored and why.
+
 The firmware is built with `firmware/build_all.sh` (see [firmware/README.md](firmware/README.md)).
 New devices are added as drivers or plugins, see [docs/drivers.md](docs/drivers.md); the user
 documentation is in the [wiki](https://github.com/deckerjulian/openSciLab/wiki).

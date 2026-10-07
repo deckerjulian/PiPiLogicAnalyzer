@@ -551,7 +551,7 @@ class Engine:
             try:
                 instrument.close()
             except Exception:  # noqa: BLE001
-                pass
+                log.debug("instrument.close() failed (ignored)", exc_info=True)
         self._opened.clear()
 
     def _create_runtimes(self) -> None:

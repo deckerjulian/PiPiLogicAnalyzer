@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 import os
@@ -40,6 +41,8 @@ from ..icons import set_icon
 from ..theme import set_role, set_variant
 from .common import dialog_layout, hint
 
+log = logging.getLogger(__name__)
+
 REFRESH_INTERVAL_MS = 1000
 WAIT_FOR_ANALYZER_S = 20
 QUERY_TIMEOUT_S = 3.0
@@ -49,6 +52,7 @@ def _scan(call: Callable[[], list]) -> list:
     try:
         return list(call())
     except Exception:  # noqa: BLE001 - device enumeration must never break the dialog
+        log.debug("return list(call()) failed: device enumeration must never break the dialog", exc_info=True)
         return []
 
 
@@ -110,6 +114,7 @@ class IdentityWorker(QThread):
             version, details = self._query(self._port)
             text: Optional[str] = firmware.describe_firmware(version, details) if version else None
         except Exception:  # noqa: BLE001 - port busy, other firmware, ...
+            log.debug("run: port busy, other firmware, ...", exc_info=True)
             text = None
         self.found.emit(self._port, text)
 
@@ -493,6 +498,7 @@ def connected_devices_of(driver) -> list[ConnectedDevice]:
         try:
             details = board.device_details()
         except Exception:  # noqa: BLE001 - the details only complete the version line
+            log.debug("details = board.device_details() failed: the details only complete the version line", exc_info=True)
             details = {}
         connected.append(ConnectedDevice(getattr(board, "connection_string", None) or "?", board.device_version,
                                          details))

@@ -86,7 +86,7 @@ class SerialLink(ByteLink):
         try:
             self._serial.close()
         except Exception:  # noqa: BLE001 - best effort
-            pass
+            log.debug("self._serial.close() failed: best effort", exc_info=True)
 
 
 class PipeLink(ByteLink):

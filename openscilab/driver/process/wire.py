@@ -71,7 +71,7 @@ def constants_of(obj: Any, members: dict[str, str]) -> dict[str, Any]:
             continue
         try:
             pickle.dumps(value)
-        except Exception:
+        except Exception:  # (a probe, not an error)
             continue
         found[name] = value
     return found
@@ -117,12 +117,12 @@ def pack_error(error: BaseException) -> tuple:
         try:
             pickle.dumps(value)
             state[key] = value
-        except Exception:
+        except Exception:  # (a probe, not an error)
             continue
     try:
         pickle.dumps(error.args)
         args = error.args
-    except Exception:
+    except Exception:  # (a probe, not an error)
         args = tuple(str(arg) for arg in error.args)
     return (type(error).__module__, type(error).__qualname__, args, state,
             "".join(traceback.format_exception(type(error), error, error.__traceback__)))

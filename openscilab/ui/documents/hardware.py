@@ -16,6 +16,7 @@ way (any image, any board).
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
@@ -41,6 +42,8 @@ from ..devices.hub_bridge import HubBridge
 from ..icons import set_icon
 from ..theme import TEXT_MUTED, set_role, set_variant, token
 from .base import DocumentWidget
+
+log = logging.getLogger(__name__)
 
 #: how the firmware gets onto a board (the guide above the list)
 GUIDE = (
@@ -88,6 +91,7 @@ class _VersionWorker(QThread):
         try:
             version, _details = self.query(self.port)
         except Exception:  # noqa: BLE001 - shown as "could not be read"
+            log.debug("version, _details = self.query(self.port) failed: shown as 'could not be read'", exc_info=True)
             version = None
         self.found.emit(self.port, version)
 

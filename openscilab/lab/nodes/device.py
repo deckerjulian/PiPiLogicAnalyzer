@@ -17,6 +17,7 @@ between the command that started it and the arrival of its data (less a latency 
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Optional
 
@@ -29,6 +30,8 @@ from ...driver.base import ACQUISITION_STREAM, CaptureError
 from ...driver.models import AnalyzerChannel, CaptureSession, EdgeKind, TriggerType
 from ..engine.runtime import NodeError, NodeRuntime
 from .registry import In, Out, Param, collect, node
+
+log = logging.getLogger(__name__)
 
 
 def split_channels(instrument: Instrument, names) -> tuple[list, list[tuple[str, int]]]:
@@ -121,6 +124,7 @@ def limits_of(driver, session: CaptureSession) -> str:
         rate = driver.max_frequency_for(numbers, mode)
         limits = driver.get_limits(numbers, mode)
     except Exception:  # noqa: BLE001 - only a better message
+        log.debug("limits_of: only a better message", exc_info=True)
         return ""
     total = session.pre_trigger_samples + session.post_trigger_samples
     found = []

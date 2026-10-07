@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
 from typing import Any, Optional
@@ -16,6 +17,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from ...lab.engine import Engine, EngineEvent, RunResult, ViewSink
 from ...lab.model import Flow
+
+log = logging.getLogger(__name__)
 
 
 #: milliseconds between two deliveries of what the engine reported (25 times a second)
@@ -115,6 +118,7 @@ class FlowRunner(QObject):
             try:
                 result = engine.run()
             except Exception as error:  # noqa: BLE001 - reported as the result
+                log.debug("result = engine.run() failed: reported as the result", exc_info=True)
                 result = RunResult("error", engine.clock.now(), str(error))
             if not self._closed:
                 try:

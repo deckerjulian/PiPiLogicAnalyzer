@@ -15,6 +15,7 @@ graph.
 from __future__ import annotations
 
 import html
+import logging
 import os
 from typing import Any, Optional
 
@@ -52,6 +53,8 @@ from ..icons import icon
 from ..theme import set_role
 from ..widgets.completer import attach as attach_completer
 from .base import DocumentWidget
+
+log = logging.getLogger(__name__)
 
 
 def device_addresses(hub=None) -> list[tuple[str, str]]:
@@ -823,6 +826,7 @@ class FlowDocument(DocumentWidget):
             try:
                 inputs, outputs = spec.resolve_ports({})
             except Exception:  # noqa: BLE001 - ports that need parameters
+                log.debug("inputs, outputs = spec.resolve_ports({}) failed: ports that need parameters", exc_info=True)
                 return None
             candidates = outputs if is_input else inputs
             for candidate in candidates:
@@ -1063,6 +1067,7 @@ class FlowDocument(DocumentWidget):
             try:
                 inputs, outputs = spec.resolve_ports({})
             except Exception:  # noqa: BLE001
+                log.debug("inputs, outputs = spec.resolve_ports({}) failed (ignored)", exc_info=True)
                 return None
             first_in = next((port.name for port in inputs if source_type and signals.compatible(source_type, port.type)),
                             None)

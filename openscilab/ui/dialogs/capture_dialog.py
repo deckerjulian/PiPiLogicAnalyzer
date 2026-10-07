@@ -29,6 +29,7 @@ exports/imports them as JSON files or applies a stored profile.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
@@ -100,6 +101,8 @@ from .. import messages
 from ..theme import BORDER, ERROR, set_role
 from ..icons import icon, set_icon
 from .common import InlineMessage, button_box, dialog_layout, hint
+
+log = logging.getLogger(__name__)
 
 #: Labels of the acquisition modes of devices that have several
 ACQUISITION_LABELS = {
@@ -280,6 +283,7 @@ class CaptureDialog(QDialog):
         try:
             self.capabilities = driver.capabilities()
         except Exception:  # noqa: BLE001 - optional functions only
+            log.debug("self.capabilities = driver.capabilities() failed: optional functions only", exc_info=True)
             self.capabilities = frozenset()
         self.limits: CaptureLimits = driver.get_limits([0])
         #: settings are being restored: keep their values instead of the defaults of the controls
@@ -501,6 +505,7 @@ class CaptureDialog(QDialog):
         try:
             clock_channels = list(self.driver.state_clock_channels())
         except Exception:  # noqa: BLE001 - a driver that cannot say: every channel
+            log.debug("clock_channels = list(self.driver.state_clock_channels()) failed: a driver that cannot say: every channel", exc_info=True)
             clock_channels = list(range(self.driver.channel_count))
         for number in clock_channels:
             self.clock_channel_box.addItem(f"Channel {number + 1}", number)

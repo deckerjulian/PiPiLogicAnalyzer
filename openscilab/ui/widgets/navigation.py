@@ -21,6 +21,7 @@ a phase; that is how both are told apart when the input device does not say it i
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, Qt
@@ -28,6 +29,8 @@ from PySide6.QtGui import QInputDevice
 from PySide6.QtWidgets import QScrollArea, QWidget
 
 from ..view_model import CHANNEL_HEIGHT_STEP, CaptureViewModel
+
+log = logging.getLogger(__name__)
 
 ZOOM_STEP = 1.2
 COARSE_ZOOM_STEP = 2.0
@@ -66,6 +69,7 @@ def wheel_mode() -> str:
     try:
         return preferences.get("navigation.wheel")
     except Exception:  # noqa: BLE001
+        log.debug("return preferences.get('navigation.wheel') failed (ignored)", exc_info=True)
         return "zoom"
 
 
@@ -75,6 +79,7 @@ def zoom_inverted() -> bool:
     try:
         return bool(preferences.get("navigation.invert_zoom"))
     except Exception:  # noqa: BLE001
+        log.debug("return bool(preferences.get('navigation.invert_zoom')) failed (ignored)", exc_info=True)
         return False
 
 

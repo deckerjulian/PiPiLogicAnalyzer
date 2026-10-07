@@ -227,7 +227,7 @@ class ArduinoMonitor(_ArduinoFacet, MonitorFacet):
         try:
             self.stop()
         except Exception:  # noqa: BLE001 - the board may be gone
-            pass
+            log.debug("self.stop() failed: the board may be gone", exc_info=True)
 
 
 class ArduinoAnalogIn(_ArduinoFacet, AnalogInFacet):

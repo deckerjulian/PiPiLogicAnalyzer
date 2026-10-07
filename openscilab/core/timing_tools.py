@@ -19,6 +19,7 @@ Qt free; ``docs/timing.md``.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -38,6 +39,8 @@ from .timing import (
     stored_latency,
     timing_of,
 )
+
+log = logging.getLogger(__name__)
 
 #: ``clock`` of :func:`device_config`
 CLOCK_OWN = "own"
@@ -314,7 +317,7 @@ class SyncOutput:
         try:
             self.gpio.write(self.pin, 0)
         except Exception:  # noqa: BLE001 - best effort
-            pass
+            log.debug("self.gpio.write(self.pin, 0) failed: best effort", exc_info=True)
 
 
 _sync_outputs: dict[int, SyncOutput] = {}

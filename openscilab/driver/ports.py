@@ -13,11 +13,14 @@ Each kind claims its ports by USB identifiers, so no port is opened by two kinds
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from serial.tools import list_ports
+
+log = logging.getLogger(__name__)
 
 #: seconds the list of serial ports is reused
 PORTS_CACHE_S = 0.5
@@ -34,7 +37,7 @@ def enlarge_receive_buffer(port) -> None:
         try:
             setter(rx_size=RECEIVE_BUFFER)
         except Exception:  # noqa: BLE001 - the default buffer works too
-            pass
+            log.debug("setter(rx_size=RECEIVE_BUFFER) failed: the default buffer works too", exc_info=True)
 _ports_cache: tuple = (None, 0.0, [])
 
 

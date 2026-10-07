@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import html
+import logging
 import math
 import os
 import time
@@ -110,6 +111,8 @@ from ..widgets.sample_marker import SampleMarker
 from ..widgets.sample_previewer import SamplePreviewer
 from ..widgets.sample_viewer import SampleViewer
 from .base import Document
+
+log = logging.getLogger(__name__)
 
 WINDOW_STATE_FILE = "analyzer-state.json"
 #: Pixels of the name of the source device in the toolbar (longer names are shortened)
@@ -2065,7 +2068,7 @@ class DataView(QMainWindow, Document):
         try:
             self._recording_monitor.stop()
         except Exception:  # noqa: BLE001 - the device may be gone
-            pass
+            log.debug("self._recording_monitor.stop() failed: the device may be gone", exc_info=True)
         self._show_recording()
         recording, self.recording, self._recording_stop = self.recording, None, None
         session = recording.session(self._recording_session)

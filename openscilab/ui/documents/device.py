@@ -19,6 +19,7 @@ restart, bootloader, firmware, reconnect, copy the details). Every action on the
 from __future__ import annotations
 
 import html
+import logging
 from collections import deque
 from typing import Optional
 
@@ -77,6 +78,8 @@ from ..devices.hub_bridge import HubBridge
 from ..icons import icon, set_icon
 from ..theme import BORDER, PANEL_LIGHT, TEXT, TEXT_MUTED, qcolor, set_role, set_variant, token
 from .base import DocumentWidget
+
+log = logging.getLogger(__name__)
 
 HISTORY = 60
 #: milliseconds between updates of the pin values while the monitor runs
@@ -546,6 +549,7 @@ class DeviceDocument(DocumentWidget):
         try:
             done = bool(controller.driver.restart())
         except Exception as error:  # noqa: BLE001 - every way a device can fail to answer
+            log.debug("done = bool(controller.driver.restart()) failed: every way a device can fail to answer", exc_info=True)
             done = False
             self.show_banner(f"{self.instrument.name} could not be restarted: {error}", "error")
         if done:
@@ -639,6 +643,7 @@ class DeviceDocument(DocumentWidget):
                                  to_thousands(limits.max_pre_samples), to_thousands(limits.max_post_samples),
                                  to_thousands(limits.max_total_samples)))
             except Exception:  # noqa: BLE001 - a device that cannot say: no table
+                log.debug("_limit_rows: a device that cannot say: no table", exc_info=True)
                 rows = []
             self._limits = rows
         return self._limits

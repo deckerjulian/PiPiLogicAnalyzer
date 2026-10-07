@@ -15,6 +15,7 @@ completion – to the data view it captures into (:attr:`view`), which displays 
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from typing import Callable, Optional
@@ -39,6 +40,8 @@ from ...driver.base import CAPABILITY_SIMULATION, AnalyzerDriverBase, CaptureErr
 from ...driver.models import CaptureSession
 from .. import background, messages
 from ..icons import icon
+
+log = logging.getLogger(__name__)
 
 #: Stimulus and capture: the action waits this long after the capture started (the device arms)
 ARM_DELAY_MS = 50
@@ -146,6 +149,7 @@ class CaptureController(QObject):
         try:
             return CAPABILITY_SIMULATION in self.driver.capabilities()
         except Exception:  # noqa: BLE001 - a device that cannot tell
+            log.debug("return CAPABILITY_SIMULATION in self.driver.capabilities() failed: a device that cannot tell", exc_info=True)
             return False
 
     def close(self) -> None:
@@ -484,6 +488,7 @@ class CaptureController(QObject):
             try:
                 status = driver.get_voltage_status()
             except Exception:  # noqa: BLE001 - a device that fails here does not answer
+                log.debug("status = driver.get_voltage_status() failed: a device that fails here does not answer", exc_info=True)
                 status = "DISCONNECTED"
             try:
                 self._power_answer.emit(status)

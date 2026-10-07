@@ -176,6 +176,7 @@ class DSLogicDriver(AnalyzerDriverBase):
         try:
             self._open()
         except Exception:
+            log.debug("self._open() failed (ignored)", exc_info=True)
             self._device.close()
             raise
 
@@ -760,6 +761,7 @@ class DSLogicDriver(AnalyzerDriverBase):
                     views, first = store.window()
                     self._raise_capture_progress(CaptureProgressArgs(session, views, first))
         except Exception as error:  # noqa: BLE001 - raised again by the reading thread
+            log.debug("_unpack_chunks: raised again by the reading thread", exc_info=True)
             failures.append(error)
 
     def _store_samples(
@@ -816,5 +818,5 @@ class DSLogicDriver(AnalyzerDriverBase):
         try:
             self._device.close()
         except Exception:  # noqa: BLE001 - best effort
-            pass
+            log.debug("self._device.close() failed: best effort", exc_info=True)
         super().dispose()

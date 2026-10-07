@@ -1389,7 +1389,7 @@ class PicoDriver(AnalyzerDriverBase):
             try:
                 self._send(bytes([protocol.CMD_ABORT_CAPTURE]))
             except Exception:  # pragma: no cover - device may already be gone
-                pass
+                log.debug("self._send(bytes([protocol.CMD_ABORT_CAPTURE])) failed: device may already be gone", exc_info=True)
             thread = self._capture_thread
             if thread is not None and thread is not threading.current_thread():
                 thread.join(STREAM_STOP_TIMEOUT)
@@ -1403,7 +1403,7 @@ class PicoDriver(AnalyzerDriverBase):
         try:
             self._send(bytes([protocol.CMD_ABORT_CAPTURE]))
         except Exception:  # pragma: no cover - device may already be gone
-            pass
+            log.debug("self._send(bytes([protocol.CMD_ABORT_CAPTURE])) failed: device may already be gone", exc_info=True)
 
         try:
             # Reconnecting is the only reliable way to resynchronise the stream
@@ -1592,6 +1592,7 @@ class PicoDriver(AnalyzerDriverBase):
             self._send(protocol.command_packet(protocol.CMD_GET_VOLTAGE))
             return self._read_answer(timeout=5.0)
         except Exception:
+            log.debug("get_voltage_status: ignored", exc_info=True)
             return "DISCONNECTED"
         finally:
             self._lock.release()
@@ -1606,11 +1607,11 @@ class PicoDriver(AnalyzerDriverBase):
             try:
                 self._send(bytes([protocol.CMD_ABORT_CAPTURE]))
             except Exception:  # pragma: no cover - device may already be gone
-                pass
+                log.debug("self._send(bytes([protocol.CMD_ABORT_CAPTURE])) failed: device may already be gone", exc_info=True)
         self._capturing = False
         self._abort.set()
         try:
             self._transport.close()
         except Exception:  # pragma: no cover - best effort
-            pass
+            log.debug("self._transport.close() failed: best effort", exc_info=True)
         super().dispose()

@@ -55,6 +55,7 @@ def supports_software_trigger(driver: AnalyzerDriverBase) -> bool:
     try:
         return ACQUISITION_STREAM in driver.acquisition_modes()
     except Exception:  # noqa: BLE001 - a device that cannot answer cannot stream
+        log.debug("return ACQUISITION_STREAM in driver.acquisition_modes() failed: a device that cannot answer cannot stream", exc_info=True)
         return False
 
 

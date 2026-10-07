@@ -14,11 +14,14 @@ closes the list.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Union
 
 from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
 from PySide6.QtGui import QStandardItem, QStandardItemModel, QTextCursor
 from PySide6.QtWidgets import QCompleter, QLineEdit, QPlainTextEdit
+
+log = logging.getLogger(__name__)
 
 #: typed characters that open the list even when no word is begun (a value after ``key: ``, a port
 #: after ``node.``, a list item after ``[`` or ``,``)
@@ -83,6 +86,7 @@ class Completer(QObject):
         try:
             start, completions = self.provider(text)
         except Exception:  # noqa: BLE001 - a provider that fails offers nothing; typing goes on
+            log.debug("start, completions = self.provider(text) failed: a provider that fails offers nothing; typing goes on", exc_info=True)
             completions = []
             start = len(text)
         word = text[start:]

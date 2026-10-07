@@ -108,6 +108,7 @@ def _string(device, index: int) -> str:
     try:
         return usb.util.get_string(device, index) or ""
     except Exception:  # noqa: BLE001 - no permission or no string
+        log.debug("return usb.util.get_string(device, index) or '' failed: no permission or no string", exc_info=True)
         return ""
 
 
@@ -225,7 +226,7 @@ class PyUsbDevice(UsbDevice):
             try:
                 self._device.set_configuration(protocol.USB_CONFIGURATION)
             except Exception:  # noqa: BLE001 - already configured or busy; claiming decides
-                pass
+                log.debug("self._device.set_configuration(protocol.USB_CONFIGURATION) failed: already configured or busy; claiming decides", exc_info=True)
             usb.util.claim_interface(self._device, protocol.USB_INTERFACE)
             self._claimed = True
         except Exception as error:  # noqa: BLE001 - normalised
@@ -242,7 +243,7 @@ class PyUsbDevice(UsbDevice):
                 usb.util.release_interface(self._device, protocol.USB_INTERFACE)
             usb.util.dispose_resources(self._device)
         except Exception:  # noqa: BLE001 - best effort
-            pass
+            log.debug("close: best effort", exc_info=True)
         self._claimed = False
 
 
@@ -257,7 +258,7 @@ def upload_fx2_firmware(info: UsbDeviceInfo, image: bytes) -> None:
         try:
             device._device.set_configuration(protocol.USB_CONFIGURATION)
         except Exception:  # noqa: BLE001 - may already be configured
-            pass
+            log.debug("device._device.set_configuration(protocol.USB_CONFIGURATION) failed: may already be configured", exc_info=True)
 
         def ezusb_write(address: int, data: bytes) -> None:
             try:

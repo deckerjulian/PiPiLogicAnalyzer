@@ -22,6 +22,7 @@ Use :func:`set_role` / :func:`set_variant` to change them after the widget is sh
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
@@ -31,6 +32,8 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QWidget
 
 from .. import __version__
+
+log = logging.getLogger(__name__)
 
 #: The colours of both themes. The application is drawn in one of them, chosen at startup from the
 #: preferences (*Settings → Appearance*; "system" follows the operating system).
@@ -82,7 +85,7 @@ def _system_mode() -> str:
             if scheme == Qt.ColorScheme.Dark:
                 return "dark"
     except Exception:  # noqa: BLE001 - older Qt: the platform below
-        pass
+        log.debug("_system_mode: older Qt: the platform below", exc_info=True)
     import subprocess
     import sys
 
@@ -98,7 +101,7 @@ def _system_mode() -> str:
                                  r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
             return "light" if winreg.QueryValueEx(key, "AppsUseLightTheme")[0] else "dark"
     except Exception:  # noqa: BLE001 - unknown: the default
-        pass
+        log.debug("_system_mode: unknown: the default", exc_info=True)
     return "dark"
 
 
@@ -111,6 +114,7 @@ def _chosen_mode() -> str:
 
             choice = preferences.get("appearance.theme")
         except Exception:  # noqa: BLE001 - damaged preferences: the default
+            log.debug("_chosen_mode: damaged preferences: the default", exc_info=True)
             choice = "dark"
     if choice == "system":
         return _system_mode()
@@ -183,6 +187,7 @@ def font_size() -> int:
 
         size = int(preferences.get("appearance.font_size"))
     except Exception:  # noqa: BLE001
+        log.debug("font_size: ignored", exc_info=True)
         size = 0
     return size if 9 <= size <= 24 else 12
 

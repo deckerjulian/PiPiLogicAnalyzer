@@ -17,10 +17,13 @@ transports are unified here behind a tiny interface with explicit timeouts.
 
 from __future__ import annotations
 
+import logging
 import socket
 from typing import Optional
 
 import serial
+
+log = logging.getLogger(__name__)
 
 
 class TransportError(IOError):
@@ -113,27 +116,28 @@ class SerialTransport(Transport):
         try:
             self._serial.reset_input_buffer()
         except Exception:  # pragma: no cover - depends on the OS/driver
-            pass
+            log.debug("self._serial.reset_input_buffer() failed: depends on the OS/driver", exc_info=True)
 
     def reopen(self) -> None:
         self._partial = b""
         try:
             self._serial.close()
         except Exception:  # pragma: no cover - best effort
-            pass
+            log.debug("self._serial.close() failed: best effort", exc_info=True)
         self._serial = self._open()
 
     def close(self) -> None:
         try:
             self._serial.close()
         except Exception:  # pragma: no cover - best effort
-            pass
+            log.debug("self._serial.close() failed: best effort", exc_info=True)
 
     @property
     def is_open(self) -> bool:
         try:
             return bool(self._serial.is_open)
         except Exception:  # pragma: no cover - best effort
+            log.debug("return bool(self._serial.is_open) failed: best effort", exc_info=True)
             return False
 
 
@@ -222,7 +226,7 @@ class NetworkTransport(Transport):
         try:
             self._socket.close()
         except Exception:  # pragma: no cover - best effort
-            pass
+            log.debug("self._socket.close() failed: best effort", exc_info=True)
 
     @property
     def is_open(self) -> bool:

@@ -252,7 +252,7 @@ class PicoMonitor(_PicoFacet, MonitorFacet):
         try:
             self.stop()
         except Exception:  # noqa: BLE001 - the board may be gone
-            pass
+            log.debug("self.stop() failed: the board may be gone", exc_info=True)
         self.driver.line_handlers.pop("STATE:", None)
 
 

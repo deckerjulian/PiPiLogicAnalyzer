@@ -532,7 +532,7 @@ class ArduinoShell:
         try:
             self.device.stop_capture()
         except Exception:  # noqa: BLE001 - closing
-            pass
+            log.debug("self.device.stop_capture() failed: closing", exc_info=True)
         self._board.close()
         self.instrument.close()
 

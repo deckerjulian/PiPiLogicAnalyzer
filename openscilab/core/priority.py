@@ -22,11 +22,14 @@ Qt free.
 from __future__ import annotations
 
 import getpass
+import logging
 import os
 import shutil
 import subprocess
 import sys
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 #: the nice value of the processes that read devices (-20 highest, 0 normal, 19 lowest)
 NICE = -10
@@ -64,6 +67,7 @@ def raise_own(nice: int = NICE) -> bool:
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             return bool(kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), above_normal))
         except Exception:  # noqa: BLE001 - normal priority then
+            log.debug("raise_own: normal priority then", exc_info=True)
             return False
     if not hasattr(os, "setpriority"):
         return False

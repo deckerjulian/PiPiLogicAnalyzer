@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from ...core.firmware import parse_device_version
@@ -21,6 +22,8 @@ from ..base import (
     DeviceSection,
 )
 from . import detector
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .analyzer import PicoDriver
@@ -52,6 +55,7 @@ def _safe(call: Callable[[], Any], default: Any) -> Any:
     try:
         return call()
     except Exception:  # noqa: BLE001 - information only, never fail the dialog
+        log.debug("return call() failed: information only, never fail the dialog", exc_info=True)
         return default
 
 

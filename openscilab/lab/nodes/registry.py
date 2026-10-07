@@ -31,10 +31,13 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from ...core import signals
+
+log = logging.getLogger(__name__)
 
 #: Groups of the palette, in their order.
 GROUPS = {
@@ -185,6 +188,7 @@ class NodeSpec:
             try:
                 extra_in, extra_out = self.ports(params)
             except Exception:  # noqa: BLE001 - invalid parameters: the static ports only
+                log.debug("extra_in, extra_out = self.ports(params) failed: invalid parameters: the static ports only", exc_info=True)
                 extra_in, extra_out = [], []
             names = {port.name for port in inputs}
             inputs += [port for port in extra_in if port.name not in names]

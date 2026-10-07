@@ -614,6 +614,7 @@ class Instrument:
         try:
             driver_type = driver.driver_type
         except Exception:  # noqa: BLE001
+            log.debug("driver_type = driver.driver_type failed (ignored)", exc_info=True)
             driver_type = AnalyzerDriverType.OTHER
         kind = {
             AnalyzerDriverType.SERIAL: "Pico",
@@ -625,6 +626,7 @@ class Instrument:
         try:
             capabilities = driver.capabilities()
         except Exception:  # noqa: BLE001
+            log.debug("capabilities = driver.capabilities() failed (ignored)", exc_info=True)
             capabilities = frozenset()
         is_hardware = getattr(driver, "is_hardware", True)
         instrument = Instrument(
@@ -650,4 +652,5 @@ def _has_external_trigger(driver) -> bool:
     try:
         return bool(driver.has_external_trigger())
     except Exception:  # noqa: BLE001 - a device that cannot answer has none
+        log.debug("return bool(driver.has_external_trigger()) failed: a device that cannot answer has none", exc_info=True)
         return False

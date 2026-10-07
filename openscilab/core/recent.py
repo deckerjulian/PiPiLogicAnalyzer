@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from . import settings
+
+log = logging.getLogger(__name__)
 
 RECENT_FILE = "recent.json"
 #: Entries kept per list.
@@ -24,6 +27,7 @@ def limit() -> int:
     try:
         return max(int(preferences.get("data.recent_count")), 1)
     except Exception:  # noqa: BLE001
+        log.debug("return max(int(preferences.get('data.recent_count')), 1) failed (ignored)", exc_info=True)
         return MAX_ENTRIES
 
 

@@ -14,6 +14,7 @@ its bootloader, waits for the drive, writes the image and waits until the board 
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -23,6 +24,8 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from ...core import firmware
 from ...core.hub import Hub
 from ...core.instrument import Instrument
+
+log = logging.getLogger(__name__)
 
 ANALYZER = "analyzer"
 BOOTLOADER = "bootloader"
@@ -69,6 +72,7 @@ def _safe(call: Callable[[], list]) -> list:
     try:
         return list(call())
     except Exception:  # noqa: BLE001 - enumeration must never break the overview
+        log.debug("return list(call()) failed: enumeration must never break the overview", exc_info=True)
         return []
 
 
