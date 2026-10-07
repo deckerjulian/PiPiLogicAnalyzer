@@ -72,7 +72,7 @@ from ...core.instrument import (
     MonitorState,
     PinInfo,
 )
-from ...driver.base import CAPABILITY_RESTART, facets_of
+from ...driver.base import CAPABILITY_RESTART, DeviceConnectionError, facets_of
 from .. import messages
 from ..devices.hub_bridge import HubBridge
 from ..icons import icon, set_icon
@@ -1536,12 +1536,20 @@ class DeviceDocument(DocumentWidget):
         """The *Monitor* box shows whether the monitor runs (a recording starts and stops it too);
         while it runs the card listens to it."""
         monitor = self.instrument.monitor
-        running = bool(monitor is not None and monitor.running)
+        try:
+            running = bool(monitor is not None and self.instrument.status != InstrumentStatus.DISCONNECTED
+                           and monitor.running)
+        except (DeviceConnectionError, InstrumentError):  # (it went away between two ticks of the timer)
+            log.debug("The monitor of %s does not answer: not running", self.instrument.name, exc_info=True)
+            running = False
         if running and self._remove_handler is None:
             self._remove_handler = monitor.on_state(self._monitor_state.emit)
         elif not running and self._remove_handler is not None:
-            self._remove_handler()
-            self._remove_handler = None
+            remove, self._remove_handler = self._remove_handler, None
+            try:
+                remove()
+            except (DeviceConnectionError, InstrumentError):  # (nothing left to listen to)
+                log.debug("The monitor handler of %s cannot be removed", self.instrument.name, exc_info=True)
         if not running:
             self._monitor_owned = False
         if self.monitor_box.isChecked() != running:

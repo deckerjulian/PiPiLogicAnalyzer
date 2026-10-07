@@ -195,6 +195,21 @@ def test_the_device_list_opens_by_address(shell, monkeypatch):
     assert entries
 
 
+def test_the_card_of_a_device_whose_process_ended_does_not_fail(shell, pico):
+    """The card asks the monitor every few hundred milliseconds whether it runs: a tick between the
+    end of the device process and the card's close found a process that cannot answer."""
+    shell.hub.add(pico)
+    card = shell.open_device_card(pico)
+    card.sync_monitor()
+    pico.process.process.kill()
+    deadline = time.monotonic() + 10
+    while pico.process.alive and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not pico.process.alive
+    card.sync_monitor()  # (no exception: not running)
+    assert not card.monitor_box.isChecked()
+
+
 # ------------------------------------------------------------------- time, flows
 def test_a_flow_streams_from_a_device_process_and_places_its_samples(pico):
     import numpy as np
