@@ -276,6 +276,7 @@ class DevicesSection(QWidget):
             try:
                 notice = backend.idle_notice()
             except Exception:  # noqa: BLE001 - enumeration problems must not disturb the list
+                log.debug("notice = backend.idle_notice() failed: enumeration problems must not disturb the list", exc_info=True)
                 notice = None
             if notice:
                 break
@@ -308,6 +309,7 @@ def serial_ports() -> frozenset:
 
         return frozenset(port.device for port in detector.comports())
     except Exception:  # noqa: BLE001 - no pyserial, no permission: nothing to watch
+        log.debug("serial_ports: no pyserial, no permission: nothing to watch", exc_info=True)
         return frozenset()
 
 
@@ -800,6 +802,7 @@ class ShellWindow(QMainWindow):
                                               lambda: webbrowser.open(UPSTREAM_DOCUMENTATION_URL), icon_name="book"))
         self.help_menu.addAction(self._action("Decoder search &paths...", self.show_decoder_paths, icon_name="folder"))
         self.help_menu.addAction(self._action("P&lugins...", self.show_plugins, icon_name="folder"))
+        self.help_menu.addAction(self._action("Open the &log folder", self.open_log_folder, icon_name="folder"))
         self.help_menu.addSeparator()
         self.help_menu.addAction(self._action("&About openSciLab", lambda: AboutDialog(self).exec(), icon_name="info"))
 
@@ -2400,12 +2403,27 @@ class ShellWindow(QMainWindow):
         registry = self.provider.registry
         registry.load()
         paths = "\n".join(registry.search_paths) or "(none)"
+        failed = registry.load_errors
         messages.info(
-            self, "Decoder search paths", f"{len(registry.decoders)} protocol decoders are loaded.",
+            self, "Decoder search paths", f"{len(registry.decoders)} protocol decoders are loaded"
+            + (f", {len(failed)} could not be." if failed else "."),
             f"Search paths:\n{paths}\n\nBy default the 'decoders' folder next to the application is used. "
             "Pass --decoders, set the OPENSCILAB_DECODERS environment variable or copy decoders into "
-            "the 'decoders' folder of the settings directory to add more.",
+            "the 'decoders' folder of the settings directory to add more."
+            + "".join(f"\n\n{name}: {error}" for name, error in failed.items()),
         )
+
+    def show_crash_notice(self, line: str) -> None:
+        """An error nobody caught (``core.crashes``): the status bar says so; the log has the details."""
+        self.statusBar().showMessage(f"An error occurred: {line} - the details are in crash.log (Help → Open "
+                                     "the log folder)", 30000)
+
+    def open_log_folder(self) -> None:
+        """*Help → Open the log folder*: the settings directory with crash.log, faults.log and
+        driver_debug.log."""
+        from ...core import settings
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(settings.settings_directory()))
 
     def show_plugins(self) -> None:
         from ... import plugins

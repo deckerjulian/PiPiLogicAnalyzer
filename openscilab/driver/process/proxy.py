@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any, Callable, Optional
 
 from ...core.instrument import CaptureFacet, Instrument, InstrumentError, InstrumentStatus
@@ -35,6 +36,14 @@ log = logging.getLogger(__name__)
 
 #: seconds to wait for a device process to open its device
 OPEN_TIMEOUT = 90.0
+#: a call the device process does not answer within this time ends it: a driver stuck in a call
+#: that never returns would otherwise freeze what waits for it (seconds; ``None``: wait)
+CALL_TIMEOUT = 60.0
+#: the device process sends a sign of life every second (``host.BEAT_INTERVAL``); none for this
+#: long means it hangs (the interpreter stuck, the OS stopped it): it is ended (seconds)
+BEAT_TIMEOUT = 10.0
+#: "the timeout of the moment" (``CALL_TIMEOUT``, which tests lower)
+DEFAULT_TIMEOUT = object()
 
 
 class ProcessEnded(DeviceConnectionError, InstrumentError):
@@ -73,6 +82,9 @@ class Connection:
         self._by_value: set[int] = set()
         self.ended = threading.Event()
         self.end_reason = ""
+        self._killed = False
+        #: when the last sign of life of the device process came (``time.monotonic``)
+        self.last_beat = time.monotonic()
         self.driver: Optional[ProcessDriver] = None
         self._listeners: list[Callable[[], None]] = []
         if not self.requests.poll(timeout):
@@ -89,8 +101,10 @@ class Connection:
             self.process.join(5)
             raise wire.unpack_error(value)
         self.description: dict = value
+        self.last_beat = time.monotonic()
         threading.Thread(target=self._read_answers, name="openscilab-device-answers", daemon=True).start()
         threading.Thread(target=self._read_events, name="openscilab-device-events", daemon=True).start()
+        threading.Thread(target=self._watch, name="openscilab-device-watchdog", daemon=True).start()
 
     # ------------------------------------------------------------ pickling
     def _reference(self, obj: Any) -> Optional[tuple]:
@@ -141,7 +155,12 @@ class Connection:
             self.requests.send_bytes(data)
 
     # --------------------------------------------------------------- calls
-    def request(self, kind: str, payload: Any, timeout: Optional[float] = None) -> Any:
+    def request(self, kind: str, payload: Any, timeout: Any = DEFAULT_TIMEOUT) -> Any:
+        """Ask the device process and wait for its answer; a call it does not answer within
+        ``timeout`` seconds (default :data:`CALL_TIMEOUT`) ends the process (``None``: wait as
+        long as it takes)."""
+        if timeout is DEFAULT_TIMEOUT:
+            timeout = CALL_TIMEOUT
         if self.ended.is_set():
             raise ProcessEnded(self._ended_text())
         number = next(self._numbers)
@@ -154,7 +173,13 @@ class Connection:
             with self._lock:
                 self._pending.pop(number, None)
             raise ProcessEnded(self._ended_text()) from None
-        return future.result(timeout)
+        try:
+            return future.result(timeout)
+        except FutureTimeout:
+            what = payload[1] if kind in ("call", "get", "set") and isinstance(payload, tuple) else kind
+            log.warning("The device process of %s did not answer %s within %g s: ended", self.address, what, timeout)
+            self._kill(f"the device process did not answer ({what}) within {timeout:g} s")
+            raise ProcessEnded(self._ended_text()) from None
 
     def call(self, number: int, name: str, args: tuple = (), kwargs: Optional[dict] = None) -> Any:
         return self.request("call", (number, name, tuple(args), dict(kwargs or {})))
@@ -198,7 +223,9 @@ class Connection:
         self._end("the device process ended")
 
     def _event(self, kind: str, payload: Any) -> None:
-        if kind == "log":
+        if kind == "beat":
+            self.last_beat = time.monotonic()
+        elif kind == "log":
             name, level, text = payload
             logging.getLogger(name).log(level, "%s", text)
         elif kind == "callback":
@@ -212,12 +239,33 @@ class Connection:
     def _ended_text(self) -> str:
         return f"{self.address}: {self.end_reason or 'the device process ended'}"
 
+    def _watch(self) -> None:
+        """Ends a device process that stopped giving signs of life (see :data:`BEAT_TIMEOUT`)."""
+        while not self.ended.wait(1.0):
+            silent = time.monotonic() - self.last_beat
+            if silent > BEAT_TIMEOUT and self.process.is_alive():
+                log.warning("The device process of %s gave no sign of life for %.0f s: ended", self.address, silent)
+                self._kill(f"the device process stopped answering ({silent:.0f} s without a sign of life)")
+                return
+
+    def _kill(self, reason: str) -> None:
+        """End a device process that hangs: killed, not asked (it would not answer)."""
+        self._killed = True
+        self.end_reason = reason  # (before the kill: the readers see the pipes close and end it too)
+        try:
+            self.process.kill()
+        except (OSError, ValueError):
+            log.debug("The device process of %s could not be killed", self.address, exc_info=True)
+        self._end(reason)
+
     def _end(self, reason: str) -> None:
         if self.ended.is_set():
             return
         self.process.join(0.5)
         code = self.process.exitcode
-        self.end_reason = reason if code in (0, None) else f"{reason} (exit code {code})"
+        if self._killed:
+            reason = self.end_reason or reason
+        self.end_reason = reason if code in (0, None) or self._killed else f"{reason} (exit code {code})"
         self.ended.set()
         with self._lock:
             pending, self._pending = self._pending, {}
@@ -261,8 +309,8 @@ class Connection:
                     self._pending[number] = future
                 self._send("close", number, None)
                 future.result(timeout)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - a process that does not answer is ended below
+                log.debug("The device process of %s did not confirm its close", self.address, exc_info=True)
         self.process.join(timeout)
         if self.process.is_alive():
             self.process.terminate()

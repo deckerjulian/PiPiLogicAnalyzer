@@ -16,12 +16,19 @@ import os
 import sys
 from typing import Optional, Sequence
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from . import __version__, qt_plugins
-from .core import settings
+from .core import crashes, settings
 from .core.sample_store import clean_disk_directory
+
+
+class CrashNotifier(QObject):
+    """Carries the notice of an uncaught error from the thread that failed to the window."""
+
+    #: one line about the error (see ``core.crashes.install``)
+    failed = Signal(str)
 
 
 def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -118,6 +125,9 @@ def _gui(argv: Sequence[str]) -> int:
         return 1
 
     application = QApplication(sys.argv[:1])
+    # an error nobody caught (a slot of Qt that failed, a thread): crash.log, a notice in the window
+    notifier = CrashNotifier()
+    crashes.install(notify=notifier.failed.emit)
     # The user interface is imported with the application in place: its theme is chosen when
     # the module is loaded, and "follow the system" asks the application for the colour scheme
     # (without one it fell back to "dark" on Linux and to a helper program on macOS).
@@ -143,6 +153,7 @@ def _gui(argv: Sequence[str]) -> int:
     clean_segments()
 
     window = ShellWindow(decoder_paths=tuple(arguments.decoders))
+    notifier.failed.connect(window.show_crash_notice)
     if arguments.smoke_test:
         return smoke_test(window, arguments.smoke_test)
     window.show()

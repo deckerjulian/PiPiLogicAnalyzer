@@ -38,6 +38,9 @@ log = logging.getLogger(__name__)
 
 #: calls answered at a time (the application calls a driver from several threads)
 WORKERS = 8
+#: a sign of life to the application this often (seconds; ``proxy.BEAT_TIMEOUT`` ends a process
+#: without one)
+BEAT_INTERVAL = 1.0
 
 
 class _Events:
@@ -53,6 +56,14 @@ class _Events:
         self._numbers = itertools.count()
         self._closed = False
         threading.Thread(target=self._run, name="openscilab-device-events", daemon=True).start()
+        threading.Thread(target=self._beat, name="openscilab-device-beat", daemon=True).start()
+
+    def _beat(self) -> None:
+        """A sign of life every :data:`BEAT_INTERVAL` seconds, from a thread of its own: it goes on
+        while a call takes long, it stops when the interpreter is stuck or the OS stopped the process."""
+        while not self._closed:
+            self.put("beat", time.time(), key="beat")  # (a beat not sent yet is replaced, not queued)
+            time.sleep(BEAT_INTERVAL)
 
     def put(self, kind: str, payload: Any, key: Any = None) -> None:
         with self._condition:
@@ -110,7 +121,7 @@ class _LogForward(logging.Handler):
                 text += "\n" + logging.Formatter().formatException(record.exc_info)
             self.events.put("log", (record.name, record.levelno, text))
         except Exception:
-            pass
+            pass  # (a logging handler cannot log what it failed to forward)
 
 
 class Host:
@@ -379,14 +390,14 @@ def snapshot(driver: Any) -> dict:
     for name in STATIC_PROPERTIES:
         try:
             found[name] = getattr(driver, name)
-        except Exception:
+        except Exception:  # (a probe, not an error)
             continue
     for name in STATIC_METHODS:
         method = getattr(driver, name, None)
         if callable(method):
             try:
                 found[name + "()"] = method()
-            except Exception:
+            except Exception:  # (a probe, not an error)
                 continue
     import pickle
 
@@ -397,7 +408,7 @@ def _picklable(pickle_module, value: Any) -> bool:
     try:
         pickle_module.dumps(value)
         return True
-    except Exception:
+    except Exception:  # (a probe, not an error)
         return False
 
 
@@ -417,6 +428,9 @@ def main(requests, events, address: str, options: dict, levels: tuple) -> None: 
     from .. import process as package
 
     package.INSIDE = True
+    from ...core import crashes
+
+    crashes.enable_faulthandler()  # (a crash of the device process leaves its stacks in faults.log)
     host = Host(requests, events)
     root = logging.getLogger()
     root.setLevel(levels[0])

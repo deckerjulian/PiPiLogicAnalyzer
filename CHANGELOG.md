@@ -40,6 +40,25 @@ again from 0.1.
   delete one with a right click on its tile or *Templates → My templates → Delete*. They are kept
   in `templates/` of the settings directory.
 
+### Stability
+
+- **Errors nobody caught are kept**: an error in a part of the window or a thread that nobody
+  handled lands in `crash.log` in the settings directory with its traceback, and the status bar
+  says so; *Help → Open the log folder* opens the folder. A crash of the application itself (or
+  of a device process) leaves the stacks of its threads in `faults.log`.
+- **A device process that hangs is ended**: a device process sends a sign of life every second;
+  after 10 s without one, or when a call to it takes longer than 60 s, it is ended and its device
+  shown as disconnected (its capture fails with the reason) instead of freezing what waited for it.
+- A protocol decoder that cannot be loaded is no longer left out silently: *Help → Decoder search
+  paths…* names it with the error, and the log says so.
+- Nothing fails silently any more: every error openSciLab ignores on purpose (a port that is gone
+  while it closes, a device that cannot tell its capabilities, ...) is in the debug log with its
+  traceback (`--debug-driver`, *View → Console*).
+- For developers: `tests/test_fuzz_parsers.py` throws arbitrary input at every parser (files,
+  protocol frames, addresses, quantities) with hypothesis, and `pytest -m soak tests/test_soak.py`
+  streams for minutes while it watches the memory; the build workflow runs the soak test on
+  request (*Run workflow* with the minutes).
+
 ### Devices
 
 - **The built-in devices are plugins too**: the Pico boards, Arduino, DSLogic, Rigol, the

@@ -228,3 +228,70 @@ edges:
     assert acquisition.clock.started >= before and acquisition.clock.started == pico.capture.driver.command_time
     starts = [block.time.start for block in blocks]
     assert np.all(np.diff(starts) > 0)  # in order, one after the other
+
+
+# ------------------------------------------------------------------ watchdog
+class HangingFacet:
+    """A facet of the device process whose call never returns (a driver stuck in its hardware)."""
+
+    title = "Hanging"
+
+    def __init__(self) -> None:
+        self.instrument = None
+
+    def hang(self) -> None:
+        time.sleep(600)
+
+    def close(self) -> None:
+        pass
+
+
+def hanging(address: str, **_options):  # a factory of the device process (by name)
+    from openscilab.core.instrument import Instrument
+
+    instrument = Instrument("Hanging", uri=address)
+    instrument.add_facet(HangingFacet())
+    return instrument
+
+
+def test_a_call_the_device_process_never_answers_ends_it(monkeypatch):
+    from openscilab.driver.process import proxy
+
+    monkeypatch.setattr(proxy, "CALL_TIMEOUT", 1.5)
+    instrument = open_instrument("sim:free", factory=f"{__name__}:hanging")
+    try:
+        facet = instrument.facet(HangingFacet)
+        started = time.monotonic()
+        with pytest.raises(ProcessEnded, match="did not answer .*hang.* within 1.5 s"):
+            facet.hang()
+        assert time.monotonic() - started < 10
+        assert instrument.status == InstrumentStatus.DISCONNECTED and not instrument.process.alive
+        with pytest.raises(ProcessEnded):
+            facet.hang()
+    finally:
+        instrument.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGSTOP freezes the process as a hang would")
+def test_a_device_process_without_a_sign_of_life_is_ended(monkeypatch):
+    import signal
+
+    from openscilab.driver.process import proxy
+
+    monkeypatch.setattr(proxy, "BEAT_TIMEOUT", 2.0)
+    instrument = open_instrument("sim:pico")
+    try:
+        gpio = instrument.facet(GpioFacet)
+        assert gpio.read("GP16") in (0, 1, True, False) or gpio.read("GP16") is not None
+        time.sleep(1.5)  # (beats arrive: nothing happens)
+        assert instrument.process.alive and time.monotonic() - instrument.process.last_beat < 2
+        os.kill(instrument.process.pid, signal.SIGSTOP)  # (frozen: no beats, no answers)
+        deadline = time.monotonic() + 15
+        while instrument.process.alive and time.monotonic() < deadline:
+            time.sleep(0.2)
+        assert not instrument.process.alive and "stopped answering" in instrument.process.end_reason
+        assert instrument.status == InstrumentStatus.DISCONNECTED
+        with pytest.raises(ProcessEnded, match="stopped answering"):
+            gpio.read("GP16")
+    finally:
+        instrument.close()

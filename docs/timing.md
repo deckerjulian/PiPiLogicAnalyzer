@@ -140,8 +140,10 @@ calls of the application's handlers come back in order - a newer progress of a s
 not sent yet, so a busy application lags behind but never slows the reading down. The device
 process stamps the start command right before the device gets it and every block when it arrives:
 the samples are placed with those stamps. If the device process dies, its capture fails with a
-message and the instrument is disconnected; if the application goes away, the device process stops
-the device and ends. Simulators, remote devices (TCP loses nothing) and the Rigol stay in the
+message and the instrument is disconnected; a device process that hangs is ended the same way - it
+sends a sign of life every second (`host.BEAT_INTERVAL`), and after `proxy.BEAT_TIMEOUT` (10 s)
+without one, or when a call takes longer than `proxy.CALL_TIMEOUT` (60 s), the application kills
+it; if the application goes away, the device process stops the device and ends. Simulators, remote devices (TCP loses nothing) and the Rigol stay in the
 application; the Python API keeps its devices in the script's process (`api.open(..., process=True)`
 opens them in one).
 
