@@ -96,9 +96,14 @@ def test_faulthandler_writes_to_the_settings_directory(tmp_path, monkeypatch):
         crashes._faults_file.flush()
         assert "test_faulthandler_writes" in open(path, encoding="utf-8").read()
     finally:
-        if not was_enabled:
-            faulthandler.disable()
+        # back to where it was: off, or on stderr (PYTHONFAULTHANDLER in the CI) - not the file of this test
+        faulthandler.disable()
+        if was_enabled:
+            faulthandler.enable(sys.stderr, all_threads=True)
     assert crashes.enable_faulthandler(str(tmp_path / "no-such-folder" / "faults.log")) is None
+    faulthandler.disable()
+    if was_enabled:
+        faulthandler.enable(sys.stderr, all_threads=True)
 
 
 def test_the_application_installs_the_hook(shell, qtbot):
