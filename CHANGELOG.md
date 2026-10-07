@@ -55,6 +55,12 @@ again from 0.1.
   Flows, panels, projects and waveforms now write such text with escapes (found by the fuzz tests).
 - A sigrok session file with damaged metadata is refused with a message that says so, instead of
   an error of the configuration reader.
+- A short capture of a device in a process of its own could leave the device "capturing" for
+  good, refusing every capture after it: on a slow computer the capture ended before the answer to
+  its start arrived (found by the crash hunt on the CI runners).
+- `report.check` takes `last: true`: only the last value counts, checked when the flow ends - for a
+  measurement that settles. The example *Align instruments* checks the accuracy so; its first,
+  rough value failed the check on a busy computer.
 - The device card of a device whose process just ended no longer raises an error: it asked the
   monitor of the device every few hundred milliseconds whether it runs, and a tick between the end
   of the device process and the card's close failed (*An error occurred* in the status bar).

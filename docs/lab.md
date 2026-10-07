@@ -290,7 +290,7 @@ Every sigrok protocol decoder is a node (133 of them, e.g. `decode.uart`, `decod
 
 | Node | What it does |
 | --- | --- |
-| `report.check` | Checks the values at 'in' against limits ('low', 'high') or an 'expected' value with a 'tolerance'; 'pass' tells the result, the report lists it. |
+| `report.check` | Checks the values at 'in' against limits ('low', 'high') or an 'expected' value with a 'tolerance'; 'pass' tells the result, the report lists it. With 'last' only the last value counts, checked when the flow ends: a measurement that settles. |
 | `report.image` | A diagram in the report: an XY chart of two table columns ('x', 'y') or of (x, y) values, or the traces of a capture or signal. |
 | `report.section` | A heading and text in the report; values at 'in' are added below it. |
 | `report.table` | The last table (or the values) arriving at 'in' as a table in the report. |

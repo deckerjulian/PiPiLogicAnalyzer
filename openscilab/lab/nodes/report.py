@@ -190,14 +190,30 @@ def _maybe_number(value: Any) -> Optional[float]:
 
 @node("report.check", title="Check",
       description="Checks the values at 'in' against limits ('low', 'high') or an 'expected' value "
-                  "with a 'tolerance'; 'pass' tells the result, the report lists it.",
+                  "with a 'tolerance'; 'pass' tells the result, the report lists it. With 'last' only the "
+                  "last value counts, checked when the flow ends: a measurement that settles.",
       inputs=[In("in", signals.ANY)],
       outputs=[Out("pass", signals.BOOL)],
       params=[Param("name", "str", ""), Param("low", "float"), Param("high", "float"),
-              Param("expected", "float"), Param("tolerance", "float", 0.0), Param("unit", "str", "")],
+              Param("expected", "float"), Param("tolerance", "float", 0.0), Param("unit", "str", ""),
+              Param("last", "bool", False,
+                    description="check only the last value, when the flow ends (the accuracy of an alignment "
+                                "settles as edges come; its first value says little)")],
       icon="check")
 class CheckNode(NodeRuntime):
+    _last: Any = None
+
     async def on_input(self, port: str, value: Any) -> None:
+        if self.p("last", False):
+            self._last = value
+            return
+        self.judge(value)
+
+    async def finish(self) -> None:
+        if self.p("last", False) and self._last is not None:
+            self.judge(self._last)
+
+    def judge(self, value: Any) -> None:
         try:
             number = _number(value)
         except (TypeError, ValueError):

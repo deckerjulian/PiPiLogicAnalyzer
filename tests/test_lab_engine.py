@@ -301,3 +301,25 @@ def test_unknown_devices_are_reported(registry):
     flow.nodes["sim"].params["address"] = ""  # no address and no project
     engine, result = run(flow, registry)
     assert result.state == "error" and "no address" in result.error
+
+
+def test_a_check_of_the_last_value_judges_when_the_flow_ends():
+    """A measurement that settles (the accuracy of an alignment): its first values say little."""
+    from openscilab.lab import yaml_io
+    from openscilab.lab.engine import Engine
+
+    flow = yaml_io.loads("""
+flow: Settles
+nodes:
+  sweep: {type: control.sweep, values: [5, 3, 0.5]}
+  every: {type: report.check, high: 1}
+  last: {type: report.check, high: 1, last: true}
+edges:
+  - sweep.value -> every.in
+  - sweep.value -> last.in
+""")
+    engine = Engine(flow)
+    assert engine.run(timeout=20).ok
+    checks = [(node, passed) for kind, node, passed, *_ in engine.views.items if kind == "check"]
+    assert [passed for node, passed in checks if node == "every"] == [False, False, True]
+    assert [passed for node, passed in checks if node == "last"] == [True]

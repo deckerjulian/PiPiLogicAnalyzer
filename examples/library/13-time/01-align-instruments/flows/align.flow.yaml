@@ -10,7 +10,7 @@ nodes:
   align: {type: timing.align, at: [544, 296]}
   offset: {type: view.number, title: Correction, unit: s, at: [808, 232]}
   accuracy: {type: view.number, title: Accuracy, unit: s, at: [808, 568]}
-  accuracy_check: {type: report.check, name: Accuracy, high: 0.0002, unit: s, at: [808, 408]}
+  accuracy_check: {type: report.check, name: Accuracy, high: 0.0002, unit: s, last: true, at: [808, 408]}
   aligned: {type: view.scope, title: GP15 on the reference's time, at: [808, 80]}
 edges:
   - uno.device -> sync.device
