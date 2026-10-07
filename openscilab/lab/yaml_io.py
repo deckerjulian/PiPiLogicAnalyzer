@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 import yaml
 
+from ..core import yaml_text
 from ..core.files import atomic_write
 from .model import Edge, Flow, FlowError, Node, PortRef
 
@@ -44,9 +45,9 @@ Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|Tru
                              list("tTfF"))
 
 
-class Dumper(yaml.SafeDumper):
+class Dumper(yaml_text.SafeDumper):
     """Writes for :class:`Loader`: ``on`` and ``off`` need no quotes (text fields of the editor; the
-    files keep the quotes, other tools read YAML 1.1)."""
+    files keep the quotes, other tools read YAML 1.1); text reads back as it was (``core/yaml_text``)."""
 
 
 Dumper.yaml_implicit_resolvers = Loader.yaml_implicit_resolvers
@@ -137,15 +138,15 @@ _PLAIN_RE = re.compile(r"^[A-Za-z0-9_./~-][^#,\[\]{}&*!|>'\"%@`]*$")
 
 def _inline(value: Any) -> str:
     """``value`` as YAML in flow style on one line."""
-    if isinstance(value, str) and _PLAIN_RE.match(value) and ": " not in value and not value.endswith((":", " ")):
+    if isinstance(value, str) and _PLAIN_RE.match(value) and ": " not in value and not value.endswith((":", " ")) \
+            and not yaml_text.UNSAFE.search(value):
         # Addresses like sim:uno need no quotes as long as YAML reads them back unchanged.
         try:
             if yaml.safe_load(f"[{value}]") == [value]:
                 return value
         except yaml.YAMLError:
             pass
-    text = yaml.safe_dump([value], default_flow_style=True, allow_unicode=True, sort_keys=False,
-                          width=10**9).strip()
+    text = yaml_text.dump([value], default_flow_style=True, width=10**9).strip()
     if text.startswith("[") and text.endswith("]"):
         text = text[1:-1]
     return text
@@ -159,7 +160,8 @@ def _block_text(value: str) -> bool:
     """Whether ``value`` can be written as a block (``|``) and read back unchanged: the first
     line tells YAML the indentation, so it must not be empty or start with a space."""
     first = value.split("\n", 1)[0]
-    return bool(first) and not first[0].isspace() and "\r" not in value and "\t" not in value
+    return bool(first) and not first[0].isspace() and "\t" not in value \
+        and not yaml_text.UNSAFE.search(value)  # (a control character makes a block unreadable)
 
 
 def _scalar_lines(key: str, value: Any, indent: str) -> list[str]:

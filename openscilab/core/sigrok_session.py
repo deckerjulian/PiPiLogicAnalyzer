@@ -211,7 +211,10 @@ def load_session(path: str) -> CaptureSession:
             delimiters=("=",), comment_prefixes=("#",), interpolation=None, strict=False
         )
         parser.optionxform = str  # keep the case of the keys
-        parser.read_string(archive.read("metadata").decode("utf-8", "replace"))
+        try:
+            parser.read_string(archive.read("metadata").decode("utf-8", "replace"))
+        except configparser.Error as error:  # (a damaged session file)
+            raise SigrokSessionError(f"{os.path.basename(path)}: its metadata cannot be read ({error}).") from None
         section = _logic_device(parser)
         if section is None:
             analog_only = _analog_device(parser)

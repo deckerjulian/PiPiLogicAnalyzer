@@ -26,7 +26,7 @@ from typing import Any, Iterable, Optional
 
 import numpy as np
 
-from . import units
+from . import units, yaml_text
 
 SINE = "sine"
 SQUARE = "square"
@@ -576,12 +576,10 @@ WAVE_SUFFIX = ".wave.yaml"
 
 
 def save(waveform: Waveform, path: str) -> None:
-    import yaml
-
     from .files import atomic_open
 
     with atomic_open(path) as handle:
-        yaml.safe_dump(waveform.to_data(), handle, sort_keys=False, allow_unicode=True)
+        yaml_text.dump(waveform.to_data(), handle)
 
 
 def load(path: str, pin: str = "D0", rate: Any = 1_000_000.0) -> Waveform:

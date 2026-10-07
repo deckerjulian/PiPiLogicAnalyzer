@@ -9,6 +9,7 @@ import json
 import os
 import zipfile
 
+import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -255,3 +256,24 @@ def test_the_capture_json_round_trip_keeps_the_settings(tmp_path):
     assert again.frequency == 12_345 and again.capture_channels[0].channel_name == "SCL"
     assert np.array_equal(again.capture_channels[0].samples, session.capture_channels[0].samples)
     assert os.path.exists(path) and json.load(open(path, encoding="utf-8"))["Settings"]
+
+
+# ------------------------------------------------- what the fuzzing found once
+@pytest.mark.parametrize("text", ["line one\nline\x08two", "\x85", "a b", "tab\tand\r\nreturn", "﻿bom"])
+def test_text_with_control_characters_reads_back_as_it_was(text):
+    flow = Flow(name="Round trip", description=text)
+    flow.add_node("structure.comment", "note", text=text)
+    again = yaml_io.loads(yaml_io.dumps(flow))  # (a block with \x08 made the file unreadable)
+    assert again.description == text and again.nodes["note"].params["text"] == text
+    panel = panel_model.Panel(name=text)
+    panel.add("label", title=text, options={"text": text})
+    assert panel_model.loads(panel_model.dumps(panel)).to_data() == panel.to_data()  # (\x85 came back as " ")
+
+
+def test_a_session_file_with_damaged_metadata_says_so(tmp_path):
+    path = tmp_path / "damaged.sr"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("version", b"1")
+        archive.writestr("metadata", b"\x00")
+    with pytest.raises(SigrokSessionError, match="metadata cannot be read"):
+        load_session(str(path))

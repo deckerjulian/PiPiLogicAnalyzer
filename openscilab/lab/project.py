@@ -23,8 +23,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-import yaml
-
+from ..core import yaml_text
 from ..core.files import atomic_open
 from .model import Flow, FlowError
 from .nodes.registry import Registry, default_registry
@@ -134,7 +133,7 @@ class Project:
 
     def save(self) -> None:
         with atomic_open(self.file, newline="\n") as handle:
-            yaml.safe_dump(self.to_data(), handle, sort_keys=False, allow_unicode=True)
+            yaml_text.dump(self.to_data(), handle)
 
     # --------------------------------------------------------------- flows
     def registry(self) -> Registry:

@@ -45,7 +45,10 @@ def to_text(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
-    return yaml.safe_dump(value, default_flow_style=True, sort_keys=False).strip().removesuffix("...").strip()
+    from ...lab.yaml_io import Dumper
+
+    return yaml.dump(value, Dumper=Dumper, default_flow_style=True, sort_keys=False,
+                     allow_unicode=True).strip().removesuffix("...").strip()
 
 
 def to_block_text(value: Any) -> str:

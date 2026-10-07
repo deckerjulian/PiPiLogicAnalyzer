@@ -306,9 +306,9 @@ def save(panel: Panel, path: str) -> None:
 
 
 def dumps(panel: Panel) -> str:
-    import yaml
+    from ..core import yaml_text
 
-    return yaml.safe_dump(panel.to_data(), sort_keys=False, allow_unicode=True, default_flow_style=None, width=120)
+    return yaml_text.dump(panel.to_data(), default_flow_style=None, width=120)
 
 
 def loads(text: str) -> Panel:

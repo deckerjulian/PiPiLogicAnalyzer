@@ -49,6 +49,12 @@ again from 0.1.
 - **A device process that hangs is ended**: a device process sends a sign of life every second;
   after 10 s without one, or when a call to it takes longer than 60 s, it is ended and its device
   shown as disconnected (its capture fails with the reason) instead of freezing what waited for it.
+- **Text with control characters is saved so it can be read again**: a flow whose description or
+  a comment held a control character (pasted from elsewhere) was written but could not be opened
+  any more; a line break of Unicode (NEL) in the title of a panel widget came back as a space.
+  Flows, panels, projects and waveforms now write such text with escapes (found by the fuzz tests).
+- A sigrok session file with damaged metadata is refused with a message that says so, instead of
+  an error of the configuration reader.
 - The device card of a device whose process just ended no longer raises an error: it asked the
   monitor of the device every few hundred milliseconds whether it runs, and a tick between the end
   of the device process and the card's close failed (*An error occurred* in the status bar).
@@ -71,6 +77,12 @@ again from 0.1.
 
 ### Devices
 
+- **The device list shows what each connected device does**: its state (*Ready*, *Armed*,
+  *Receiving 45 %*, *Failed*), how it is connected, the settings of its next capture (rate,
+  samples, channels, trigger, stream) and a bar with its load - how much of the device memory the
+  capture uses, how much of the link a stream (orange from 90 %), how much of a running capture
+  arrived - and, for a device in a process of its own, what that process takes of a processor
+  core. It follows the device every second while the list is shown.
 - **The built-in devices are plugins too**: the Pico boards, Arduino, DSLogic, Rigol, the
   simulators and the remote devices register their kinds of address the same way a plugin does
   (`openscilab/plugins/`). *Help → Plugins…* and `openscilab-cli plugins` list them as *built in*,
