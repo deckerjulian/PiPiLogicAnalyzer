@@ -44,6 +44,13 @@ def test_the_latency_is_measured_without_a_flow():
     captured = timing_tools.measure_latency(pico, "GP16", "GP17", rate=100_000, mode="capture", samples=50_000,
                                             store=False)
     assert captured.value > 0
+    # a fast capture is short: switched in faster and fewer times; too short to switch in at all: said why
+    assert timing_tools.measure_latency(pico, "GP16", "GP17", rate=10_000_000, mode="capture", store=False).value > 0
+    assert timing_tools.loopback_rate_limit(pico, "GP17", "capture") == int(100_000 / (3 * timing_tools.MIN_SWITCH))
+    with pytest.raises(timing_tools.LatencyError, match="lasts 1 ms - too short to switch"):
+        timing_tools.measure_latency(pico, "GP16", "GP17", rate=100_000_000, mode="capture", store=False)
+    with pytest.raises(timing_tools.LatencyError, match="streams at most 400 kHz"):
+        timing_tools.measure_latency(pico, "GP16", "GP17", rate=100_000_000, store=False)
     unwired = open_simulated("pico")
     with pytest.raises(timing_tools.LatencyError, match="is GP16 wired to it"):
         timing_tools.measure_latency(unwired, "GP16", "GP17", store=False)
@@ -124,6 +131,12 @@ def test_the_timing_tab_measures_wires_and_runs_a_sync_output(shell, monkeypatch
     assert card.measure_latency()
     assert "kept for its captures" in card.banner.label.text()
     assert "stream at 100 kHz" in card.latency_label.text()
+    # the rates offered are those the Pico reaches in the mode (a capture: long enough to switch in)
+    card.loop_mode.setCurrentIndex(card.loop_mode.findData("capture"))
+    rates = [card.loop_rate.itemText(index) for index in range(card.loop_rate.count())]
+    assert rates == ["10 kHz", "100 kHz", "1 MHz", "10 MHz", "16.6 MHz"]
+    card.loop_mode.setCurrentIndex(card.loop_mode.findData("stream"))
+    assert card.loop_rate.itemText(card.loop_rate.count() - 1) == "400 kHz"
     # the sample clock is kept for the device
     card.clock_box.setCurrentIndex(card.clock_box.findData(timing_tools.CLOCK_SHARED))
     card.clock_box.activated.emit(card.clock_box.currentIndex())

@@ -113,6 +113,16 @@ edges:
     assert abs(acquisition.time_of(0) - truth) <= uncertainty + 0.0006  # (+ the frame the envelope may keep)
 
 
+def test_a_loopback_in_a_fast_capture_switches_within_it(tmp_path):
+    flow = CALIBRATE.replace("rate: 100 kHz, repeats: 8", "rate: 10 MHz, mode: capture, store: false")
+    _engine, values = run(flow, tmp_path, "    pico: [{from: GP16, to: GP17}]\n")
+    assert values["cal.latency"][-1].value > 0  # (10 ms of samples: four switches, 2 ms apart)
+    too_fast = CALIBRATE.replace("rate: 100 kHz", "rate: 100 MHz, mode: capture")
+    result = Engine(yaml_io.loads(too_fast), mode="real",
+                    project=project(tmp_path, "    pico: [{from: GP16, to: GP17}]\n")).run(timeout=40)
+    assert not result.ok and "too short to switch the output" in str(result.error)
+
+
 def test_a_simulator_without_usb_knows_its_time(tmp_path):
     flow = """
 flow: S

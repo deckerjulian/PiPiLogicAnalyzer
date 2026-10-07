@@ -28,6 +28,12 @@ again from 0.1.
   rate above the device's maximum is refused with that maximum, *Wire them* says on the *Timing*
   tab when a wire cannot be made or is already there, and the *Wires* of the *Signals* tab list
   the wires of the simulator's profile as well.
+- A latency measured with a capture (*Timing* tab, `timing.calibrate` with `mode: capture`)
+  switches the output within the capture: a fast capture is short (100,000 samples at 10 MHz:
+  10 ms), so the switches come faster (down to 2 ms apart) and fewer; before, they came 30 ms
+  apart and missed it ("0 of 10 edges seen"). The capture holds at most what the device's memory
+  does. A capture too short to switch in (100 MHz: 1 ms) is refused with the highest rate that
+  works (16.6 MHz for 100,000 samples), and the *Timing* tab offers only the rates up to it.
 - Loading a profile from a device card opens no data view: its decoders go to the device's data
   view when one is open, else to the next one.
 - A panel has an icon of its own - a dial in a frame, the front of an instrument - and the *Panel*

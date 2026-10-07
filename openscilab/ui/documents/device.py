@@ -991,6 +991,9 @@ class DeviceDocument(DocumentWidget):
         if self.loop_input.count() == 0:
             return
         highest = loopback_rate_limit(self.instrument, self.loop_input.currentText(), self.loop_mode.currentData())
+        if highest >= 1000:  # three digits, down: what is shown is reached (16.6 MHz, not 16.67)
+            step = 10 ** (len(str(int(highest))) - 3)
+            highest = highest // step * step
         rates = [10_000.0, 100_000.0, 1_000_000.0, 10_000_000.0]
         if highest:
             rates = [rate for rate in rates if rate <= highest]

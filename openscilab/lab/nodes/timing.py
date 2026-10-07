@@ -38,7 +38,7 @@ from ...core.timing import (
     store_latency,
     timing_of,
 )
-from ...core.timing_tools import LatencyError, loopback_latency, shares_clock
+from ...core.timing_tools import LatencyError, loopback_latency, loopback_plan, shares_clock
 from ...driver.base import ACQUISITION_STREAM, CaptureError
 from ...driver.models import AnalyzerChannel, CaptureSession, TriggerType
 from ..engine.runtime import NodeError, NodeRuntime
@@ -282,7 +282,11 @@ class CalibrateNode(_TimingNode):
         repeats, interval = int(self.p("repeats", 10)), self.q("interval") or 0.03
         mode = str(self.p("mode", "stream"))
         driver = capture.driver
-        total = int(self.p("samples", 100_000)) if mode == "capture" else int((repeats + 4) * interval * rate)
+        try:
+            total, repeats, interval = loopback_plan(instrument, str(self.p("channel")), rate, mode,
+                                                     int(self.p("samples", 100_000)), repeats, interval)
+        except LatencyError as error:
+            raise NodeError(f"{self.node.id}: {error}") from None
         session = CaptureSession(frequency=int(round(rate)), pre_trigger_samples=0, post_trigger_samples=total,
                                  trigger_type=TriggerType.IMMEDIATE)
         session.capture_channels = [AnalyzerChannel(channel_number=number)]

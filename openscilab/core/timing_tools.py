@@ -180,8 +180,24 @@ def channel_of(instrument: Instrument, name: str) -> int:
     raise LatencyError(f"{instrument.name} has no channel {name}")
 
 
-def loopback_rate_limit(instrument: Instrument, channel: str, mode: str = "stream") -> int:
-    """The highest rate a loopback measurement of ``channel`` can run at in ``mode`` (0: unknown)."""
+#: the shortest time between two switches of an output by command (a USB round trip and its jitter)
+MIN_SWITCH = 0.002
+
+
+def loopback_samples(instrument: Instrument, channel: str, samples: int) -> int:
+    """``samples`` of a loopback capture of ``channel``, at most what the memory of the device holds."""
+    capture = instrument.facet(CaptureFacet)
+    try:
+        held = int(capture.driver.get_limits([channel_of(instrument, channel)]).max_post_samples)
+    except (LatencyError, AttributeError, TypeError, ValueError):
+        held = 0
+    return min(int(samples), held) if held > 0 else int(samples)
+
+
+def loopback_rate_limit(instrument: Instrument, channel: str, mode: str = "stream", samples: int = 100_000) -> int:
+    """The highest rate a loopback measurement of ``channel`` can run at in ``mode`` (0: unknown): a
+    stream as fast as its link carries, a capture of ``samples`` (at most its memory) as long as it
+    lasts long enough to switch the output in it (three times :data:`MIN_SWITCH`)."""
     from ..driver.base import ACQUISITION_STREAM
 
     capture = instrument.facet(CaptureFacet)
@@ -189,9 +205,36 @@ def loopback_rate_limit(instrument: Instrument, channel: str, mode: str = "strea
         return 0
     try:
         number = channel_of(instrument, channel)
-        return int(capture.driver.max_frequency_for([number], ACQUISITION_STREAM if mode == "stream" else None))
+        highest = int(capture.driver.max_frequency_for([number], ACQUISITION_STREAM if mode == "stream" else None))
     except (LatencyError, AttributeError, TypeError, ValueError):
         return 0
+    if mode == "capture":
+        long_enough = int(loopback_samples(instrument, channel, samples) / (3 * MIN_SWITCH))
+        highest = min(highest, long_enough) if highest else long_enough
+    return highest
+
+
+def loopback_plan(instrument: Instrument, channel: str, rate: float, mode: str, samples: int, repeats: int,
+                  interval: float) -> tuple[int, int, float]:
+    """The samples to take, the switches and the time between them of a loopback measurement of
+    ``channel``: a stream ``repeats`` switches ``interval`` apart, a capture of ``samples`` (at most
+    what its memory holds) as many as fall into it. Raises :class:`LatencyError` for a rate the device
+    does not reach or a capture too short to switch the output in."""
+    highest = loopback_rate_limit(instrument, channel, mode, samples)
+    if highest and rate > highest:
+        if mode == "stream":
+            raise LatencyError(f"{instrument.name} streams at most {units.format_quantity(highest, 'Hz')}; "
+                               "choose a lower rate")
+        held = loopback_samples(instrument, channel, samples)
+        raise LatencyError(f"a capture of {held:,} samples at {units.format_quantity(rate, 'Hz')} lasts "
+                           f"{units.format_quantity(held / rate, 's', 3)} - too short to switch the output in it; "
+                           f"measure a capture at {units.format_quantity(highest, 'Hz', 3)} or less")
+    if mode != "capture":
+        return int((repeats + 4) * interval * rate), repeats, interval
+    total = loopback_samples(instrument, channel, samples)
+    window = total / rate
+    step = max(min(interval, window / (repeats + 2)), MIN_SWITCH)
+    return total, max(min(repeats, int(window / step) - 1), 1), step
 
 
 def measure_latency(instrument: Instrument, pin: str, channel: str, rate: float = 100_000.0, mode: str = "stream",
@@ -199,7 +242,9 @@ def measure_latency(instrument: Instrument, pin: str, channel: str, rate: float 
                     cancelled: Optional[Callable[[], bool]] = None) -> Latency:
     """The latency of ``instrument`` by a loopback from the output ``pin`` to ``channel`` (wired to
     each other): ``repeats`` switches while it streams (or captures) the channel. Blocks for about
-    ``(repeats + 4) * interval``; kept for the instrument at this rate when ``store``. Its result goes
+    ``(repeats + 4) * interval``; a capture of ``samples`` (at most what its memory holds) is
+    switched in faster and fewer times when it lasts shorter. Kept for the instrument at this rate
+    when ``store``. Its result goes
     to this function only (a data view of the instrument does not show it)."""
     from ..driver.base import ACQUISITION_STREAM, CaptureError
     from ..driver.models import AnalyzerChannel, CaptureSession, TriggerType
@@ -212,11 +257,7 @@ def measure_latency(instrument: Instrument, pin: str, channel: str, rate: float 
     driver = capture.driver
     if driver.is_capturing:
         raise LatencyError(f"{instrument.name} is capturing; stop the capture first")
-    highest = loopback_rate_limit(instrument, channel, mode)
-    if highest and rate > highest:
-        raise LatencyError(f"{instrument.name} {'streams' if mode == 'stream' else 'captures'} at most "
-                           f"{units.format_quantity(highest, 'Hz')}; choose a lower rate")
-    total = int(samples) if mode == "capture" else int((repeats + 4) * interval * rate)
+    total, repeats, step = loopback_plan(instrument, channel, rate, mode, samples, repeats, interval)
     session = CaptureSession(frequency=int(round(rate)), pre_trigger_samples=0, post_trigger_samples=total,
                              trigger_type=TriggerType.IMMEDIATE)
     session.capture_channels = [AnalyzerChannel(channel_number=number)]
@@ -253,14 +294,14 @@ def measure_latency(instrument: Instrument, pin: str, channel: str, rate: float 
         if error != CaptureError.NONE:
             raise LatencyError(f"the {mode} could not be started ({error.message})")
         started(acquisition, driver)
-        time.sleep(interval)
+        time.sleep(step)
         for index in range(repeats):
             if cancelled is not None and cancelled():
                 driver.stop_capture()
                 raise LatencyError("cancelled")
             commands.append(time.monotonic())  # (right before the command)
             gpio.write(pin, (index + 1) % 2)
-            time.sleep(interval)
+            time.sleep(step)
         if not done.wait(max(10.0, 4 * (repeats + 4) * interval)):
             driver.stop_capture()
             raise LatencyError(f"the {mode} did not end")
