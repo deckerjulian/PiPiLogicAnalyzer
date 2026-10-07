@@ -153,13 +153,24 @@ def test_editing_with_undo(shell, flow_file, monkeypatch):
 
 
 def test_operating_full_screen(shell, flow_file):
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+
     document = shell.new_panel(Panel(name="Kiosk", flow=flow_file))
     document.add_widget("number", "gain.out")
     document.toggle_kiosk()
-    assert document.kiosk is not None and document.operating
-    assert document.kiosk.isFullScreen() or document.kiosk.windowState() & 0x4  # Qt.WindowFullScreen
+    window = document.kiosk
+    assert window is not None and document.operating and window.parent() is document
+    assert window.isFullScreen() or window.windowState() & 0x4  # Qt.WindowFullScreen
+    content = window.content
     document.toggle_kiosk()
-    assert document.kiosk is None and document.operate_area.widget() is not None
+    assert document.kiosk is None and document.operate_area.widget() is content
+    # Qt deletes the window (not Python's garbage collector, at a moment of its own)
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert not shiboken6.isValid(window) and shiboken6.isValid(content)
+    document.toggle_kiosk()  # (again, closed by the window itself as F11 or Esc close it)
+    document.kiosk.close()
+    assert document.kiosk is None and document.operate_area.widget() is content
 
 
 def test_the_curve_example_opens_its_panel_and_flow(shell, tmp_path):

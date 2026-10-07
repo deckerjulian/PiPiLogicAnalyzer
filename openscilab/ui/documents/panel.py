@@ -629,6 +629,32 @@ class _RunPage(QWidget):
                       lambda widget: self.page_rect(widget.rect))
 
 
+class _Kiosk(QWidget):
+    """The panel that is operated full screen, as a window of its own; F11 or Esc closes it.
+
+    A child of the panel document (a window, but owned by Qt) that deletes itself when it is
+    closed: its end is a moment Qt chooses, never one of Python's garbage collector - a window freed
+    by the collector in the middle of something Qt does with its windows crashes the application."""
+
+    #: closed: the document takes its content back
+    closed = Signal()
+
+    def __init__(self, parent: QWidget, title: str, content: QWidget) -> None:
+        super().__init__(parent, Qt.Window)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setWindowTitle(title)
+        self.content = content
+        layout = QVBoxLayout(self)
+        layout.addWidget(content)
+        content.show()
+        for key in (Qt.Key_F11, Qt.Key_Escape):
+            QShortcut(QKeySequence(key), self, activated=self.close)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self.closed.emit()
+        super().closeEvent(event)
+
+
 class PanelDocument(DocumentWidget):
     """A panel (see the module documentation)."""
 
@@ -1257,24 +1283,19 @@ class PanelDocument(DocumentWidget):
             return
         if not self.operating:
             self.set_view("Operate")
-        content = self.operate_area.takeWidget()
-        window = QWidget(None, Qt.Window)
-        window.setWindowTitle(self.panel.name)
-        window_layout = QVBoxLayout(window)
-        window_layout.addWidget(content)
-        content.show()
-        for key in (Qt.Key_F11, Qt.Key_Escape):
-            QShortcut(QKeySequence(key), window, activated=window.close)
-
-        def closed(event, window=window, content=content) -> None:
-            self.kiosk = None
-            content.setParent(None)
-            self.operate_area.setWidget(content)
-            event.accept()
-
-        window.closeEvent = closed
+        window = _Kiosk(self, self.panel.name, self.operate_area.takeWidget())
+        window.closed.connect(self._kiosk_closed)
         self.kiosk = window
         window.showFullScreen()
+
+    def _kiosk_closed(self) -> None:
+        """The full screen window closes: its content goes back into the document."""
+        window, self.kiosk = self.kiosk, None
+        if window is None:
+            return
+        content = window.content
+        content.setParent(None)
+        self.operate_area.setWidget(content)
 
     # ----------------------------------------------------------- inspector
     def inspector_widget(self, selection=None) -> Optional[QWidget]:

@@ -49,6 +49,12 @@ again from 0.1.
 - **A device process that hangs is ended**: a device process sends a sign of life every second;
   after 10 s without one, or when a call to it takes longer than 60 s, it is ended and its device
   shown as disconnected (its capture fails with the reason) instead of freezing what waited for it.
+- The device card of a device whose process just ended no longer raises an error: it asked the
+  monitor of the device every few hundred milliseconds whether it runs, and a tick between the end
+  of the device process and the card's close failed (*An error occurred* in the status bar).
+- The full screen window of a panel (F11) is deleted by Qt when it closes. Before, Python's garbage
+  collector freed it at a moment of its own, which could crash the application when that moment
+  fell into something Qt did with its windows.
 - No error while a capture still arrives is drawn: the data view read the state of the transfer
   twice in one paint, and when the transfer ended in between, the paint failed (a flickering view,
   "endPaint called with active painter" in the log).
