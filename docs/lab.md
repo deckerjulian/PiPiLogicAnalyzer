@@ -158,7 +158,8 @@ periodic work `await ctx.sleep_until(start + n * period)` keeps the period (slee
 after each round adds the time the round took); `await ctx.device_call(device, function, ...)`
 calls a device without holding the other nodes while a real one answers. The
 example project (`examples/project/`) has both kinds; the node `control.python` holds such code
-inside the flow.
+inside the flow. Nodes for every flow and project come from a plugin, with the same `@node`
+([drivers.md](drivers.md#nodes-of-a-plugin)).
 
 ## Nodes
 

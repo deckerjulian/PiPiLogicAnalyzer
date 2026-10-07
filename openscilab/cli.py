@@ -290,6 +290,9 @@ def command_plugins(args) -> int:
         simulated = ("a simulator" if kind.simulator else
                      f"simulated by sim:{kind.simulation}" if kind.simulation else "no simulator")
         print(f"{kind.kind}:\t{kind.title}{process}, {simulated}")
+    for plugin in found:
+        for spec in plugins.nodes(plugin):
+            print(f"node {spec.type}\t{spec.title} ({plugin.name})")
     return 1 if plugins.problems() else 0
 
 

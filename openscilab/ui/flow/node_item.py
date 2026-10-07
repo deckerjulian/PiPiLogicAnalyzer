@@ -69,9 +69,9 @@ def _icon_pixmap(name: str, color: str, size: int):
     """The icon ``name`` in ``color`` (drawn once)."""
     key = (name, color, size)
     if key not in _PIXMAPS:
-        from ..icons import icon
+        from ..icons import icon, known
 
-        _PIXMAPS[key] = icon(name, color).pixmap(size, size)
+        _PIXMAPS[key] = icon(known(name), color).pixmap(size, size)  # (a plugin's node may name any icon)
     return _PIXMAPS[key]
 
 

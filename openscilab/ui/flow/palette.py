@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QFrame, QLineEdit, QTreeWidget, QTreeWidgetItem, Q
 from ...core import fuzzy
 from ...lab.model import DEVICE_NODE
 from ...lab.nodes.registry import GROUPS, Registry, default_registry
-from ..icons import icon
+from ..icons import icon, known
 from .canvas import NODE_MIME, encode_node
 
 
@@ -125,7 +125,7 @@ class NodePalette(QWidget):
             item = QTreeWidgetItem(group, [spec.title])
             item.setData(0, Qt.UserRole, spec.type)
             item.setToolTip(0, f"{spec.type}\n{spec.description}")
-            item.setIcon(0, icon(spec.icon if spec.icon else "nodes"))
+            item.setIcon(0, icon(known(spec.icon)))
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
         for name in self.registry.pending_groups():
             group = QTreeWidgetItem(self.tree, [GROUPS.get(name, name.capitalize())])

@@ -159,7 +159,7 @@ def test_unknown_types_ports_devices_and_double_wires():
     flow.connect("timer.tick", "cap.arm")
     flow.connect("ghost.out", "cap.arm")
     texts = [str(problem) for problem in flow.validate()]
-    assert "a: unknown node type 'no.such'" in texts
+    assert "a: unknown node type 'no.such' (a node of a plugin needs its plugin: Help → Plugins)" in texts
     assert "cap: the input 'device' is not wired" in texts
     assert any("Device does not fit Any" in text for text in texts)
     assert any("sweep has no output 'nothing'" in text for text in texts)

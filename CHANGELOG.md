@@ -49,6 +49,12 @@ again from 0.1.
   with all its facets (`instrument=`), say that no simulator stands in for it
   (`simulation=None`), or that it is a simulator itself (`simulator=True`); see
   [docs/drivers.md](docs/drivers.md#plugins).
+- **Plugins add nodes for the flows**: a plugin's functions with `@node` - as a project's own nodes
+  - are known to every flow and project, in the palette (in a group of their own, titled with
+  `node_group`), in flow files and to `openscilab run`. *Help → Plugins…* and
+  `openscilab-cli plugins` list them; a flow with a node of a missing plugin says so; a plugin
+  cannot replace a node of openSciLab. Example: `examples/plugins/calibration_nodes.py`
+  (two-point calibration, NTC thermistor).
 - *Simulate* of a flow runs a simulated Arduino (`arduino-sim:`) on the simulator *uno* and a
   simulated Rigol (`rigol-sim:`) on *dho924s*, as it does for the real devices (before: *free*).
 

@@ -246,6 +246,11 @@ def _render(name: str, color: str, size: int, padded: bool) -> QPixmap:
 
 
 @lru_cache(maxsize=None)
+def known(name: str, fallback: str = "nodes") -> str:
+    """``name`` when it is an icon, else ``fallback`` - for names from elsewhere (a plugin's node)."""
+    return name if name in _SHAPES else fallback
+
+
 def icon(name: str, color: str = TEXT, disabled_color: str = TEXT_DISABLED, padded: bool = False) -> QIcon:
     """The icon ``name`` in ``color`` (a QApplication must exist)."""
     result = QIcon()

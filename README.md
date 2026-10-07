@@ -54,7 +54,8 @@ view* of the lab. Windows, macOS and Linux; GPL-3.0.
 | Measuring devices on other computers | network; Python package `openscilab_device` | values, streams, outputs and commands with their time | beta |
 | Simulators (`sim:free`, `sim:uno`, `sim:uno_r4`, `sim:pico`, `sim:daq`, `sim:dho924s`, `remote-sim:…`) | built in | everything above, several at once, wired together | ready |
 
-New devices are added as drivers or as plugins that need no change of openSciLab, see
+New devices - and node types for the flows - are added as plugins that need no change of
+openSciLab, or devices as drivers in the project, see
 [docs/drivers.md](docs/drivers.md).
 
 ## Getting started

@@ -2415,10 +2415,12 @@ class ShellWindow(QMainWindow):
         lines = [f"{plugin.name}: {plugin.error or 'loaded'} ({plugin.source})" for plugin in found]
         added = [f"{kind.kind}: {kind.title}{' (device process)' if kind.process else ''}"
                  for kind in kinds.registered()]
+        nodes = [f"{spec.type}: {spec.title} ({plugin.name})" for plugin in found for spec in plugins.nodes(plugin)]
         folders = "\n".join(plugins.directories())
         failed = plugins.problems()
         details = (
             "\n".join(lines or ["(no plugins)"]) + "\n\nKinds of devices they add:\n" + "\n".join(added or ["(none)"])
+            + "\n\nNodes they add to the flows:\n" + "\n".join(nodes or ["(none)"])
             + f"\n\nPlugins are loaded from:\n{folders}\nand from installed packages (entry points "
             f"'{plugins.GROUP}') when openSciLab starts: restart it for a new plugin. See docs/drivers.md."
             + "".join(f"\n\n{plugin.details}" for plugin in failed)

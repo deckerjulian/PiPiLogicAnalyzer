@@ -18,6 +18,7 @@ from openscilab.driver.base import DeviceConnectionError
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLE = os.path.join(ROOT, "examples", "plugins", "counter_device.py")
+NODES = os.path.join(ROOT, "examples", "plugins", "calibration_nodes.py")
 
 
 def setup_entry() -> None:  # an entry point's function (see test_installed_packages_add_plugins)
@@ -250,3 +251,79 @@ def test_help_plugins_shows_what_is_loaded(folder, shell, monkeypatch):
     text, details = shown[0]
     assert text == f"{len(plugins.BUILT_IN) + 1} plugins are loaded, 1 could not be."
     assert "counter: Counter" in details and "no hardware library" in details and folder in details
+
+
+# ------------------------------------------------------------------- nodes
+CALIBRATE = """
+flow: Calibrate
+nodes:
+  sweep: {type: control.sweep, start: 0.5, stop: 2.5, step: 1}
+  pressure: {type: calib.linear, raw_low: 0.5, raw_high: 4.5, low: 0, high: 100, unit: kPa}
+  temperature: {type: calib.ntc}
+edges:
+  - sweep.value -> pressure.raw
+  - sweep.value -> temperature.volts
+"""
+
+
+def test_a_plugin_adds_nodes_to_every_flow(folder, tmp_path, capsys):
+    from openscilab.lab import yaml_io
+    from openscilab.lab.engine import Engine
+    from openscilab.lab.nodes.registry import GROUPS, default_registry
+    from openscilab.lab.project import Project
+
+    shutil.copy(NODES, folder)
+    found = {plugin.name: plugin for plugin in plugins.load()}
+    assert [spec.type for spec in plugins.nodes(found["calibration_nodes"])] == ["calib.linear", "calib.ntc"]
+    assert GROUPS["calib"] == "Calibration" and default_registry.get("calib.ntc").title == "NTC thermistor"
+    engine = Engine(yaml_io.loads(CALIBRATE))
+    values = []
+    engine.subscribe(lambda event: event.kind == "value" and event.node in ("pressure", "temperature")
+                     and values.append((event.node, round(event.value.value, 1), event.value.unit)))
+    assert engine.run(timeout=20).ok
+    assert ("pressure", 25.0, "kPa") in values and ("temperature", 29.2, "°C") in values
+    assert "calib.linear" in Project.create(str(tmp_path / "lab")).registry()  # (a project knows them too)
+    from openscilab import cli
+
+    assert cli.main(["plugins"]) == 0
+    assert "node calib.ntc\tNTC thermistor (calibration_nodes)" in capsys.readouterr().out
+    plugins.reset()
+    assert default_registry.find("calib.ntc") is None
+    with pytest.raises(Exception, match="a node of a plugin needs its plugin"):
+        default_registry.get("calib.ntc")
+
+
+def test_a_plugin_cannot_replace_a_node_of_openscilab(folder):
+    with open(os.path.join(folder, "my_filter.py"), "w") as handle:
+        handle.write("from openscilab.lab import node\n"
+                     "@node('dsp.filter')\n"
+                     "def mine(x):\n"
+                     "    return x\n")
+    found = {plugin.name: plugin for plugin in plugins.load()}
+    assert "node type of openSciLab itself" in found["my_filter"].error
+    from openscilab.lab.nodes.registry import default_registry
+
+    assert default_registry.get("dsp.filter").source == "openscilab.lab.nodes.dsp"
+
+
+def test_the_palette_shows_the_nodes_of_a_plugin(folder, shell, monkeypatch):
+    from openscilab.ui import messages
+
+    shutil.copy(NODES, folder)
+    plugins.reset()  # (the shell loaded them before: plugins load once, when openSciLab starts)
+    plugins.load(ui=True)
+    palette = shell.nodes_section
+    palette.refresh()
+    groups = {palette.tree.topLevelItem(index).text(0): palette.tree.topLevelItem(index)
+              for index in range(palette.tree.topLevelItemCount())}
+    calibration = groups["Calibration"]
+    assert [calibration.child(index).text(0) for index in range(calibration.childCount())] == [
+        "Two-point calibration", "NTC thermistor"]
+    flow = shell.new_flow()
+    flow.add_node("calib.ntc", (0, 0), "ntc")  # (as a drop from the palette adds it)
+    # known with its ports: what is missing is only the wire to its input
+    assert [problem.text for problem in flow.flow.errors(flow.registry)] == ["the input 'volts' is not wired"]
+    shown = []
+    monkeypatch.setattr(messages, "info", lambda parent, title, text, details=None: shown.append(details))
+    shell.show_plugins()
+    assert "calib.ntc: NTC thermistor (calibration_nodes)" in shown[0]

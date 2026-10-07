@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Plugins: Python code that adds devices (``docs/drivers.md``).
+"""Plugins: Python code that adds devices and nodes for the flows (``docs/drivers.md``).
 
 A plugin is
 
@@ -14,7 +14,8 @@ A plugin is
 * an installed Python package with an entry point in the group ``openscilab.plugins`` (naming a
   module, or a function that is called once).
 
-Importing it registers what it adds - kinds of devices with :func:`openscilab.driver.kinds.register`.
+Importing it registers what it adds - kinds of devices with :func:`openscilab.driver.kinds.register`,
+node types with :func:`openscilab.lab.node` (every flow and project knows them, see :func:`nodes`).
 A plugin that brings user interface of its own (a device backend that asks for an address, see
 :func:`openscilab.ui.devices.register_backend`) does that in a function ``setup_ui()``, which only
 the application calls: the command line and the device processes stay without Qt.
@@ -133,16 +134,31 @@ def problems() -> list[Plugin]:
     return [plugin for plugin in _plugins if plugin.error]
 
 
+def nodes(plugin: Plugin) -> list:
+    """The node types ``plugin`` added (:class:`~openscilab.lab.nodes.registry.NodeSpec`, by type)."""
+    if plugin.module is None:
+        return []
+    from ..lab.nodes.registry import default_registry
+
+    name = plugin.module.__name__
+    return [spec for spec in default_registry.specs(lazy=False) if spec.source == name
+            or spec.source.startswith(name + ".")]
+
+
 def reset() -> None:
-    """Forget the plugins of the user and the kinds they registered (tests); openSciLab's own stay."""
+    """Forget the plugins of the user and the kinds and nodes they registered (tests); openSciLab's
+    own stay."""
     global _loaded
     from ..driver import kinds
+    from ..lab.nodes.registry import default_registry
 
     for plugin in _plugins:
         if plugin.module is not None and not plugin.builtin:
             for entry in list(kinds._kinds.values()):
                 if entry.module == plugin.module.__name__:
                     kinds.unregister(entry.kind)
+            for spec in nodes(plugin):
+                default_registry.remove(spec.type)
             sys.modules.pop(plugin.module.__name__, None)
     _plugins[:] = [plugin for plugin in _plugins if plugin.builtin]
     _loaded = False

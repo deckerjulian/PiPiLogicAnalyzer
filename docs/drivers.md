@@ -253,11 +253,43 @@ In the packaged applications a plugin can import what openSciLab brings (numpy, 
 through pyusb, ...); a plugin that needs other Python packages wants openSciLab installed with
 `pip` next to them.
 
+### Nodes of a plugin
+
+A plugin can also bring node types for the flows - the same `@node` as the own nodes of a project
+(`nodes/*.py`, see [lab.md](lab.md#own-nodes)), but known to every flow and project, in the
+palette, in flow files and to `openscilab run`. `node_group` gives its group a title in the
+palette (the part of the type before the dot); `examples/plugins/calibration_nodes.py` is a
+complete example:
+
+```python
+from openscilab.core import signals
+from openscilab.lab import In, Out, Param, node, node_group
+
+node_group("calib", "Calibration")
+
+
+@node("calib.linear", title="Two-point calibration", icon="ruler",
+      inputs=[In("raw", "Scalar", optional=False)], outputs=[Out("value", "Scalar")],
+      params=[Param("raw_low", "float", 0.0), Param("raw_high", "float", 1.0), Param("low", "float", 0.0),
+              Param("high", "float", 1.0), Param("unit", "str", "")])
+def linear(raw, params):
+    share = (float(raw) - params["raw_low"]) / (params["raw_high"] - params["raw_low"])
+    return signals.Scalar(name="value", unit=params["unit"],
+                          value=params["low"] + share * (params["high"] - params["low"]), at=raw.at)
+```
+
+A plain function is computed from the latest values of its inputs whenever one changes (`params`,
+when it takes it, holds the parameters of the node); an `async def` taking `ctx` runs with the
+flow. A node type of openSciLab cannot be replaced: a plugin that tries is reported like any that
+fails. `icon` names one of the icons of the application (`openscilab/ui/icons.py`; another name
+shows the icon of nodes). *Help → Plugins…* and `openscilab-cli plugins` list the nodes of each
+plugin; a flow with a node of a plugin that is not there says which plugin it needs.
+
 ## Tests
 
 `tests/test_device_backends.py` connects a minimal driver through a backend and opens the
 dialogs with it; a new driver should at least pass the same steps. `tests/test_plugins.py` loads
-the example plugin and opens its device everywhere (device list, flow, command line, API, device
-process). Tests never touch real
+the example plugins: it opens the device everywhere (device list, flow, command line, API, device
+process) and runs the nodes in a flow and finds them in the palette. Tests never touch real
 devices: fake the transport (see `tests/test_driver.py` for the Pico boards and
 `tests/test_dslogic_driver.py` for a USB device).

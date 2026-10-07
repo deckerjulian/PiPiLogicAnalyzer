@@ -19,6 +19,12 @@ A node type is registered with the decorator :func:`node` on
     @node("my.double", inputs=[In("x", "Scalar")], outputs=[Out("y", "Scalar")])
     def double(x):
         return 2 * x
+
+Where a node type is defined decides where it is known: the built-in ones in ``lab/nodes``, those of
+a project in its ``nodes/*.py`` (:meth:`Registry.load_module`), those of a plugin (``plugins``,
+``docs/drivers.md``) or a script everywhere - in :data:`default_registry`, which loads the plugins
+with the built-in nodes. A plugin names the group of its nodes in the palette with :func:`node_group`;
+it cannot replace a node type of openSciLab.
 """
 
 from __future__ import annotations
@@ -48,6 +54,9 @@ GROUPS = {
     "convert": "Conversions",
     "structure": "Structure",
 }
+
+#: the groups of openSciLab's own nodes (plugins add theirs with :func:`node_group`)
+OWN_GROUPS = frozenset(GROUPS)
 
 #: Modules whose nodes are made on demand by a function ``nodes()``, by group (the decoders: loading
 #: the sigrok decoders takes a moment, so flows without decoders do not wait for it).
@@ -198,9 +207,11 @@ class NodeSpec:
 class Registry:
     """Node types by name."""
 
-    def __init__(self, load_builtin: bool = True) -> None:
+    def __init__(self, load_builtin: bool = True, load_plugins: bool = False) -> None:
         self._specs: dict[str, NodeSpec] = {}
         self._load_builtin = load_builtin
+        #: load the plugins with the built-in nodes (:data:`default_registry`): their nodes come along
+        self._load_plugins = load_plugins
         self._loaded = False
         self._lazy_loaded: set[str] = set()
 
@@ -212,6 +223,10 @@ class Registry:
             imported = importlib.import_module(module)
             for spec in getattr(imported, "NODES", []):
                 self.add(spec, replace=True)
+        if self._load_plugins:
+            from ... import plugins
+
+            plugins.load()  # (a plugin's @node lands here: add_external)
 
     def _ensure_group(self, group: str) -> None:
         if not self._load_builtin or group in self._lazy_loaded or group not in LAZY_MODULES:
@@ -233,6 +248,17 @@ class Registry:
         self._specs[spec.type] = spec
         return spec
 
+    def add_external(self, spec: NodeSpec) -> NodeSpec:
+        """A node type of a plugin or a script (``@node`` outside a project): it replaces one of the
+        same name, but not one of openSciLab."""
+        self._ensure_loaded()
+        self._ensure_group(spec.group)
+        current = self._specs.get(spec.type)
+        if current is not None and _builtin(current):
+            raise RegistryError(f"{spec.type!r} is a node type of openSciLab itself: give yours a name of its own")
+        self._specs[spec.type] = spec
+        return spec
+
     def remove(self, type_name: str) -> None:
         self._specs.pop(type_name, None)
 
@@ -243,7 +269,9 @@ class Registry:
         try:
             return self._specs[type_name]
         except KeyError:
-            raise RegistryError(f"unknown node type {type_name!r}") from None
+            group = type_name.split(".", 1)[0]
+            hint = "" if group in OWN_GROUPS else " (a node of a plugin needs its plugin: Help → Plugins)"
+            raise RegistryError(f"unknown node type {type_name!r}{hint}") from None
 
     def find(self, type_name: str) -> Optional[NodeSpec]:
         self._ensure_loaded()
@@ -281,7 +309,7 @@ class Registry:
 
     def copy(self) -> "Registry":
         self._ensure_loaded()
-        other = Registry(load_builtin=self._load_builtin)
+        other = Registry(load_builtin=self._load_builtin)  # (the plugins are loaded: their nodes are copied)
         other._loaded = True
         other._specs = dict(self._specs)
         other._lazy_loaded = set(self._lazy_loaded)
@@ -311,8 +339,9 @@ class Registry:
         return added
 
 
-#: The registry used when none is given; built-in nodes plus those of ``@node`` in modules.
-default_registry = Registry()
+#: The registry used when none is given; built-in nodes, those of the plugins and of ``@node`` in
+#: other modules (scripts). A project's registry is a copy of it with the project's own nodes.
+default_registry = Registry(load_plugins=True)
 _COLLECTED: list[NodeSpec] = []
 #: Registries that receive nodes defined while a project module is loaded
 _COLLECTING: list[Registry] = []
@@ -343,7 +372,7 @@ def node(type_name: str, *, title: str = "", description: str = "", inputs: Sequ
             if _COLLECTING:
                 _COLLECTING[-1].add(spec, replace=True)
             elif not spec.source.startswith("openscilab.lab.nodes."):
-                default_registry.add(spec, replace=True)
+                default_registry.add_external(spec)
         try:
             target.node_spec = spec
         except (AttributeError, TypeError):
@@ -351,6 +380,19 @@ def node(type_name: str, *, title: str = "", description: str = "", inputs: Sequ
         return target
 
     return decorate
+
+
+def node_group(key: str, title: str) -> None:
+    """The title of the group ``key`` of node types (the part of their type before the dot) in the
+    palette - for the nodes of a plugin: ``node_group("calib", "Calibration")``. The groups of
+    openSciLab keep theirs."""
+    GROUPS.setdefault(key.strip(), title.strip() or key)
+
+
+def _builtin(spec: NodeSpec) -> bool:
+    """A node type of openSciLab itself, or of a protocol decoder (not of a plugin, a project or a
+    script)."""
+    return spec.source.startswith("openscilab.") or spec.group in LAZY_MODULES
 
 
 def _infer_function_ports(spec: NodeSpec, function) -> None:
