@@ -98,10 +98,11 @@ again from 0.1.
 
 - **The device list shows what each connected device does**: its state (*Ready*, *Armed*,
   *Receiving 45 %*, *Failed*), how it is connected, the settings of its next capture (rate,
-  samples, channels, trigger, stream) and a bar with its load - how much of the device memory the
-  capture uses, how much of the link a stream (orange from 90 %), how much of a running capture
-  arrived - and, for a device in a process of its own, what that process takes of a processor
-  core. It follows the device every second while the list is shown.
+  samples, channels, trigger, stream), how long a capture lasts (*3.28 ms of signal*) and a bar
+  with its load: how much of a running capture arrived, how much of the link a stream uses, what
+  a device process takes of a processor core (orange from 90 %), else how much of the device
+  memory a capture uses - said only when it does not fill the memory, as the settings of a
+  capture do by default. It follows the device every second while the list is shown.
 - **The built-in devices are plugins too**: the Pico boards, Arduino, DSLogic, Rigol, the
   simulators and the remote devices register their kinds of address the same way a plugin does
   (`openscilab/plugins/`). *Help → Plugins…* and `openscilab-cli plugins` list them as *built in*,

@@ -36,14 +36,18 @@ def test_a_capture_into_the_device_uses_part_of_its_memory(pico):
     assert summary.connection == "sim:pico · simulated"
     assert summary.settings == "1 MHz · 32,768 samples · 8 ch · trigger: none"
     # 8 channels: the simulated Pico holds 131,072 samples of them
-    assert summary.load == pytest.approx(0.25) and summary.load_text == "memory 25 %" and summary.load_kind == "memory"
-    assert summary.load_line == "memory 25 %"
+    assert summary.load == pytest.approx(0.25) and summary.load_kind == "memory"
+    assert summary.load_line == "32.8 ms of signal · memory 25 %"
+    # a capture that fills the memory (as by default): how long it lasts, no bar
+    full = summarize(pico, session(131_072 - 2, rate=20_000_000), ("Ready", "idle"))
+    assert full.load_line == "6.55 ms of signal" and full.load is None and full.load_kind == ""
 
 
 def test_a_stream_uses_part_of_the_link(pico):
     summary = summarize(pico, session(10_000, rate=400_000, stream=True), ("Ready", "idle"))
     # 8 channels stream at 800 kHz at most
-    assert summary.load == pytest.approx(0.5) and summary.load_text == "link 50 %" and summary.load_kind == "link"
+    assert summary.load == pytest.approx(0.5) and summary.load_text == "25 ms of signal · link 50 %"
+    assert summary.load_kind == "link"
     assert summary.settings.endswith("· stream")
 
 
@@ -69,7 +73,15 @@ def test_a_disconnected_device_and_one_without_captures(pico):
 def test_the_load_of_a_device_process_and_limits_asked_once(pico):
     pico.process = types.SimpleNamespace(cpu_load=0.123)
     summary = summarize(pico, session(32_768))
-    assert summary.process_load == pytest.approx(0.123) and summary.load_line == "memory 25 % · process 12 % CPU"
+    assert summary.process_load == pytest.approx(0.123)
+    assert summary.load_line == "32.8 ms of signal · memory 25 % · process 12 % CPU"
+    # the bar: the processor before the memory; of the link and the processor the one closer to its limit
+    assert (summary.load_kind, summary.load) == ("process", pytest.approx(0.123))
+    pico.process.cpu_load = 0.95
+    stream = summarize(pico, session(10_000, rate=400_000, stream=True))
+    assert (stream.load_kind, stream.load) == ("process", pytest.approx(0.95))
+    pico.process.cpu_load = 0.1
+    assert summarize(pico, session(10_000, rate=400_000, stream=True)).load_kind == "link"
     del pico.process
     asked = []
     driver = pico.capture.driver
@@ -99,8 +111,8 @@ def test_the_device_list_shows_a_row_per_connected_device(shell, monkeypatch):
     assert section.open_list.itemWidget(section.open_list.item(0)) is row
     assert row.name_label.full_text() == "Simulation: Pico" and row.state_label.text() == "Ready"
     assert row.connection_label.full_text() == "sim:pico · simulated"
-    assert row.settings_label.full_text().endswith("trigger: none") and row.load_label.text().startswith("memory ")
-    assert not row.bar.isHidden() and 0 < row.bar.value <= 1
+    assert row.settings_label.full_text().endswith("trigger: none") and " of signal" in row.load_label.text()
+    assert row.bar.isHidden() == (row.summary.load is None)
     # a capture that runs: the row says so at the next refresh
     from openscilab.ui.devices.capture import CaptureController, capture_controller
 

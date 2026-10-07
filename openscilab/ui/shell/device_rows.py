@@ -23,8 +23,8 @@ from ..theme import BORDER, TEXT_MUTED, WARNING, set_role, token
 
 #: the colour of the state of each level (``DeviceSummary.level``); ``None``: that of the device status
 LEVEL_TOKENS = {"armed": None, "busy": "device.busy", "error": "device.error", "off": "device.disconnected"}
-#: from this load of its link on, a stream may overflow: the bar warns (a capture that fills the memory
-#: of the device is as it should be)
+#: from this load of its link on, a stream may overflow, from this share of a core on a device process
+#: falls behind: the bar warns
 HIGH_LOAD = 0.9
 
 
@@ -126,7 +126,7 @@ class DeviceRow(QWidget):
         self.settings_label.set_full_text(summary.settings)
         self.settings_label.setVisible(bool(summary.settings))
         bar_color = QColor(token("device.busy")) if summary.level == "busy" else \
-            QColor(WARNING) if summary.load_kind == "link" and (summary.load or 0) >= HIGH_LOAD else \
+            QColor(WARNING) if summary.load_kind in ("link", "process") and (summary.load or 0) >= HIGH_LOAD else \
             QColor(token(self.instrument.status.token))
         self.bar.set_value(summary.load, bar_color)
         self.bar.setVisible(summary.load is not None)

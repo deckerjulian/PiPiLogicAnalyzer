@@ -7,11 +7,13 @@
 """A connected device in a few lines: what it does, how it is connected, the settings of its next
 capture and how much of the device they use - for the device list of the sidebar.
 
-*Load* is how close the settings come to what the device can: a capture into the memory of the
-device uses part of that memory (its samples of the most it holds with these channels), a stream
-part of the link (its rate of the highest rate the link carries for these channels); while a
-capture arrives, how much of it arrived. A device in a process of its own adds what that process
-takes of a processor core. Qt free.
+The load line says how long a capture lasts (its samples at its rate) and how close the settings
+come to what the device can: a stream uses part of the link (its rate of the highest rate the link
+carries for these channels), a capture into the memory of the device part of that memory (said
+only when it does not fill it - the settings of a capture fill it by default); while a capture
+arrives, how much of it arrived. A device in a process of its own adds what that process takes of
+a processor core. The bar shows what arrived, else of the link and the processor the one closer to
+its limit, else the memory. Qt free.
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ log = logging.getLogger(__name__)
 
 #: the kinds of :attr:`DeviceSummary.level`: what colour the state has
 LEVELS = ("idle", "armed", "busy", "error", "off")
+#: from this share of its memory on, a capture fills the memory of the device (not worth saying)
+FULL = 0.995
 
 
 @dataclass
@@ -40,11 +44,13 @@ class DeviceSummary:
     #: the settings of the next capture (``100 MHz · 32,768 samples · 24 ch · trigger: none``), or
     #: what the device offers besides captures (``GPIO · monitor 20/s · generator``)
     settings: str
-    #: 0..1, ``None``: nothing to say
+    #: 0..1 of the bar, ``None``: no bar
     load: Optional[float] = None
-    #: what :attr:`load` is (``memory 25 %``, ``link 40 %``, ``received 45 %``)
+    #: how long a capture lasts and how much of the device it uses (``3.28 ms of signal · memory 25 %``,
+    #: ``10 s of signal · link 40 %``, ``received 45 %``)
     load_text: str = ""
-    #: ``"memory"``, ``"link"`` (a stream close to the link's limit may overflow) or ``"received"``
+    #: what the bar is: ``"received"``, ``"link"`` (a stream close to the link's limit may overflow),
+    #: ``"process"`` (its device process close to a full core falls behind) or ``"memory"``
     load_kind: str = ""
     #: the share of a processor core its device process takes (``None``: not in a process of its own)
     process_load: Optional[float] = None
@@ -117,13 +123,24 @@ def summarize(instrument: Instrument, session: Any = None, state: Optional[tuple
     if kind == "busy" and received is not None:
         summary.load, summary.load_text, summary.load_kind = received, f"received {received * 100:.0f} %", "received"
         return summary
+    samples = session.pre_trigger_samples + session.post_trigger_samples
+    parts = [f"{units.format_quantity(samples / session.frequency, 's', 3)} of signal"] \
+        if samples > 0 and session.frequency > 0 else []
+    bars: list[tuple[str, float]] = []
     capacity = (limits or LimitCache()).capacity(instrument.capture.driver, session)
     if capacity is not None and capacity[1] > 0:
         what, most = capacity
-        used = session.frequency if what == "link" else session.pre_trigger_samples + session.post_trigger_samples
-        summary.load = min(used / most, 1.0)
-        summary.load_text = f"{what} {used / most * 100:.0f} %"
-        summary.load_kind = what
+        share = (session.frequency if what == "link" else samples) / most
+        if what == "link" or share < FULL:  # (a capture that fills the memory, as it does by default: not said)
+            parts.append(f"{what} {share * 100:.0f} %")
+            bars.append((what, min(share, 1.0)))
+    if process_load is not None:
+        bars.append(("process", min(process_load, 1.0)))
+    summary.load_text = " · ".join(parts)
+    # the bar: of the link and the processor the one closer to its limit, else the memory
+    limited = [bar for bar in bars if bar[0] != "memory"] or bars
+    if limited:
+        summary.load_kind, summary.load = max(limited, key=lambda bar: bar[1])
     return summary
 
 
