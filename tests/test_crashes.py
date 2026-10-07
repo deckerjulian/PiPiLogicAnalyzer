@@ -17,8 +17,11 @@ pytestmark = pytest.mark.qt_no_exception_capture
 
 
 @pytest.fixture
-def hooked(tmp_path):
+def hooked(tmp_path, monkeypatch):
     notices: list[str] = []
+    # the hooks of pytest are not the ones to chain to here: what the tests raise on purpose would be
+    # reported as an error of a later test
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)
     path = crashes.install(str(tmp_path / "crash.log"), notify=notices.append, faults=False)
     yield path, notices
     crashes.uninstall()
