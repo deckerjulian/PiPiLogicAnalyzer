@@ -38,8 +38,10 @@ def _child(connection, on_disk: bool, folder: str) -> None:  # pragma: no cover 
 
 @pytest.mark.parametrize("on_disk", [False, True])
 def test_the_application_reads_what_the_device_process_writes(tmp_path, on_disk):
+    folder = tmp_path / "segments"  # (a folder of its own: the settings directory of the test is in tmp_path)
+    folder.mkdir()
     parent, child = CONTEXT.Pipe()
-    process = CONTEXT.Process(target=_child, args=(child, on_disk, str(tmp_path)))
+    process = CONTEXT.Process(target=_child, args=(child, on_disk, str(folder)))
     process.start()
     try:
         message = shared_arrays.loads(parent.recv_bytes())
@@ -53,7 +55,7 @@ def test_the_application_reads_what_the_device_process_writes(tmp_path, on_disk)
         arrays = message["arrays"]
         assert list(arrays[0][600:900]) == [7] * 300  # the same memory
         if on_disk and sys.platform != "win32":
-            assert os.listdir(tmp_path) == []  # mapped by both: the file name is gone already
+            assert os.listdir(folder) == []  # mapped by both: the file name is gone already
     finally:
         parent.send("bye")
         process.join(10)

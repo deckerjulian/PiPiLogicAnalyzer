@@ -5,7 +5,8 @@
 # * crash hunt: several runners run the tests at the same time, each one or more rounds, with core
 #   dumps on. A crash leaves the test it happened in (pytest -v), the Python stacks of every thread
 #   (faulthandler) and the native ones (gdb on the core dump) in the log and in the artifact
-#   "crash-logs-<runner>".
+#   "crash-logs-<runner>". A test that fails in a round fails the runner too (the slow runners find
+#   what depends on timing).
 
 name: Stability
 
@@ -114,6 +115,7 @@ jobs:
           ulimit -c unlimited
           mkdir -p crash-logs
           crashed=0
+          failed=0
           for round in $(seq 1 "$ROUNDS"); do
             log="crash-logs/round-$round.log"
             set +e
@@ -132,10 +134,12 @@ jobs:
               break
             fi
             if [ "$code" -ne 0 ]; then
-              grep -E "^(FAILED|ERROR) " "$log" || true
+              failed=1
+              grep -E "^(FAILED|ERROR) " "$log" | tee -a "$GITHUB_STEP_SUMMARY" || true
             fi
           done
           echo "crashed=$crashed" >> "$GITHUB_OUTPUT"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
 
       - name: The native stacks of the crash
         if: steps.run.outputs.crashed == '1'
@@ -155,6 +159,8 @@ jobs:
           path: crash-logs/
           if-no-files-found: ignore
 
-      - name: Fail when it crashed
-        if: steps.run.outputs.crashed == '1'
-        run: exit 1
+      - name: Fail when it crashed or a test failed
+        if: steps.run.outputs.crashed == '1' || steps.run.outputs.failed == '1'
+        run: |
+          echo "::error::crashed: ${{ steps.run.outputs.crashed }}, a test failed: ${{ steps.run.outputs.failed }} (the log and the artifact have the details)"
+          exit 1

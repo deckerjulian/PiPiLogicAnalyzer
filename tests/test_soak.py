@@ -33,6 +33,7 @@ def seconds_of_part(parts: int = 3) -> float:
 
 
 def rss_mib() -> float:
+    """The most memory the process held so far (the operating system's peak resident set)."""
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return usage / (1024 * 1024 if sys.platform == "darwin" else 1024)
 
@@ -60,14 +61,14 @@ class Watch:
             self.reported = now
             current, peak = tracemalloc.get_traced_memory()
             print(f"{self.what}: {now - self.started:5.0f} s, {self.count} blocks, "
-                  f"{current / 1e6:.1f} MB traced (peak {peak / 1e6:.1f}), rss {rss_mib():.0f} MiB", flush=True)
+                  f"{current / 1e6:.1f} MB traced (peak {peak / 1e6:.1f}), peak rss {rss_mib():.0f} MiB", flush=True)
 
     def finish(self) -> int:
         after = tracemalloc.take_snapshot()
         tracemalloc.stop()
         growth = sum(stat.size_diff for stat in after.compare_to(self.before, "filename"))
         print(f"{self.what}: done after {time.monotonic() - self.started:.0f} s, {self.count} blocks, "
-              f"memory grew by {growth / 1e6:+.2f} MB, rss {rss_mib():.0f} MiB", flush=True)
+              f"memory grew by {growth / 1e6:+.2f} MB, peak rss {rss_mib():.0f} MiB", flush=True)
         if growth > ALLOWED_GROWTH:
             print("The biggest growths:")
             for stat in after.compare_to(self.before, "lineno")[:8]:
@@ -107,15 +108,17 @@ def test_streams_from_a_device_process():
 
 
 def test_a_flow_streams_for_the_time():
+    """Until the flow ends, keeping the newest 2 s (a ring): the memory stays where it is."""
     from openscilab.lab import yaml_io
     from openscilab.lab.engine import Engine
 
     seconds = seconds_of_part()
     flow = yaml_io.loads(f"""
 flow: Soak
+settings: {{duration: {seconds:.0f} s}}
 nodes:
   pico: {{type: device.instrument, address: "sim:pico"}}
-  stream: {{type: device.stream, channels: [0, 1, 2, 3], rate: 200 kHz, duration: {seconds:.0f} s}}
+  stream: {{type: device.stream, channels: [0, 1, 2, 3], rate: 200 kHz, duration: 2 s, until_stopped: true}}
   line: {{type: convert.channel, channel: 0}}
   frequency: {{type: measure.frequency}}
   shown: {{type: view.number}}

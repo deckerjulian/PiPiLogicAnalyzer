@@ -51,7 +51,10 @@ def test_a_failed_write_keeps_the_file(tmp_path):
 
 
 def test_a_capture_that_cannot_be_written_keeps_the_old_one(tmp_path, monkeypatch):
-    path = str(tmp_path / "capture.lac")
+    # a folder of its own: the settings directory of the test is in tmp_path as well (conftest)
+    folder = tmp_path / "captures"
+    folder.mkdir()
+    path = str(folder / "capture.lac")
     capture_io.save_capture(path, session())
     before = open(path, "rb").read()
 
@@ -62,7 +65,7 @@ def test_a_capture_that_cannot_be_written_keeps_the_old_one(tmp_path, monkeypatc
     with pytest.raises(OSError):
         capture_io.save_capture(path, session(samples=2000))
     assert open(path, "rb").read() == before
-    assert os.listdir(tmp_path) == ["capture.lac"]
+    assert os.listdir(folder) == ["capture.lac"]  # (no half-written file left beside it)
 
 
 def test_a_compressed_capture_round_trips(tmp_path):
