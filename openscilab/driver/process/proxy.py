@@ -85,6 +85,10 @@ class Connection:
         self._killed = False
         #: when the last sign of life of the device process came (``time.monotonic``)
         self.last_beat = time.monotonic()
+        #: the share of a processor core the device process took between its last two signs of life
+        #: (``None`` until two came)
+        self.cpu_load: Optional[float] = None
+        self._last_times: Optional[tuple[float, float]] = None
         self.driver: Optional[ProcessDriver] = None
         self._listeners: list[Callable[[], None]] = []
         if not self.requests.poll(timeout):
@@ -225,6 +229,10 @@ class Connection:
     def _event(self, kind: str, payload: Any) -> None:
         if kind == "beat":
             self.last_beat = time.monotonic()
+            wall, cpu = payload
+            if self._last_times is not None and wall > self._last_times[0]:
+                self.cpu_load = max(cpu - self._last_times[1], 0.0) / (wall - self._last_times[0])
+            self._last_times = (wall, cpu)
         elif kind == "log":
             name, level, text = payload
             logging.getLogger(name).log(level, "%s", text)

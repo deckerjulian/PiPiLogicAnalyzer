@@ -493,18 +493,12 @@ class DeviceDocument(DocumentWidget):
 
     def capture_summary(self) -> str:
         """The settings of the next capture in a line."""
+        from ...core.device_summary import settings_line
+
         session = self.controller.settings() if self.controller is not None else None
         if session is None:
             return ""
-        parts = [units.format_quantity(session.frequency, "Hz"),
-                 f"{session.pre_trigger_samples + session.post_trigger_samples:,} samples",
-                 f"{len(session.capture_channels)} channels"]
-        if session.analog_channels:
-            parts.append(f"{len(session.analog_channels)} analog")
-        parts.append(f"trigger: {session.trigger_type.label.lower()}")
-        if getattr(session, "acquisition_mode", "") == "stream":
-            parts.append("stream")
-        return "Next capture: " + " · ".join(parts)
+        return "Next capture: " + settings_line(session)
 
     def _update_capture(self) -> None:
         """The device functions the device has (the buttons on the Details tab)."""

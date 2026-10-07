@@ -65,7 +65,7 @@ from ..dialogs.device_dialogs import AboutDialog
 from ..documents.dataview import DataView
 from ..documents.base import Document
 from ..documents.chart import view_document
-from ..documents.device import DeviceDocument, status_icon
+from ..documents.device import DeviceDocument
 from ..documents.flow import FlowDocument, open_flow_file
 from ..documents.panel import PanelDocument, open_panel_file
 from ..documents.waveform import WAVE_EXTENSIONS, WaveformDocument, open_waveform_file
@@ -108,7 +108,12 @@ PANEL_EXTENSIONS = (".panel.yaml",)
 
 
 class DevicesSection(QWidget):
-    """The instruments open in the hub (with their status) and the devices that can be opened."""
+    """The instruments open in the hub - a row each with its state, connection, the settings of its
+    next capture and how much of the device they use (``device_rows``) - and the devices that can
+    be opened."""
+
+    #: how often the rows of the connected devices show what they do now, while the list is shown (ms)
+    STATUS_INTERVAL_MS = 1000
 
     #: an open instrument was chosen (device card)
     instrument_activated = Signal(object)
@@ -142,6 +147,14 @@ class DevicesSection(QWidget):
         self.open_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.open_list.customContextMenuRequested.connect(self._open_menu)
         self.connected_part = self.parts.add(Part("connected", "Connected", self.open_list), 1)
+        from ...core.device_summary import LimitCache
+
+        #: the rows of the connected devices (``device_rows.DeviceRow``), in the order of the list
+        self.rows: list = []
+        self._limits = LimitCache()
+        self.status_timer = QTimer(self)
+        self.status_timer.setInterval(self.STATUS_INTERVAL_MS)
+        self.status_timer.timeout.connect(self.update_rows)
         self.disconnect_all_button = self.connected_part.add_button(
             "unplug", "Disconnect all devices...", self.disconnect_all_requested.emit)
         self.list = QListWidget(self)
@@ -218,16 +231,57 @@ class DevicesSection(QWidget):
         menu.exec(self.open_list.mapToGlobal(position))
 
     def refresh_open(self) -> None:
+        from .device_rows import DeviceRow
+
         self.open_list.clear()
+        self.rows = []
         for instrument in self.hub.instruments():
-            item = QListWidgetItem(status_icon(instrument.status), instrument.name, self.open_list)
+            item = QListWidgetItem(self.open_list)
             item.setToolTip(f"{instrument.kind} · {instrument.status.value}\n{instrument.uri}")
             item.setData(Qt.UserRole, instrument)
+            item.setData(Qt.AccessibleTextRole, instrument.name)
+            row = DeviceRow(instrument)
+            self.rows.append(row)
+            self.open_list.setItemWidget(item, row)
+        self.update_rows()
         if not len(self.hub):
             item = QListWidgetItem("No device connected", self.open_list)
             item.setFlags(Qt.NoItemFlags)
         self.disconnect_all_button.setVisible(len(self.hub) > 0)
         self.connected_part.set_count(len(self.hub) or None)
+
+    def update_rows(self) -> None:
+        """What each connected device does now (state, settings, load)."""
+        for index, row in enumerate(self.rows):
+            row.show_summary(self.summary_of(row.instrument))
+            item = self.open_list.item(index)
+            if item is not None:
+                item.setSizeHint(row.sizeHint())
+
+    def summary_of(self, instrument: Instrument):
+        from ...core.device_summary import summarize
+        from ..devices.capture import capture_controller
+
+        controller = None
+        if instrument.capture is not None and instrument.status != InstrumentStatus.DISCONNECTED:
+            controller = capture_controller(instrument)
+        try:
+            session = controller.settings() if controller is not None else None
+            state = controller.state_text() if controller is not None else None
+            received = controller.received if controller is not None else None
+            return summarize(instrument, session, state, received, self._limits)
+        except Exception:  # noqa: BLE001 - a device that went away between two refreshes: its bare status
+            log.debug("The summary of %s cannot be made", instrument.name, exc_info=True)
+            return summarize(instrument)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        self.update_rows()
+        self.status_timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().hideEvent(event)
+        self.status_timer.stop()
 
     def refresh(self) -> None:
         self.refresh_open()
@@ -573,8 +627,8 @@ class ShellWindow(QMainWindow):
             ports = serial_ports()
             try:
                 self._ports_read.emit(ports)
-            except RuntimeError:  # the window was closed meanwhile
-                pass
+            except (RuntimeError, TypeError):  # the window was closed meanwhile (PySide 6.11: TypeError)
+                log.debug("The serial ports were read after the window closed", exc_info=True)
 
         self._ports_thread = threading.Thread(target=read, name="openscilab-ports", daemon=True)
         self._ports_thread.start()

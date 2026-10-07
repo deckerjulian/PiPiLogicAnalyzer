@@ -60,9 +60,11 @@ class _Events:
 
     def _beat(self) -> None:
         """A sign of life every :data:`BEAT_INTERVAL` seconds, from a thread of its own: it goes on
-        while a call takes long, it stops when the interpreter is stuck or the OS stopped the process."""
+        while a call takes long, it stops when the interpreter is stuck or the OS stopped the process.
+        It carries the processor time the process used so far (the application shows its load)."""
         while not self._closed:
-            self.put("beat", time.time(), key="beat")  # (a beat not sent yet is replaced, not queued)
+            # (a beat not sent yet is replaced, not queued)
+            self.put("beat", (time.monotonic(), time.process_time()), key="beat")
             time.sleep(BEAT_INTERVAL)
 
     def put(self, kind: str, payload: Any, key: Any = None) -> None:

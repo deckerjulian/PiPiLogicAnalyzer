@@ -210,6 +210,14 @@ def test_the_card_of_a_device_whose_process_ended_does_not_fail(shell, pico):
     assert not card.monitor_box.isChecked()
 
 
+def test_the_application_knows_the_load_of_a_device_process(pico):
+    """The sign of life every second carries the processor time the device process used."""
+    deadline = time.monotonic() + 5
+    while pico.process.cpu_load is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert pico.process.cpu_load is not None and 0 <= pico.process.cpu_load < 4
+
+
 # ------------------------------------------------------------------- time, flows
 def test_a_flow_streams_from_a_device_process_and_places_its_samples(pico):
     import numpy as np
