@@ -36,7 +36,9 @@ ruff check .                       # style, configured in pyproject.toml
 
 `tests/test_fuzz_parsers.py` throws arbitrary input at the parsers (hypothesis), and
 `OPENSCILAB_SOAK_MINUTES=30 pytest -m soak tests/test_soak.py -s` streams for half an hour while it
-watches the memory (the suite leaves it out; *Run workflow* in the Actions runs it on request).
+watches the memory (the suite leaves it out). On GitHub, *Actions → Stability → Run workflow* runs the
+soak test and a crash hunt: several runners run the tests at once with core dumps on, and a crash
+leaves the test, the Python stacks and the native ones in the log.
 
 **An `except` that swallows is a silent failure.** Every handler either reports the error (a
 message, a banner, the result of the call) or logs it - at least `log.debug(..., exc_info=True)`,

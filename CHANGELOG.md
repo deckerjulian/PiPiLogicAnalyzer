@@ -59,8 +59,9 @@ again from 0.1.
   traceback (`--debug-driver`, *View → Console*).
 - For developers: `tests/test_fuzz_parsers.py` throws arbitrary input at every parser (files,
   protocol frames, addresses, quantities) with hypothesis, and `pytest -m soak tests/test_soak.py`
-  streams for minutes while it watches the memory; the build workflow runs the soak test on
-  request (*Run workflow* with the minutes).
+  streams for minutes while it watches the memory; the workflow *Stability* runs the soak test
+  on request, and a crash hunt: the tests on several runners at once, a crash with its Python and
+  native stacks.
 
 ### Devices
 

@@ -4,8 +4,8 @@ coming. Only on request (the suite leaves it out)::
 
     OPENSCILAB_SOAK_MINUTES=30 pytest -m soak tests/test_soak.py -s
 
-The minutes are shared by the three parts; the build workflow runs it by hand (*Run workflow* with
-soak minutes). The lines it prints are the report."""
+The minutes are shared by the three parts; the workflow *Stability* runs it on request (Actions →
+Stability → Run workflow). The lines it prints are the report."""
 
 from __future__ import annotations
 
