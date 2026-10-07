@@ -459,21 +459,25 @@ class ProcessDriver(AnalyzerDriverBase):
         # known before it starts (its first progress may come before the answer), sent by value
         number = connection.register_session(session)
         self._handlers[number] = completed_handler
+        # capturing from before the command on: a short capture can end - and say so - before the
+        # answer to its start arrives (a slow computer); set after the answer, the flag stayed on
+        self._capturing = True
         connection._by_value.add(id(session))
         try:
             error, commanded = connection.request("start", (number, session, kwargs))
         except BaseException:
             self._handlers.pop(number, None)
             connection.forget_session(number)
+            self._capturing = bool(self._handlers)
             raise
         finally:
             connection._by_value.discard(id(session))
         if error != CaptureError.NONE:
             self._handlers.pop(number, None)
             connection.forget_session(number)
+            self._capturing = bool(self._handlers)
             return error
         self.command_time = commanded
-        self._capturing = True
         return error
 
     def stop_capture(self) -> bool:

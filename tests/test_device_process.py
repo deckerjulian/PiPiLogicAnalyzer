@@ -92,6 +92,29 @@ def test_the_simulated_pico_in_a_device_process(pico):
     assert "Process" in dict(pico.details())
 
 
+def test_a_capture_that_ends_before_its_start_is_answered_does_not_run_on(pico, monkeypatch):
+    """On a slow computer a short capture can end before the answer to its start arrives: the driver
+    must not think it still runs (it refused every capture after that one)."""
+    from openscilab.driver.process import proxy
+
+    driver = pico.capture.driver
+    done = threading.Event()
+    original = proxy.Connection.request
+
+    def answered_late(self, kind, payload, *args, **kwargs):
+        answer = original(self, kind, payload, *args, **kwargs)
+        if kind == "start":
+            assert done.wait(10)  # (the completion came first)
+        return answer
+
+    monkeypatch.setattr(proxy.Connection, "request", answered_late)
+    results = []
+    assert driver.start_capture(session(2000), lambda args: (results.append(args), done.set())) == CaptureError.NONE
+    assert results and results[0].success and not driver.is_capturing
+    monkeypatch.undo()
+    assert run(driver, session(1000)).success  # (and the next one starts)
+
+
 def test_a_device_process_that_dies_fails_its_capture(pico):
     driver = pico.capture.driver
     done = threading.Event()
