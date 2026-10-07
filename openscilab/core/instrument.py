@@ -445,6 +445,86 @@ class CacheFacet(Facet):
         raise NotImplementedError
 
 
+class SimulationFacet(Facet):
+    """What a simulator simulates and how it is wired - the same whether it runs in the application
+    or in a device process (``driver/simulated``; the *Signals* tab of its device card)."""
+
+    title = "Simulation"
+
+    def channel_names(self) -> list[str]:
+        """The nets of its digital channels (``D0``, ``GP2``, ``P0.0``)."""
+        raise NotImplementedError
+
+    def analog_channel_names(self) -> list[str]:
+        raise NotImplementedError
+
+    def pin_names(self) -> list[str]:
+        """Every pin a wire can start at (outputs, PWM, the channels)."""
+        raise NotImplementedError
+
+    def scenarios(self) -> list[tuple[str, str]]:
+        """``(scenario key, why it cannot be used - "" when it can)`` of every scenario."""
+        raise NotImplementedError
+
+    def signals(self) -> dict:
+        """What it simulates now (scenario, its parameters, the signals of single channels)."""
+        raise NotImplementedError
+
+    def apply_signals(self, config: dict) -> tuple[dict, dict]:
+        """Simulate ``config`` at once; returns it as applied and the names it suggests for the
+        channels (``{channel index: name}``). Raises ``ValueError`` when it does not fit."""
+        raise NotImplementedError
+
+    def circuit(self) -> dict[str, str]:
+        """What each net carries, for people (``square 1 kHz, 50 %``, ``wired to P0.0``)."""
+        raise NotImplementedError
+
+    def wires(self) -> list[tuple[str, str]]:
+        """``(from, to)`` of every wire of its circuit now (of its profile and added ones)."""
+        raise NotImplementedError
+
+    def wiring(self) -> list[dict]:
+        """The wires added to its profile's (``[{from: GP16, to: GP17}]``)."""
+        raise NotImplementedError
+
+    def profile_wiring(self) -> list[dict]:
+        """The wires its profile brings."""
+        raise NotImplementedError
+
+    def set_wiring(self, wiring: list[dict]) -> None:
+        """Replace the added wires; ``ValueError`` (nothing changed) for one that cannot be."""
+        raise NotImplementedError
+
+    def usb(self) -> Optional[dict]:
+        """The USB link it emulates (``frame``, ``latency``, ``jitter`` in seconds), ``None``: none."""
+        raise NotImplementedError
+
+    def set_usb(self, usb: Optional[dict]) -> None:
+        raise NotImplementedError
+
+    def knows_time(self) -> bool:
+        """Whether it knows the time of its samples (it emulates no USB link)."""
+        raise NotImplementedError
+
+    def drift(self) -> float:
+        """How much faster its sample clock runs than the computer's (a share: 30e-6)."""
+        raise NotImplementedError
+
+    def set_drift(self, ppm: float) -> None:
+        raise NotImplementedError
+
+    def inject(self, fault: str, value: float = 0.0) -> None:
+        """A fault: ``disconnect``, ``reconnect``, ``delay`` (seconds), ``overflow``, ``restart``."""
+        raise NotImplementedError
+
+    def add_event_listener(self, listener: Callable[[float, str], None]) -> None:
+        """``listener(time, text)`` for each thing it does (its log)."""
+        raise NotImplementedError
+
+    def remove_event_listener(self, listener: Callable[[float, str], None]) -> None:
+        raise NotImplementedError
+
+
 F = TypeVar("F", bound=Facet)
 
 
@@ -538,6 +618,10 @@ class Instrument:
     @property
     def generator(self) -> Optional[GeneratorFacet]:
         return self.facet(GeneratorFacet)
+
+    @property
+    def simulation(self) -> Optional[SimulationFacet]:
+        return self.facet(SimulationFacet)
 
     # -------------------------------------------------------- description
     def capabilities(self) -> frozenset[str]:

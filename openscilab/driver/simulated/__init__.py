@@ -24,6 +24,7 @@ from .facets import (
     SimulatedGenerator,
     SimulatedGpio,
     SimulatedMonitor,
+    SimulationControl,
 )
 from . import scenarios
 from .profiles import SimAddress, available_profiles, free_address, load_profile, multi_profile
@@ -76,6 +77,7 @@ def open_simulated(profile_name: str, clock: Optional[Callable[[], float]] = Non
     inputs = profile.get("trigger_inputs") or {}
     if inputs:
         instrument.trigger_inputs = tuple(dict.fromkeys(tuple(instrument.trigger_inputs) + tuple(inputs)))
+    instrument.add_facet(SimulationControl(driver))  # (what it simulates: the same here and in a device process)
     return instrument
 
 

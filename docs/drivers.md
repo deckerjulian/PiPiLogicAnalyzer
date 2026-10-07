@@ -78,6 +78,7 @@ reference for a new device.
 | `AnalogOutFacet` | `set_voltage(pin, volts)`, `voltage_range(pin)` | device card, `gpio.dac` |
 | `GeneratorFacet` | `outputs()` → `OutputInfo`, `start(output, waveform)`, `stop(output)`, `running(output)`, `sync_out()`; `transmits(protocol)`, `transmit(protocol, data, pins, **settings)` for UART/SPI/I²C sent by the device | waveform document, `gen.*` nodes, *Send* tab |
 | `CacheFacet` | `entries()` → `CacheEntry`, `delete(id)`, `set_limit(bytes)` | *Cache* tab of the device card |
+| `SimulationFacet` | `channel_names()`, `pin_names()`, `scenarios()`, `signals()`, `apply_signals(config)`, `circuit()`, `wires()`, `wiring()`/`set_wiring(wires)`, `profile_wiring()`, `usb()`/`set_usb(usb)`, `knows_time()`, `drift()`/`set_drift(ppm)`, `inject(fault, value)`, `add_event_listener(listener)` (simulators only, `driver/simulated`) | *Signals*, *Events* and *Timing* tabs of a simulator, *Devices → Simulate faults*; the same in the application and in a device process |
 
 Pins are described by `PinInfo` (name, pin capabilities, capture channel, reason when
 reserved, logic level, analog channel); the GPIO keeps a device alive with `heartbeat()` when it

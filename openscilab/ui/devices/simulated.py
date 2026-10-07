@@ -13,11 +13,11 @@ from typing import Optional
 
 from PySide6.QtWidgets import QMenu, QWidget
 
-from ...core import settings
 from ...core.hub import Hub
 from ...core.instrument import Instrument, InstrumentStatus
-from ...driver.simulated import free_address, open_simulated, scenarios
+from ...driver.simulated import free_address
 from ...driver.simulated.profiles import available_profiles, profile_title
+from ...driver.simulated.stored import open_stored
 from . import DeviceBackend, DeviceEntry
 
 BACKEND_ID = "sim"
@@ -32,78 +32,28 @@ FAULTS = (
 )
 
 
-SIGNALS_FILE = "sim-signals.json"
-#: wires and the emulated USB link of each simulator (by its address)
-CIRCUIT_FILE = "sim-circuit.json"
 #: the entry of the device list that asks for a multi device set of simulated boards
 KIND_MULTI = "multi"
 
 
-def stored_signals(uri: str) -> Optional[dict]:
-    """What the simulator at ``uri`` was last told to simulate."""
-    data = settings.get_settings(SIGNALS_FILE)
-    config = data.get(uri) if isinstance(data, dict) else None
-    return dict(config) if isinstance(config, dict) else None
-
-
-def remember_signals(uri: str, config: dict) -> None:
-    data = settings.get_settings(SIGNALS_FILE)
-    data = data if isinstance(data, dict) else {}
-    data[uri] = config
-    settings.persist_settings(SIGNALS_FILE, data)
-
-
-def stored_circuit(uri: str) -> dict:
-    """The wires (``wiring``) and the USB link (``usb``: values, or ``False`` for none) the simulator
-    at ``uri`` was given; empty when nothing was changed."""
-    data = settings.get_settings(CIRCUIT_FILE)
-    entry = data.get(uri) if isinstance(data, dict) else None
-    return dict(entry) if isinstance(entry, dict) else {}
-
-
-def remember_circuit(uri: str, **values) -> None:
-    """Keep ``wiring`` and/or ``usb`` for the simulator at ``uri`` (see :func:`stored_circuit`)."""
-    data = settings.get_settings(CIRCUIT_FILE)
-    data = data if isinstance(data, dict) else {}
-    entry = dict(data.get(uri) or {})
-    entry.update(values)
-    data[uri] = entry
-    settings.persist_settings(CIRCUIT_FILE, data)
-
-
-def apply_circuit(instrument: Instrument) -> None:
-    """Give a simulator the wires and the USB link it had last time."""
-    from ...driver.simulated import set_usb, set_wiring
-
-    driver = getattr(instrument, "simulated_driver", None)
-    stored = stored_circuit(instrument.uri) if driver is not None else {}
-    if "usb" in stored:
-        try:
-            set_usb(driver, stored["usb"] or None)
-        except (TypeError, ValueError):
-            pass
-    if isinstance(stored.get("drift"), (int, float)):
-        driver.set_drift(float(stored["drift"]))
-    if stored.get("wiring"):
-        try:
-            set_wiring(driver, list(stored["wiring"]))
-        except (TypeError, ValueError):
-            pass  # a pin of another profile: the wires of the profile
-
-
 def open_at(address: str, hub: Optional[Hub] = None) -> Instrument:
-    """The simulator at ``address`` (``sim:uno``, ``sim:pico*2#2``), simulating what it did last
-    time. In real time on the clock of the hub: simulators wired to each other agree on it."""
-    spec = address[4:] if address.startswith("sim:") else address
-    instrument = open_simulated(spec, clock=hub.now if hub is not None else None)
-    config = stored_signals(instrument.uri)
-    if config:
-        try:
-            scenarios.apply(instrument.simulated_driver, config)
-        except scenarios.ScenarioError:
-            pass  # e.g. a capture file that is gone: the test signals of the profile
-    apply_circuit(instrument)
-    return instrument
+    """The simulator at ``address`` (``sim:uno``, ``sim:pico*2#2``) in the application, simulating
+    what it did last time. In real time on the clock of the hub: simulators wired to each other
+    agree on it."""
+    return open_stored(address, clock=hub.now if hub is not None else None)
+
+
+def connect_simulator(address: str, hub: Optional[Hub], parent: Optional[QWidget]) -> Instrument:
+    """The simulator at ``address`` as the device list connects it: in a device process when it
+    emulates a USB link (``process.simulator_wanted``), else in the application (:func:`open_at`)."""
+    from ...driver import process
+
+    if process.simulator_wanted(address):
+        from .. import background
+
+        return background.run(parent, f"Starting the simulator {address}...",
+                              lambda: process.open_instrument(address, factory=process.SIMULATOR_FACTORY))
+    return open_at(address, hub)
 
 
 class SimulatedBackend(DeviceBackend):
@@ -129,7 +79,7 @@ class SimulatedBackend(DeviceBackend):
                 return None
             spec = dialog.spec
         taken = [instrument.uri for instrument in hub.instruments()] if hub is not None else []
-        return open_at(str(free_address(spec, taken)), hub)
+        return connect_simulator(str(free_address(spec, taken)), hub, parent)
 
     def connect(self, entry: DeviceEntry, parent: QWidget):
         instrument = self.open_instrument(entry, parent)
@@ -137,12 +87,12 @@ class SimulatedBackend(DeviceBackend):
 
 
 def is_simulated(instrument: Instrument) -> bool:
-    return getattr(instrument, "simulated_driver", None) is not None
+    return instrument.simulation is not None
 
 
 def inject(hub: Hub, instrument: Instrument, fault: str, value: float = 0.0) -> None:
     """Inject ``fault`` into the simulated ``instrument``; its status in the hub follows."""
-    instrument.simulated_driver.inject(fault, value)
+    instrument.simulation.inject(fault, value)
     name = hub.name_of(instrument) if instrument in hub else None
     if name is None:
         return

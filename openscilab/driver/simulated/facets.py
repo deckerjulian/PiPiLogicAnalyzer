@@ -45,6 +45,7 @@ from ...core.instrument import (
     MonitorState,
     OutputInfo,
     PinInfo,
+    SimulationFacet,
 )
 from .circuit import KEEP_PAST, OutputSource, Source, SyncSource, WaveSource
 
@@ -645,3 +646,86 @@ class SimulatedGenerator(_DeviceFacet, GeneratorFacet):
         if gpio is not None:
             gpio._pin(str(name), PIN_DOUT)
         return str(name)
+
+
+class SimulationControl(SimulationFacet):
+    """What the simulator simulates and how it is wired (:class:`SimulationFacet`), on its device
+    model: the same calls whether it runs here or in a device process."""
+
+    def __init__(self, device) -> None:
+        super().__init__()
+        self.device = device
+
+    def channel_names(self) -> list[str]:
+        return list(self.device.channel_names())
+
+    def analog_channel_names(self) -> list[str]:
+        return list(self.device.analog_channel_names())
+
+    def pin_names(self) -> list[str]:
+        gpio = self.device.gpio
+        pins = [pin.name for pin in gpio.pins()] if gpio is not None else []
+        return list(dict.fromkeys(pins + self.channel_names() + self.analog_channel_names()))
+
+    def scenarios(self) -> list[tuple[str, str]]:
+        from . import scenarios
+
+        return [(scenario.key, reason) for scenario, reason in scenarios.available(self.device)]
+
+    def signals(self) -> dict:
+        from . import scenarios
+
+        return scenarios.normalized(self.device.signals)
+
+    def apply_signals(self, config: dict) -> tuple[dict, dict]:
+        from . import scenarios
+
+        applied = scenarios.apply(self.device, config)
+        return applied, dict(self.device.signal_names)
+
+    def circuit(self) -> dict[str, str]:
+        return self.device.circuit.describe()
+
+    def wires(self) -> list[tuple[str, str]]:
+        return [tuple(wire) for wire in self.device.circuit.wires()]
+
+    def wiring(self) -> list[dict]:
+        from . import wiring_of
+
+        return wiring_of(self.device)
+
+    def profile_wiring(self) -> list[dict]:
+        return [dict(wire) for wire in (self.device.profile.get("circuit") or {}).get("wiring") or []]
+
+    def set_wiring(self, wiring: list[dict]) -> None:
+        from . import set_wiring
+
+        set_wiring(self.device, wiring)
+
+    def usb(self) -> Optional[dict]:
+        from . import usb_of
+
+        return usb_of(self.device)
+
+    def set_usb(self, usb: Optional[dict]) -> None:
+        from . import set_usb
+
+        set_usb(self.device, usb)
+
+    def knows_time(self) -> bool:
+        return bool(self.device.knows_time)
+
+    def drift(self) -> float:
+        return float(self.device.drift)
+
+    def set_drift(self, ppm: float) -> None:
+        self.device.set_drift(ppm)
+
+    def inject(self, fault: str, value: float = 0.0) -> None:
+        self.device.inject(fault, value)
+
+    def add_event_listener(self, listener) -> None:
+        self.device.add_event_listener(listener)
+
+    def remove_event_listener(self, listener) -> None:
+        self.device.remove_event_listener(listener)

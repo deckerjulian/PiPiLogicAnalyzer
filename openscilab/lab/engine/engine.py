@@ -626,9 +626,8 @@ class Engine:
             return dict(signals)
         if self.hub is not None:
             for instrument in self.hub.instruments():
-                driver = getattr(instrument, "simulated_driver", None)
-                if driver is not None and instrument.uri == address:
-                    return dict(driver.signals)
+                if instrument.simulation is not None and instrument.uri == address:
+                    return dict(instrument.simulation.signals())
         return None
 
     def _project_wiring(self, device: str) -> list:
@@ -659,6 +658,12 @@ class Engine:
                 # (a simulated remote device offers its sync output as a net to wire)
                 source = getattr(source_device, "simulated_driver", None) or getattr(source_device, "wiring_source", None)
                 if target is None or source is None:
+                    in_process = [device.name for device in (instrument, source_device)
+                                  if device is not None and getattr(device, "process", None) is not None]
+                    if in_process:
+                        raise FlowError(f"simulation.wiring of {name}: {', '.join(in_process)} runs in a device "
+                                        "process of its own and cannot be wired to another simulator - switch off "
+                                        "Settings → Devices: simulators in a process of their own")
                     raise FlowError(f"simulation.wiring of {name}: {source_name} is no simulated device of the flow")
                 offset = source.clock() - target.clock()
                 wired_net = str(wire["to"])
@@ -887,7 +892,9 @@ class Engine:
 
     async def _device_call(self, device: Any, function: Callable, *args) -> Any:
         driver = getattr(getattr(device, "capture", None), "driver", None)
-        simulated = bool(getattr(driver, "is_simulator", False)) or getattr(device, "simulated_driver", None) is not None
+        # (a simulator in a device process is called as hardware is: through its pipe, not in the loop)
+        simulated = getattr(device, "process", None) is None and (
+            bool(getattr(driver, "is_simulator", False)) or getattr(device, "simulated_driver", None) is not None)
         if simulated or self.clock.virtual:
             return function(*args)
         lock = self._device_locks.setdefault(id(device), threading.Lock())

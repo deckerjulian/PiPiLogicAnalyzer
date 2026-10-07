@@ -243,7 +243,8 @@ def test_a_simulated_multi_device_from_the_device_list(shell, monkeypatch):
 def test_the_signals_tab_tells_the_device_what_to_simulate(shell):
     from PySide6.QtWidgets import QLineEdit, QSpinBox
 
-    from openscilab.ui.devices.simulated import open_at, stored_signals
+    from openscilab.driver.simulated.stored import stored_signals
+    from openscilab.ui.devices.simulated import open_at
 
     instrument = shell.connect_entry(sim_entry(shell, "free"))
     card = shell.device_card(instrument)

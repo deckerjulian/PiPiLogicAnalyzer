@@ -56,7 +56,8 @@ def test_a_drifting_sample_clock_takes_its_samples_on_the_true_clock():
 
 
 def test_the_signals_tab_sets_the_drift_and_keeps_it(shell):
-    from openscilab.ui.devices.simulated import open_at, stored_circuit
+    from openscilab.driver.simulated.stored import stored_circuit
+    from openscilab.ui.devices.simulated import open_at
 
     daq = open_at("sim:daq", shell.hub)
     shell.hub.add(daq)

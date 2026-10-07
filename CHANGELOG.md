@@ -96,6 +96,16 @@ again from 0.1.
 
 ### Devices
 
+- **Simulators of USB devices run in a process of their own**, as the device they simulate: a
+  simulator of the device list that emulates a USB link (`sim:pico`, `sim:daq`) is read in a device
+  process - the same way as a real Pico, with its processor load in the device list and *Details →
+  Process* on its card. Its *Signals*, *Events* and *Timing* tabs and *Devices → Simulate faults*
+  work as before. Simulators that know the time of their samples (`sim:uno`), those of flows and
+  simulators wired to each other stay in the application. *Settings → Devices: Run simulators of
+  USB devices in a process of their own* (on by default) switches it off.
+- A simulator in a device process starts with a capture that needs no trigger, as one in the
+  application does (the device process gave the application `is_simulator` as false); and a device
+  process that opens very fast no longer fails to send its first sign of life.
 - **The device list shows what each connected device does**: its state (*Ready*, *Armed*,
   *Receiving 45 %*, *Failed*), how it is connected, the settings of its next capture (rate,
   samples, channels, trigger, stream), how long a capture lasts (*3.28 ms of signal*) and a bar

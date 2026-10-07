@@ -103,9 +103,10 @@ def reconnect(shell: "ShellWindow", uris: list[str]) -> list[str]:
             continue
         try:
             if uri.startswith("sim:"):
-                from ..devices.simulated import open_at
+                from ..devices.simulated import connect_simulator
 
-                instrument = open_at(uri, shell.hub)  # on the hub's clock, simulating what it did
+                # simulating what it did; on the hub's clock, or in a device process as its device
+                instrument = connect_simulator(uri, shell.hub, shell)
             else:
                 # not in the thread of the window: a device that is gone would freeze the start
                 instrument = background.run(shell, f"Connecting to {uri}...", lambda uri=uri: open_instrument(uri))

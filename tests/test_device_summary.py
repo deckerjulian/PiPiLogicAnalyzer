@@ -67,7 +67,7 @@ def test_a_disconnected_device_and_one_without_captures(pico):
     assert (gone.state, gone.level, gone.settings, gone.load) == ("Disconnected", "off", "", None)
     pico.status = InstrumentStatus.SIMULATED
     offers = summarize(pico)  # (no settings of a capture: what it offers)
-    assert offers.settings == "Capture · GPIO · Monitor · Analog inputs · Generator" and offers.load is None
+    assert offers.settings == "Capture · GPIO · Monitor · Analog inputs · Generator · Simulation" and offers.load is None
 
 
 def test_the_load_of_a_device_process_and_limits_asked_once(pico):

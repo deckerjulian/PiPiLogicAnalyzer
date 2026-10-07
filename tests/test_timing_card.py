@@ -113,7 +113,8 @@ def test_a_sync_output_drives_its_pin_until_stopped():
 
 # -------------------------------------------------------------------- card
 def test_the_timing_tab_measures_wires_and_runs_a_sync_output(shell, monkeypatch):
-    from openscilab.ui.devices.simulated import open_at, stored_circuit
+    from openscilab.driver.simulated.stored import stored_circuit
+    from openscilab.ui.devices.simulated import open_at
 
     pico = open_at("sim:pico", shell.hub)
     shell.hub.add(pico)
@@ -157,7 +158,8 @@ def test_the_timing_tab_measures_wires_and_runs_a_sync_output(shell, monkeypatch
 
 
 def test_the_usb_link_of_a_simulator_is_set_in_its_signals_tab(shell):
-    from openscilab.ui.devices.simulated import open_at, stored_circuit
+    from openscilab.driver.simulated.stored import stored_circuit
+    from openscilab.ui.devices.simulated import open_at
 
     uno = open_at("sim:uno", shell.hub)
     shell.hub.add(uno)

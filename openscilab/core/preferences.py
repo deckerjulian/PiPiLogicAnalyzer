@@ -56,6 +56,9 @@ DEFAULTS: dict[str, Any] = {
     #: hardware devices are read in a process of their own (docs/timing.md): nothing the application
     #: does can delay reading them
     "devices.process": DEVICE_PROCESS,
+    #: a simulator of the device list that emulates a USB link runs in a process of its own too, as the
+    #: device it simulates (driver/process)
+    "devices.simulator_process": True,
     #: the processes that read devices run with a higher priority (macOS, Linux: asks for the rights
     #: when openSciLab starts, see core/priority.py; Windows needs none)
     "devices.high_priority": False,

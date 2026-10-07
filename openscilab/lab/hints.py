@@ -105,8 +105,9 @@ def from_instrument(instrument) -> DeviceHints:
     capture = instrument.capture
     if capture is not None:
         try:
-            names = getattr(getattr(instrument, "simulated_driver", None), "channel_names", None)
-            digital = list(names()) if callable(names) else [pin.name for pin in instrument.pins() if pin.channel is not None]
+            simulation = instrument.simulation
+            digital = list(simulation.channel_names()) if simulation is not None else \
+                [pin.name for pin in instrument.pins() if pin.channel is not None]
             driver = capture.driver
             analog = list(driver.analog_channel_names()) if driver.analog_channel_count else []
             hints.channels, hints.analog = digital + analog, analog

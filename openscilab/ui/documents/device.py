@@ -270,20 +270,20 @@ class DeviceDocument(DocumentWidget):
         self.tabs.addTab(self.pins_page, icon("chip"), "Pins")
         # (made only for a tab: a child left out of the layout showed as a black box in the corner)
         self.event_list: Optional[QListWidget] = None
-        model = getattr(instrument, "simulated_driver", None)
+        simulation = instrument.simulation
         #: what a simulator simulates (scenario, signals of single channels); ``None`` for real devices
         self.signals_panel = None
-        if model is not None:
+        if simulation is not None:
             from ..devices.signals_panel import SignalsPanel
 
-            self.signals_panel = SignalsPanel(model, self, on_names=self._name_channels)
+            self.signals_panel = SignalsPanel(simulation, self, on_names=self._name_channels)
             self.signals_panel.applied.connect(self._signals_applied)
             self.signals_panel.circuit_changed.connect(self._circuit_changed)
             self.tabs.addTab(self.signals_panel, icon("wave"), "Signals")
             self.event_list = QListWidget(self)
             self.tabs.addTab(self.event_list, icon("list"), "Events")
             self._device_events = lambda stamp, text: self._event.emit(f"{stamp:10.4f} s  {text}")
-            model.add_event_listener(self._device_events)
+            simulation.add_event_listener(self._device_events)
         #: UART, SPI and I²C sent by the device itself (capabilities TX_*)
         self.send_panel = None
         generator = instrument.facet(GeneratorFacet)
@@ -976,10 +976,12 @@ class DeviceDocument(DocumentWidget):
 
     def _simulated_loopback(self, outputs: list[str], channels: list[str]) -> Optional[tuple[str, str]]:
         """The first wire of the simulated circuit from an output to a channel, ``None`` for none."""
-        simulator = getattr(self.instrument, "simulated_driver", None)
-        if simulator is None:
+        simulation = self.instrument.simulation
+        try:
+            wires = simulation.wires() if simulation is not None else []
+        except Exception:  # noqa: BLE001 - a simulator whose device process ended
             return None
-        for source, target in simulator.circuit.wires():
+        for source, target in wires:
             if source in outputs and target in channels:
                 return source, target
         return None
@@ -1038,18 +1040,22 @@ class DeviceDocument(DocumentWidget):
         controller = self.controller
         capturing = controller is not None and controller.is_capturing
         has_gpio = instrument.gpio is not None and self.loop_output.count() > 0
-        simulator = getattr(instrument, "simulated_driver", None)
+        simulation = instrument.simulation
+        try:
+            emulates_usb = simulation is not None and not simulation.knows_time()
+        except Exception:  # noqa: BLE001 - a simulator whose device process ended
+            emulates_usb = False
         self.latency_box.setVisible(has_gpio)
         self.measure_button.setEnabled(connected and not capturing and self.loop_input.count() > 0)
-        self.wire_button.setVisible(simulator is not None and self.signals_panel is not None)
+        self.wire_button.setVisible(simulation is not None and self.signals_panel is not None)
         if not has_gpio:
             self.latency_note.setText("Measuring needs an output of the device wired to one of its channels; this "
                                       "device has no outputs. A latency of a flow (timing.calibrate with another "
                                       "instrument) or a sync signal places its samples instead.")
-        elif simulator is not None and not getattr(simulator, "knows_time", True):
+        elif emulates_usb:
             self.latency_note.setText("The simulator emulates a USB link (Signals tab): wire the output to the "
                                       "channel there (or <i>Wire them</i>), then <i>Measure</i>.")
-        elif simulator is not None:
+        elif simulation is not None:
             self.latency_note.setText("The simulator knows the time of its samples (exact): switch on its USB link "
                                       "in the Signals tab to measure as with the real device.")
         else:
@@ -1117,8 +1123,8 @@ class DeviceDocument(DocumentWidget):
         pin, channel = self.loop_output.currentText(), self.loop_input.currentText()
         if not pin or not channel or pin == channel:
             return False
-        simulator = getattr(self.instrument, "simulated_driver", None)
-        if simulator is not None and (pin, channel) in simulator.circuit.wires():
+        simulation = self.instrument.simulation
+        if simulation is not None and (pin, channel) in simulation.wires():
             self.show_banner(f"{pin} is already wired to {channel} in the simulated circuit.", "info")
             return True
         done = self.signals_panel.add_wire(pin, channel)
@@ -1217,7 +1223,7 @@ class DeviceDocument(DocumentWidget):
 
     def _signals_applied(self, config: dict, _names: dict) -> None:
         """The simulator simulates something else: remember it for this device, show it."""
-        from ..devices.simulated import remember_signals
+        from ...driver.simulated.stored import remember_signals
 
         if self.instrument.uri:
             remember_signals(self.instrument.uri, config)
@@ -1235,7 +1241,7 @@ class DeviceDocument(DocumentWidget):
 
     def _circuit_changed(self, values: dict) -> None:
         """Wires or the USB link of the simulator changed: remember them for this device."""
-        from ..devices.simulated import remember_circuit
+        from ...driver.simulated.stored import remember_circuit
 
         if self.instrument.uri:
             remember_circuit(self.instrument.uri, **values)
@@ -1691,9 +1697,12 @@ class DeviceDocument(DocumentWidget):
             self.instrument.monitor.stop()
         if self._remove_handler is not None:
             self._remove_handler()
-        model = getattr(self.instrument, "simulated_driver", None)
-        if model is not None and self._device_events is not None:
-            model.remove_event_listener(self._device_events)
+        simulation = self.instrument.simulation
+        if simulation is not None and self._device_events is not None:
+            try:
+                simulation.remove_event_listener(self._device_events)
+            except Exception:  # noqa: BLE001 - a device process that ended took its listeners along
+                log.debug("The events of %s cannot be unsubscribed", self.instrument.name, exc_info=True)
         self.bridge.close()
 
 

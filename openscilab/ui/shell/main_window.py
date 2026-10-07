@@ -1785,9 +1785,9 @@ class ShellWindow(QMainWindow):
             self.hub.remove(instrument.name)
         try:
             if instrument.uri.startswith("sim:"):
-                from ..devices.simulated import open_at
+                from ..devices.simulated import connect_simulator
 
-                new = open_at(instrument.uri, self.hub)
+                new = connect_simulator(instrument.uri, self.hub, self)
             else:
                 new = background.run(self, f"Connecting to {instrument.uri}...",
                                      lambda: open_instrument(instrument.uri))

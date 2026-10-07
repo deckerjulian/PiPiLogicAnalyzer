@@ -26,6 +26,7 @@ def isolated_settings(tmp_path, monkeypatch):
     # fake drivers live in this process: devices are opened here (tests/test_device_process.py opens
     # them in device processes on purpose)
     monkeypatch.setitem(preferences.DEFAULTS, "devices.process", False)
+    monkeypatch.setitem(preferences.DEFAULTS, "devices.simulator_process", False)
     preferences.reload()
     yield
     preferences.reload()

@@ -546,6 +546,11 @@ for _name, _member in list(vars(AnalyzerDriverBase).items()):
         continue
     if isinstance(_member, property) or callable(_member):
         setattr(ProcessDriver, _name, _passed(_name, _member))
+# plain values of the base (``is_simulator = False``) that a driver sets to its own: read once, there
+for _name in host_module.STATIC_PROPERTIES:
+    _member = vars(AnalyzerDriverBase).get(_name)
+    if _member is not None and not isinstance(_member, property) and not callable(_member):
+        setattr(ProcessDriver, _name, property(lambda self, name=_name: self._get(name)))
 del _name, _member
 
 

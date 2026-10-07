@@ -143,9 +143,20 @@ the samples are placed with those stamps. If the device process dies, its captur
 message and the instrument is disconnected; a device process that hangs is ended the same way - it
 sends a sign of life every second (`host.BEAT_INTERVAL`), and after `proxy.BEAT_TIMEOUT` (10 s)
 without one, or when a call takes longer than `proxy.CALL_TIMEOUT` (60 s), the application kills
-it; if the application goes away, the device process stops the device and ends. Simulators, remote devices (TCP loses nothing) and the Rigol stay in the
-application; the Python API keeps its devices in the script's process (`api.open(..., process=True)`
-opens them in one).
+it; if the application goes away, the device process stops the device and ends. Remote devices (TCP
+loses nothing) and the Rigol stay in the application; the Python API keeps its devices in the
+script's process (`api.open(..., process=True)` opens them in one).
+
+**Simulators of USB devices, too.** A simulator of the device list that emulates a USB link
+(`sim:pico`, `sim:daq`; the link its *Signals* tab set counts) runs in a device process as the
+device it simulates (*Settings → Devices: Run simulators of USB devices in a process of their own*,
+on by default): the same proxy, shared memory and stamps, its processor load in the device list. It
+opens with what it simulated last time (`driver/simulated/stored.py`); the application reaches its
+signals, wires, USB link, drift, faults and events through its simulation facet
+(`core.instrument.SimulationFacet`), here or there alike. A simulator that knows the time of its
+samples, the simulators of flows (the engine's clock, *Fast*, `simulation.wiring`) and simulators
+wired to each other stay in the application; a flow that wires a simulator in a device process to
+another one says to switch the setting off.
 
 **In the application, too:** drivers raise their events into a notifier thread of their own (the
 reading thread hands them over and goes on), the protocol decoders run in a process of their own

@@ -132,7 +132,6 @@ class Host:
     def __init__(self, requests, events) -> None:
         self.requests = requests
         self.sent = Sent()
-        self.events = _Events(events, self)
         self.objects: dict[int, Any] = {}
         self._ids: dict[int, int] = {}
         self._numbers = itertools.count(100)
@@ -144,6 +143,8 @@ class Host:
         self._reply_lock = threading.Lock()
         self.instrument = None
         self.driver = None
+        # last: its threads send at once (a sign of life) and look up what is above
+        self.events = _Events(events, self)
 
     # ------------------------------------------------------------- objects
     def export(self, obj: Any) -> int:

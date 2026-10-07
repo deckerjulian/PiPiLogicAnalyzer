@@ -118,6 +118,12 @@ class PreferencesDialog(QDialog):
         self.device_process.setToolTip("Pico, Arduino and DSLogic: nothing the application does (drawing, flows, "
                                        "scripts) can delay reading them, so a stream does not overflow. "
                                        "Applies to devices connected from now on.")
+        self.simulator_process = QCheckBox("Run simulators of USB devices in a process of their own", self)
+        self.simulator_process.setToolTip(
+            "A simulator that emulates a USB link (sim:pico, sim:daq) runs as the device it simulates: in a "
+            "process of its own, with its processor load in the device list. Simulators that know the time of "
+            "their samples, those of flows and simulators wired to each other stay in the application. Applies "
+            "to simulators connected from now on.")
         import sys
 
         self.high_priority = QCheckBox("Read devices with a higher priority", self)
@@ -127,7 +133,7 @@ class PreferencesDialog(QDialog):
                             "macOS and Linux ask for the administrator's password when openSciLab starts (on "
                             "Linux it can be allowed for good)."))
         self._page("Devices", [("Look for devices every", self.refresh), ("", self.simulators),
-                               ("", self.device_process), ("", self.high_priority)],
+                               ("", self.device_process), ("", self.simulator_process), ("", self.high_priority)],
                    "Unplugged devices are noticed when the device list looks again. A device read in a process "
                    "of its own shows it on its card (Details).")
 
@@ -222,6 +228,7 @@ class PreferencesDialog(QDialog):
         self.refresh.setValue(float(values["devices.refresh_s"]))
         self.simulators.setChecked(values["devices.show_simulators"])
         self.device_process.setChecked(values["devices.process"])
+        self.simulator_process.setChecked(values["devices.simulator_process"])
         self.high_priority.setChecked(values["devices.high_priority"])
         self.remote_port.setValue(int(values["remote.port"]))
         self.remote_token.setText(str(values["remote.token"]))
@@ -245,6 +252,7 @@ class PreferencesDialog(QDialog):
             "devices.refresh_s": float(self.refresh.value()),
             "devices.show_simulators": self.simulators.isChecked(),
             "devices.process": self.device_process.isChecked(),
+            "devices.simulator_process": self.simulator_process.isChecked(),
             "devices.high_priority": self.high_priority.isChecked(),
             "remote.enabled": self.remote_enabled.isChecked(),
             "remote.port": self.remote_port.value(),

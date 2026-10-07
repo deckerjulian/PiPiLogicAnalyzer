@@ -51,9 +51,9 @@ def channel_numbers(instrument: Instrument, names) -> list[tuple[str, int]]:
     """``(name, channel number)`` of the capture channels ``names`` (pin names, ``CH3``, numbers)."""
     capture = instrument.require(CaptureFacet)
     pins = {pin.name: pin.channel for pin in instrument.pins() if pin.channel is not None}
-    driver_names = getattr(getattr(instrument, "simulated_driver", None), "channel_names", None)
-    if callable(driver_names):
-        pins.update({name: index for index, name in enumerate(driver_names())})
+    simulation = instrument.simulation
+    if simulation is not None:
+        pins.update({name: index for index, name in enumerate(simulation.channel_names())})
     count = capture.channel_count
     if not names:
         names = list(pins) if pins else [f"CH{index + 1}" for index in range(count)]
