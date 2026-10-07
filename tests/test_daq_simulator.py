@@ -32,6 +32,10 @@ def test_the_daq_simulator_is_a_usb_daq():
     # its latency over the emulated USB, measured with the digital loopback
     latency = timing_tools.measure_latency(daq, "P0.0", "P0.1", rate=10_000, store=False)
     assert 0.001 <= latency.value < 0.05
+    # faster than it streams: said so before anything is switched
+    assert timing_tools.loopback_rate_limit(daq, "P0.1") == 50_000
+    with pytest.raises(timing_tools.LatencyError, match="streams at most 50 kHz"):
+        timing_tools.measure_latency(daq, "P0.0", "P0.1", rate=100_000, store=False)
 
 
 def test_a_drifting_sample_clock_takes_its_samples_on_the_true_clock():
@@ -64,6 +68,36 @@ def test_the_signals_tab_sets_the_drift_and_keeps_it(shell):
     assert daq.simulated_driver.drift == pytest.approx(150e-6) and stored_circuit("sim:daq")["drift"] == 150.0
     assert open_at("sim:daq").simulated_driver.drift == pytest.approx(150e-6)
     time.sleep(0.01)
+
+
+def test_the_timing_tab_measures_with_the_loopback_of_the_profile(shell):
+    from openscilab.driver.simulated import wiring_of
+    from openscilab.ui.devices.simulated import open_at
+
+    daq = open_at("sim:daq", shell.hub)
+    shell.hub.add(daq)
+    card = shell.open_device_card(daq)
+    panel = card.signals_panel
+    # the wires of the profile are listed (not removable), the added ones first
+    assert panel.wire_table.rowCount() == 2 and panel.wire_table.item(0, 0).text() == "P0.0"
+    assert "of the profile" in panel.wire_table.item(0, 1).text() and not panel.remove_wire_button.isEnabled()
+    # the Timing tab starts with the wire of the profile, at a rate the DAQ streams
+    assert (card.loop_output.currentText(), card.loop_input.currentText()) == ("P0.0", "P0.1")
+    rates = [card.loop_rate.itemText(index) for index in range(card.loop_rate.count())]
+    assert rates == ["10 kHz", "50 kHz"] and card.loop_rate.currentText() == "50 kHz"
+    assert card.wire_loopback() and wiring_of(daq.simulated_driver) == []  # (already wired)
+    assert "already wired" in card.banner.label.text()
+    # the reverse wire would be a loop: said on the Timing tab
+    card.loop_output.setCurrentText("P0.1")
+    card.loop_input.setCurrentText("P0.0")
+    assert not card.wire_loopback() and "loop" in card.banner.label.text()
+    card.loop_output.setCurrentText("P0.3")
+    card.loop_input.setCurrentText("P0.4")
+    assert card.wire_loopback() and wiring_of(daq.simulated_driver) == [{"from": "P0.3", "to": "P0.4"}]
+    assert panel.wire_table.rowCount() == 3 and panel.remove_wire_button.isEnabled()
+    card.loop_rate.setCurrentText("10 kHz")
+    assert card.measure_latency(), card.banner.label.text()
+    assert panel.remove_wire(0) and wiring_of(daq.simulated_driver) == []
 
 
 # ------------------------------------------------------- compact controls

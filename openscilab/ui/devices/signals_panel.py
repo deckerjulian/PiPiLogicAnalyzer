@@ -177,6 +177,8 @@ class SignalsPanel(QWidget):
         self.on_names = on_names
         #: single channels set by hand: net -> source description
         self.single: dict[str, dict] = dict((driver.signals or {}).get("channels") or {})
+        #: why the last wire could not be set ("" when it could)
+        self.wire_error = ""
         self._editors: dict[str, QWidget] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 10, 0, 0)
@@ -310,14 +312,26 @@ class SignalsPanel(QWidget):
         pins = [pin.name for pin in gpio.pins()] if gpio is not None else []
         return list(dict.fromkeys(pins + self.nets()))
 
+    def profile_wires(self) -> list[dict]:
+        """The wires the profile of the simulator brings (not removable here)."""
+        return [dict(wire) for wire in (self.driver.profile.get("circuit") or {}).get("wiring") or []]
+
     def refresh_circuit(self) -> None:
         from ...driver.simulated import usb_of, wiring_of
 
         wires = wiring_of(self.driver)
-        self.wire_table.setRowCount(len(wires))
-        for row, wire in enumerate(wires):
+        built_in = self.profile_wires()
+        self.wire_table.setRowCount(len(wires) + len(built_in))
+        for row, wire in enumerate(wires + built_in):
+            fixed = row >= len(wires)
             for column, key in enumerate(("from", "to")):
-                self.wire_table.setItem(row, column, QTableWidgetItem(str(wire[key])))
+                item = QTableWidgetItem(str(wire[key]) + ("   · of the profile" if fixed and column == 1 else ""))
+                if fixed:
+                    item.setForeground(QColor(TEXT_MUTED))
+                    item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                    item.setToolTip("A wire of the simulator's profile: always there (a wire added to the same "
+                                    "pin replaces it)")
+                self.wire_table.setItem(row, column, item)
         self.remove_wire_button.setEnabled(bool(wires))
         usb = usb_of(self.driver)
         self.usb_box.setChecked(usb is not None)
@@ -333,8 +347,10 @@ class SignalsPanel(QWidget):
         try:
             set_wiring(self.driver, wires)
         except ValueError as error:
-            self.message.show_error(str(error))
+            self.wire_error = str(error)
+            self.message.show_error(self.wire_error)
             return False
+        self.wire_error = ""
         self.refresh_circuit()
         self.refresh_table()
         self.circuit_changed.emit({"wiring": wiring_of(self.driver)})

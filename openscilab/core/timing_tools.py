@@ -26,7 +26,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
-from . import settings
+from . import settings, units
 from .instrument import MODE_OUTPUT, CaptureFacet, GpioFacet, Instrument, InstrumentError
 from .timing import (
     TIMING_FILE,
@@ -180,6 +180,20 @@ def channel_of(instrument: Instrument, name: str) -> int:
     raise LatencyError(f"{instrument.name} has no channel {name}")
 
 
+def loopback_rate_limit(instrument: Instrument, channel: str, mode: str = "stream") -> int:
+    """The highest rate a loopback measurement of ``channel`` can run at in ``mode`` (0: unknown)."""
+    from ..driver.base import ACQUISITION_STREAM
+
+    capture = instrument.facet(CaptureFacet)
+    if capture is None:
+        return 0
+    try:
+        number = channel_of(instrument, channel)
+        return int(capture.driver.max_frequency_for([number], ACQUISITION_STREAM if mode == "stream" else None))
+    except (LatencyError, AttributeError, TypeError, ValueError):
+        return 0
+
+
 def measure_latency(instrument: Instrument, pin: str, channel: str, rate: float = 100_000.0, mode: str = "stream",
                     samples: int = 100_000, repeats: int = 10, interval: float = 0.03, store: bool = True,
                     cancelled: Optional[Callable[[], bool]] = None) -> Latency:
@@ -198,6 +212,10 @@ def measure_latency(instrument: Instrument, pin: str, channel: str, rate: float 
     driver = capture.driver
     if driver.is_capturing:
         raise LatencyError(f"{instrument.name} is capturing; stop the capture first")
+    highest = loopback_rate_limit(instrument, channel, mode)
+    if highest and rate > highest:
+        raise LatencyError(f"{instrument.name} {'streams' if mode == 'stream' else 'captures'} at most "
+                           f"{units.format_quantity(highest, 'Hz')}; choose a lower rate")
     total = int(samples) if mode == "capture" else int((repeats + 4) * interval * rate)
     session = CaptureSession(frequency=int(round(rate)), pre_trigger_samples=0, post_trigger_samples=total,
                              trigger_type=TriggerType.IMMEDIATE)

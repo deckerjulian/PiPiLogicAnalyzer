@@ -21,6 +21,13 @@ again from 0.1.
 - *Signals* of a simulator's device card: the button for a channel's own signal says that it acts
   on the channel selected in the table (*Set signal of the selected channel…*) and is off while
   none is selected (before, it did nothing without a selection).
+- Measuring the latency of a simulator works out of the box: the *Timing* tab starts with a
+  loopback the simulator already has (`sim:daq`: P0.0 → P0.1) instead of the reverse pair, whose
+  wire made a loop, and offers only the rates the device reaches in the chosen mode (`sim:daq`
+  streams at most 50 kHz; before, 100 kHz failed with "Specified parameters are incorrect"). A
+  rate above the device's maximum is refused with that maximum, *Wire them* says on the *Timing*
+  tab when a wire cannot be made or is already there, and the *Wires* of the *Signals* tab list
+  the wires of the simulator's profile as well.
 - Loading a profile from a device card opens no data view: its decoders go to the device's data
   view when one is open, else to the next one.
 - A panel has an icon of its own - a dial in a frame, the front of an instrument - and the *Panel*

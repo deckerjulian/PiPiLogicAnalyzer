@@ -873,6 +873,8 @@ class DeviceDocument(DocumentWidget):
         self.loop_mode = QComboBox(self.latency_box)
         self.loop_mode.addItem("Stream", "stream")
         self.loop_mode.addItem("Capture", "capture")
+        self.loop_mode.currentIndexChanged.connect(self._fill_loop_rates)
+        self.loop_input.currentIndexChanged.connect(self._fill_loop_rates)
         for column, (title, widget) in enumerate((("Output", self.loop_output), ("wired to", self.loop_input),
                                                    ("Rate", self.loop_rate), ("Mode", self.loop_mode))):
             grid.addWidget(QLabel(title, self.latency_box), 0, column)
@@ -947,6 +949,7 @@ class DeviceDocument(DocumentWidget):
         outputs = [pin.name for pin in pins if PIN_DOUT in pin.capabilities and pin.usable]
         channels = [pin.name for pin in self.instrument.pins() if pin.channel is not None]
         config = timing_tools.device_config(self.instrument)
+        first = self.loop_output.count() == 0
         for box, names in ((self.loop_output, outputs), (self.loop_input, channels), (self.sync_pin, outputs)):
             current = box.currentText()
             box.blockSignals(True)
@@ -955,15 +958,55 @@ class DeviceDocument(DocumentWidget):
             if current in names:
                 box.setCurrentText(current)
             box.blockSignals(False)
-        if outputs and self.loop_output.currentIndex() == 0 and channels:
+        wired = self._simulated_loopback(outputs, channels)
+        if wired is not None:
+            if first:  # a wire the simulator already has (sim:daq: P0.0 → P0.1)
+                self.loop_output.setCurrentText(wired[0])
+                self.loop_input.setCurrentText(wired[1])
+        elif outputs and self.loop_output.currentIndex() == 0 and channels:
             # an output that is not also the channel (GP16 → GP17)
             free = [name for name in outputs if name != channels[0]]
             if free and config["sync_pin"] != free[0]:
                 self.loop_output.setCurrentText(free[0])
+        self._fill_loop_rates()
         if config["sync_pin"] in outputs:
             self.sync_pin.setCurrentText(config["sync_pin"])
         self.sync_seed.setValue(int(config["sync_seed"] or 1))
         self.clock_box.setCurrentIndex(max(self.clock_box.findData(config["clock"]), 0))
+
+    def _simulated_loopback(self, outputs: list[str], channels: list[str]) -> Optional[tuple[str, str]]:
+        """The first wire of the simulated circuit from an output to a channel, ``None`` for none."""
+        simulator = getattr(self.instrument, "simulated_driver", None)
+        if simulator is None:
+            return None
+        for source, target in simulator.circuit.wires():
+            if source in outputs and target in channels:
+                return source, target
+        return None
+
+    def _fill_loop_rates(self) -> None:
+        """The rates of the latency measurement: those the device reaches for the channel and mode."""
+        from ...core.timing_tools import loopback_rate_limit
+
+        if self.loop_input.count() == 0:
+            return
+        highest = loopback_rate_limit(self.instrument, self.loop_input.currentText(), self.loop_mode.currentData())
+        rates = [10_000.0, 100_000.0, 1_000_000.0, 10_000_000.0]
+        if highest:
+            rates = [rate for rate in rates if rate <= highest]
+            if not rates or rates[-1] < highest:
+                rates.append(float(highest))
+        try:
+            current = float(units.parse(self.loop_rate.currentText(), "Hz"))
+        except (TypeError, ValueError):
+            current = 100_000.0
+        if current <= 0 or (highest and current > highest):
+            current = min(100_000.0, rates[-1])
+        self.loop_rate.blockSignals(True)
+        self.loop_rate.clear()
+        self.loop_rate.addItems([units.format_quantity(rate, "Hz") for rate in rates])
+        self.loop_rate.setCurrentText(units.format_quantity(current, "Hz"))
+        self.loop_rate.blockSignals(False)
 
     def _clock_chosen(self) -> None:
         from ...core import timing_tools
@@ -1071,9 +1114,15 @@ class DeviceDocument(DocumentWidget):
         pin, channel = self.loop_output.currentText(), self.loop_input.currentText()
         if not pin or not channel or pin == channel:
             return False
+        simulator = getattr(self.instrument, "simulated_driver", None)
+        if simulator is not None and (pin, channel) in simulator.circuit.wires():
+            self.show_banner(f"{pin} is already wired to {channel} in the simulated circuit.", "info")
+            return True
         done = self.signals_panel.add_wire(pin, channel)
         if done:
             self.show_banner(f"{pin} is wired to {channel} in the simulated circuit (Signals tab: Wires).", "info")
+        else:
+            self.show_banner(f"{pin} cannot be wired to {channel}: {self.signals_panel.wire_error}", "error")
         self._update_timing()
         return done
 
