@@ -43,8 +43,9 @@ def wanted(address: str) -> bool:
     return kind is not None and kind.process
 
 
-#: the function a device process opens a simulator with: as it was last time (``driver/simulated/stored``)
-SIMULATOR_FACTORY = "openscilab.driver.simulated.stored:open_stored"
+#: the function a device process opens a simulator with: as it was last time, on the system's clock
+#: (``driver/simulated/stored``)
+SIMULATOR_FACTORY = "openscilab.driver.simulated.stored:open_in_device_process"
 
 
 def simulator_wanted(address: str) -> bool:

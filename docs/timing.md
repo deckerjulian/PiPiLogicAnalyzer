@@ -154,9 +154,18 @@ on by default): the same proxy, shared memory and stamps, its processor load in 
 opens with what it simulated last time (`driver/simulated/stored.py`); the application reaches its
 signals, wires, USB link, drift, faults and events through its simulation facet
 (`core.instrument.SimulationFacet`), here or there alike. A simulator that knows the time of its
-samples, the simulators of flows (the engine's clock, *Fast*, `simulation.wiring`) and simulators
-wired to each other stay in the application; a flow that wires a simulator in a device process to
-another one says to switch the setting off.
+samples and the simulators a flow opens (the engine's clock, *Fast*) stay in the application.
+
+**Wires between simulators, wherever they run.** A wired input reads the other simulator's net
+when it samples - every source is a function of time, so it asks for exactly its window. In one
+process it reads the other circuit directly; across processes it asks the *net server* of the
+process the other simulator runs in (`driver/simulated/nets.py`: a `multiprocessing.connection`
+listener, a Unix socket or named pipe with a random key, started with the first wire), directly,
+not through the application. Simulators in device processes run on the system's monotonic clock
+like the hub; the difference of two clocks comes from their origins (`time.monotonic() - clock()`,
+each found in its own process), not from a measurement over the connection. `simulation.wiring` of
+a project and trigger routes of the hub use it (`connect_nets`); a wire stays when the target
+simulates something else, and an input whose source went away reads low and says so.
 
 **In the application, too:** drivers raise their events into a notifier thread of their own (the
 reading thread hands them over and goes on), the protocol decoders run in a process of their own

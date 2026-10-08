@@ -281,6 +281,11 @@ def apply(driver, config: Optional[dict]) -> dict:
                 sources[net] = Constant(0.0)  # only what the scenario says is connected
     sources.update(built)
     sources.update(single)
+    # nets wired to another simulator stay wired (what drives them now is what they give back to)
+    followed = getattr(driver, "followed", {})
+    for net, (source, _previous) in list(followed.items()):
+        followed[net] = (source, sources.get(net))
+        sources[net] = source
     # what the device drives itself right now stays on its nets, above the new signals: an
     # output shows them again when it lets go, a generator gives them back when it stops
     generator = getattr(driver, "generator", None)

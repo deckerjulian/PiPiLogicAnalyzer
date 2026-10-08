@@ -248,7 +248,8 @@ class Engine:
         self.devices: dict[str, Any] = {}
         self._opened: list[Any] = []
         #: nets of simulators of the device list wired for this run: (circuit, net, source before)
-        self._rewired: list[tuple[Any, str, Any]] = []
+        #: what gives the simulators of the device list back their nets after the run (wires of the flow)
+        self._rewired: list[Callable[[], None]] = []
 
         self._busy = 0
         self._external = 0
@@ -541,11 +542,11 @@ class Engine:
                 runtime.cleanup()
             except Exception:  # noqa: BLE001 - the other nodes still let go of their devices
                 log.exception("Cleaning up after node %s failed", node_id)
-        for circuit, net, previous in reversed(self._rewired):
-            if previous is None:
-                circuit.sources.pop(net, None)
-            else:
-                circuit.sources[net] = previous
+        for undo in reversed(self._rewired):
+            try:
+                undo()
+            except Exception:  # noqa: BLE001 - a simulator whose device process ended keeps nothing to give back
+                log.debug("A wire of the flow could not be taken away (ignored)", exc_info=True)
         self._rewired.clear()
         for instrument in self._opened:
             try:
@@ -644,34 +645,34 @@ class Engine:
 
     def _wire_devices(self) -> None:
         """Wires between simulated devices: ``{from: "uno:A0", to: CH1}`` at the scope makes its CH1
-        follow A0 of the Uno (both run on the engine's clock)."""
-        from ...driver.simulated.circuit import RemoteSource
+        follow A0 of the Uno - in this process or across device processes (``connect_nets``)."""
+        from ...driver.simulated import connect_nets
+
+        def simulated(device: Any) -> bool:
+            # (a simulated remote device offers its sync output as a net and takes wires to its inputs)
+            return device is not None and (getattr(device, "simulation", None) is not None
+                                           or getattr(device, "simulated_driver", None) is not None
+                                           or getattr(device, "wiring_source", None) is not None)
 
         for name, instrument in self.devices.items():
-            # (a simulated remote device takes wires to its inputs too)
-            target = getattr(instrument, "simulated_driver", None) or getattr(instrument, "wiring_source", None)
             for wire in self._project_wiring(name):
                 source_name, separator, net = str(wire.get("from", "")).partition(":")
                 if not separator:
-                    continue
+                    # a wire within the device: a simulator the flow opened has it in its circuit
+                    # already (``_wiring``), one of the device list gets it for the run
+                    if instrument not in self._opened and simulated(instrument):
+                        source_name, net = name, source_name
+                    else:
+                        continue
                 source_device = self.devices.get(source_name)
-                # (a simulated remote device offers its sync output as a net to wire)
-                source = getattr(source_device, "simulated_driver", None) or getattr(source_device, "wiring_source", None)
-                if target is None or source is None:
-                    in_process = [device.name for device in (instrument, source_device)
-                                  if device is not None and getattr(device, "process", None) is not None]
-                    if in_process:
-                        raise FlowError(f"simulation.wiring of {name}: {', '.join(in_process)} runs in a device "
-                                        "process of its own and cannot be wired to another simulator - switch off "
-                                        "Settings → Devices: simulators in a process of their own")
+                if not simulated(instrument) or not simulated(source_device):
                     raise FlowError(f"simulation.wiring of {name}: {source_name} is no simulated device of the flow")
-                offset = source.clock() - target.clock()
-                wired_net = str(wire["to"])
+                try:
+                    undo = connect_nets(source_device, net, instrument, str(wire["to"]), label=f"{source_name}:{net}")
+                except Exception as error:  # noqa: BLE001 - e.g. a device process that ended
+                    raise FlowError(f"simulation.wiring of {name}: {error}") from None
                 if instrument not in self._opened:
-                    # a simulator of the device list: its circuit is given back as it was
-                    self._rewired.append((target.circuit, wired_net, target.circuit.sources.get(wired_net)))
-                target.circuit.drive(wired_net, RemoteSource(source.circuit, net, offset,
-                                                             high=float(source.profile.get("logic_level", 3.3))))
+                    self._rewired.append(undo)  # a simulator of the device list: given back as it was
 
     def device(self, name: str):
         try:

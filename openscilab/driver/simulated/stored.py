@@ -93,6 +93,14 @@ def open_stored(address: str, clock: Optional[Callable[[], float]] = None) -> In
     return instrument
 
 
+def open_in_device_process(address: str) -> Instrument:
+    """:func:`open_stored` for a device process (``driver/process``): on the system's monotonic
+    clock, as the hub and the simulators of the application - all of them agree on the time."""
+    import time
+
+    return open_stored(address, clock=time.monotonic)
+
+
 def emulates_usb(address: str) -> bool:
     """Whether the simulator at ``address`` emulates a USB link (its profile's, unless it was given
     another one); ``False`` for an address that is no simulator."""

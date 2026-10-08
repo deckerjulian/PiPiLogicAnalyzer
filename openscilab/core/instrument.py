@@ -524,6 +524,29 @@ class SimulationFacet(Facet):
     def remove_event_listener(self, listener: Callable[[float, str], None]) -> None:
         raise NotImplementedError
 
+    # ------------------------------------------- wires to other simulators
+    def endpoint(self) -> Any:
+        """Where another process reads its circuit (``driver/simulated/nets.Endpoint``: address,
+        key, the origin of its clock, its logic level)."""
+        raise NotImplementedError
+
+    def follow(self, net: str, endpoint: Any, source_net: str, delay: float = 0.0, label: str = "") -> None:
+        """``net`` follows ``source_net`` of the simulator at ``endpoint`` (a wire between two
+        simulators, ``delay`` seconds of cable), until :meth:`unfollow`."""
+        raise NotImplementedError
+
+    def unfollow(self, net: str) -> None:
+        """``net`` is driven again by what drove it before :meth:`follow`."""
+        raise NotImplementedError
+
+    def trigger_output_net(self, output: str) -> Optional[str]:
+        """The net of the trigger output ``output`` (``SYNC``, ``TRIG OUT``), ``None`` without one."""
+        raise NotImplementedError
+
+    def trigger_input_net(self, name: str) -> Optional[str]:
+        """The net of the trigger input ``name``, ``None`` without one."""
+        raise NotImplementedError
+
 
 F = TypeVar("F", bound=Facet)
 

@@ -108,3 +108,137 @@ def test_a_simulator_that_knows_its_time_stays_in_the_application(shell):
         assert shell.open_device_card(uno).signals_panel is not None
     finally:
         shell.disconnect_instrument(uno, ask=False)
+
+
+# ------------------------------------------------- wires across processes (roadmap 4d)
+def in_process(address: str):
+    return process.open_instrument(address, factory=process.SIMULATOR_FACTORY)
+
+
+def level_becomes(read, level: int, timeout: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if read() == level:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_a_net_is_wired_between_two_device_processes():
+    from openscilab.driver.simulated import connect_nets
+
+    pico, daq = in_process("sim:pico"), in_process("sim:daq")
+    try:
+        assert pico.process.pid != daq.process.pid
+        undo = connect_nets(pico, "GP16", daq, "P0.7")
+        assert "wired from Simulation: Pico GP16" in daq.simulation.circuit()["P0.7"]
+        pico.gpio.write("GP16", 1)  # (in the Pico's process; the DAQ reads it in its own)
+        assert level_becomes(lambda: daq.gpio.read("P0.7"), 1)
+        pico.gpio.write("GP16", 0)
+        assert level_becomes(lambda: daq.gpio.read("P0.7"), 0)
+        # the wire stays when the DAQ simulates something else
+        daq.simulation.apply_signals({"scenario": "counter"})
+        pico.gpio.write("GP16", 1)
+        assert level_becomes(lambda: daq.gpio.read("P0.7"), 1)
+        undo()
+        assert "wired" not in daq.simulation.circuit().get("P0.7", "")
+        assert level_becomes(lambda: daq.gpio.read("P0.7"), 0)
+    finally:
+        pico.close()
+        daq.close()
+
+
+def test_a_net_is_wired_between_the_application_and_a_device_process():
+    from openscilab.driver.simulated import connect_nets
+
+    uno, daq = open_stored("sim:uno"), in_process("sim:daq")
+    try:
+        connect_nets(uno, "D7", daq, "P0.6")  # application -> device process
+        connect_nets(daq, "P0.0", uno, "D2")  # device process -> application
+        uno.gpio.write("D7", 1)
+        assert level_becomes(lambda: daq.gpio.read("P0.6"), 1)
+        daq.gpio.write("P0.0", 1)
+        assert level_becomes(lambda: uno.gpio.read("D2"), 1)
+        # the DAQ's process ends: the wire reads low and says why, nothing fails
+        daq.close()
+        assert level_becomes(lambda: uno.gpio.read("D2"), 0)
+        assert "gone" in uno.simulated_driver.circuit.sources["D2"].describe()
+    finally:
+        uno.close()
+        daq.close()
+
+
+def test_a_trigger_route_between_two_device_processes():
+    import threading
+
+    from openscilab.core import waveform as waves
+    from openscilab.core.hub import Hub
+    from openscilab.core.instrument import GeneratorFacet
+    from openscilab.driver.models import AnalyzerChannel, CaptureSession, TriggerType
+    from openscilab.driver.simulated import follow_routes
+
+    hub = Hub()
+    scope, logic = in_process("sim:dho924s"), in_process("sim:free")
+    scope.name, logic.name = "scope", "logic"
+    hub.add(scope)
+    hub.add(logic)
+    stop = follow_routes(hub)
+    try:
+        hub.add_route("scope", "SYNC", "logic", "TRIG IN")
+        assert "wired from scope SYNC" in logic.simulation.circuit()["D15"]
+        scope.facet(GeneratorFacet).start("GI", waves.standard(waves.SINE, "2 kHz", 1))
+        session = CaptureSession(frequency=1_000_000, pre_trigger_samples=0, post_trigger_samples=2000,
+                                 trigger_type=TriggerType.EDGE, trigger_channel=15)
+        session.capture_channels = [AnalyzerChannel(channel_number=15)]
+        done = threading.Event()
+        assert logic.capture.driver.start_capture(session, lambda args: done.set()).name == "NONE"
+        assert done.wait(10)
+        levels = session.capture_channels[0].samples
+        assert levels[0] == 1 and int(levels.sum()) == pytest.approx(1000, abs=3)  # 2 kHz square on D15
+    finally:
+        stop()
+        hub.close_all()
+
+
+@pytest.mark.parametrize("where", ["device process", "application"])
+def test_the_start_example_aligns_simulators_of_the_device_list(where):
+    import numpy as np
+
+    from openscilab.core.hub import Hub
+    from openscilab.lab import yaml_io
+    from openscilab.lab.engine import Engine
+    from openscilab.lab.project import Project
+
+    root = os.path.join(os.path.dirname(__file__), "..", "examples", "library", "00-start",
+                        "04-synchronized-instruments")
+    hub = Hub()
+    if where == "device process":
+        logic, daq = in_process("sim:pico"), in_process("sim:daq")
+    else:
+        logic, daq = open_stored("sim:pico", clock=hub.now), open_stored("sim:daq", clock=hub.now)
+    logic.name, daq.name = "logic", "daq"
+    hub.add(logic)
+    hub.add(daq)
+    try:
+        project = Project.open(root)
+        with open(os.path.join(root, "flows", "sync.flow.yaml")) as file:
+            flow = project.complete(yaml_io.loads(file.read()))
+        flow.nodes["sync"].params["duration"] = "2 s"
+        for node in ("reference", "recording"):
+            flow.nodes[node].params["duration"] = "2.5 s"
+        engine = Engine(flow, mode="real", project=project, hub=hub)
+        values: dict[str, list] = {}
+        engine.subscribe(lambda event: event.kind == "value" and values.setdefault(
+            f"{event.node}.{event.port}", []).append(event.value))
+        result = engine.run(timeout=60)
+        assert result.ok, result.error
+        edges = {key: sum(int(np.count_nonzero(np.diff(block.values.astype(np.int8)))) for block in values[key])
+                 for key in ("reference.GP17", "recording.P0.7")}
+        # the sync signal of the logic analyzer on its own GP17 and, across processes, on P0.7 of the box
+        assert edges["reference.GP17"] > 20 and abs(edges["recording.P0.7"] - edges["reference.GP17"]) <= 6
+        assert values["align.uncertainty"][-1].value < 0.005
+        # the simulators of the device list are given back as they were
+        assert "wired" not in daq.simulation.circuit().get("P0.7", "")
+        assert "wired" not in logic.simulation.circuit().get("GP17", "")
+    finally:
+        hub.close_all()

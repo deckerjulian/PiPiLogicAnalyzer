@@ -121,9 +121,9 @@ class PreferencesDialog(QDialog):
         self.simulator_process = QCheckBox("Run simulators of USB devices in a process of their own", self)
         self.simulator_process.setToolTip(
             "A simulator that emulates a USB link (sim:pico, sim:daq) runs as the device it simulates: in a "
-            "process of its own, with its processor load in the device list. Simulators that know the time of "
-            "their samples, those of flows and simulators wired to each other stay in the application. Applies "
-            "to simulators connected from now on.")
+            "process of its own, with its processor load in the device list; wires to other simulators work "
+            "across processes. Simulators that know the time of their samples and those a flow opens stay in "
+            "the application. Applies to simulators connected from now on.")
         import sys
 
         self.high_priority = QCheckBox("Read devices with a higher priority", self)

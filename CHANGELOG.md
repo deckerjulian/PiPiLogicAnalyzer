@@ -100,9 +100,18 @@ again from 0.1.
   simulator of the device list that emulates a USB link (`sim:pico`, `sim:daq`) is read in a device
   process - the same way as a real Pico, with its processor load in the device list and *Details →
   Process* on its card. Its *Signals*, *Events* and *Timing* tabs and *Devices → Simulate faults*
-  work as before. Simulators that know the time of their samples (`sim:uno`), those of flows and
-  simulators wired to each other stay in the application. *Settings → Devices: Run simulators of
-  USB devices in a process of their own* (on by default) switches it off.
+  work as before. Simulators that know the time of their samples (`sim:uno`) and those a flow
+  opens stay in the application. *Settings → Devices: Run simulators of USB devices in a process of
+  their own* (on by default) switches it off.
+- **Wires between simulators across processes**: `simulation.wiring` of a project and trigger
+  routes of the hub connect simulators wherever they run - in the application or in device
+  processes. The input reads the other simulator's net through a small net server of that process;
+  simulators in device processes share the system's clock. *Synchronized instruments* runs with
+  `sim:pico` and `sim:daq` of the device list. A wire stays when the target simulates something
+  else; an input whose simulator went away reads low.
+- A flow that uses simulators of the device list gives them the wires of the project within one
+  device too (`logic: [{from: GP16, to: GP17}]`); before, only those between devices - so
+  *Synchronized instruments* aligned nothing when its simulators were connected in the device list.
 - A simulator in a device process starts with a capture that needs no trigger, as one in the
   application does (the device process gave the application `is_simulator` as false); and a device
   process that opens very fast no longer fails to send its first sign of life.

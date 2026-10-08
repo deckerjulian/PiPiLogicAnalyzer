@@ -171,6 +171,9 @@ class SimulatedDriver(AnalyzerDriverBase):
         #: what the device simulates (:mod:`.scenarios`), and the names it suggests for channels
         self.signals: dict = {"scenario": "default", "channels": {}}
         self.signal_names: dict[int, str] = {}
+        #: nets that follow a net of another simulator (a wire between simulators, :meth:`follow`):
+        #: net -> (the source that reads the other net, what drove the net before)
+        self.followed: dict[str, tuple] = {}
         #: profile, boards and instance (set by ``open_simulated``)
         self.sim_address = None
         self._capture_channels: list = []
@@ -1038,8 +1041,38 @@ class SimulatedDriver(AnalyzerDriverBase):
         self.log("restart")
         return True
 
+    def follow(self, net: str, source) -> None:
+        """``net`` follows a net of another simulator from now on (``source``: a
+        :class:`.circuit.RemoteSource` or a :class:`.nets.NetSource`); it stays wired when the
+        device simulates something else. :meth:`unfollow` gives the net back."""
+        previous = self.followed[net][1] if net in self.followed else self.circuit.sources.get(net)
+        old = self.followed.get(net, (None,))[0]
+        self.followed[net] = (source, previous)
+        self.circuit.drive(net, source)
+        if old is not None and old is not source and hasattr(old, "close"):
+            old.close()
+        self.log(f"{net}: {source.describe()}")
+
+    def unfollow(self, net: str) -> None:
+        """``net`` is driven again by what drove it before :meth:`follow`."""
+        if net not in self.followed:
+            return
+        source, previous = self.followed.pop(net)
+        if self.circuit.sources.get(net) is source:
+            if previous is None:
+                self.circuit.sources.pop(net, None)
+            else:
+                self.circuit.sources[net] = previous
+        if hasattr(source, "close"):
+            source.close()
+        self.log(f"{net}: no longer wired to another simulator")
+
     def dispose(self) -> None:
         self._abort.set()
         self._transfer_abort.set()
         self._event_listeners.clear()
+        for net in list(self.followed):
+            source, _previous = self.followed.pop(net)
+            if hasattr(source, "close"):
+                source.close()
         super().dispose()

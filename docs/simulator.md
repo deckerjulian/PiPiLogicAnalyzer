@@ -174,6 +174,12 @@ come back with the next connection, as the signals do.
 Trigger routes of the hub between simulated instruments are wired as well: the sync output of
 one instrument triggers a capture of another (`hub.add_route("scope", "SYNC", "logic", "TRIG IN")`).
 
+Wires between simulators work wherever they run - in the application, or each in a device process
+of its own (simulators of USB devices of the device list, see [timing.md](timing.md), *Staying
+responsive*): the input reads the other net through the net server of its process. A flow that uses
+simulators of the device list gives them their wires for the run - those between devices and those
+within one device - and takes them away afterwards.
+
 ## Faults
 
 *Devices → Simulate faults* injects faults into an open simulated instrument; scripts call

@@ -729,3 +729,30 @@ class SimulationControl(SimulationFacet):
 
     def remove_event_listener(self, listener) -> None:
         self.device.remove_event_listener(listener)
+
+    def endpoint(self):
+        from .nets import serve
+
+        return serve(self.device.circuit, self.device.clock, float(self.device.profile.get("logic_level", 3.3)))
+
+    def follow(self, net: str, endpoint, source_net: str, delay: float = 0.0, label: str = "") -> None:
+        from .circuit import RemoteSource
+        from .nets import NetSource, local_circuit, origin_of
+
+        offset = origin_of(self.device.clock) - endpoint.origin  # (the other time at this one's time)
+        circuit = local_circuit(endpoint)
+        source = RemoteSource(circuit, source_net, offset, delay, high=endpoint.high) if circuit is not None else \
+            NetSource(endpoint, source_net, offset, delay, label)
+        self.device.follow(net, source)
+
+    def unfollow(self, net: str) -> None:
+        self.device.unfollow(net)
+
+    def trigger_output_net(self, output: str) -> Optional[str]:
+        if output == "SYNC":
+            generator = self.device.generator
+            return generator.sync_net() if generator is not None else None
+        return {"TRIG OUT": self.device.profile.get("trigger_out_net")}.get(output)
+
+    def trigger_input_net(self, name: str) -> Optional[str]:
+        return (self.device.profile.get("trigger_inputs") or {}).get(name)
